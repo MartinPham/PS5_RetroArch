@@ -3919,3 +3919,34 @@ core-options file and no history):
   20 s (25 times): no crash, every audio window 98-100%.
 
 tools/verify.sh PASS; ../PS5_Vulkan tools/check-driver.sh PASS.
+
+## 2026-09-26 — Dolphin at its best settings: the PS5 defaults, and what Rogue Leader still needs
+
+Dolphin's defaults were upstream's: 1x, Synchronous shader compilation, no
+anisotropic filtering. Profile 12 (`tooling/dolphin-profiles/p12-ps5-best.txt`)
+is the best picture that holds full speed, every accuracy setting at Dolphin's
+default: 6x, Async (UberShaders) -- exact ubershaders draw while the specialised
+shaders compile in the background, so nothing is skipped and nothing stalls --
+16x anisotropic filtering and texture decoding on the GPU. From my save states,
+Resident Evil 4, Melee, Wind Waker and Mario Kart Wii held 100% in every window
+after the one that boots and loads the state (title 870bd1bb).
+
+The port now makes these the defaults (patches/dolphin/ps5-port.patch,
+`Ps5ApplyDefaultProfile`), and like the PPSSPP port it sets an options file an
+earlier core saved aside once, as `dolphin-emu.opt.before-ps5-profile`, because
+RetroArch would otherwise keep its values over the new defaults. It makes the
+options folder first, open to FTP, so the marker (`ps5-default-profile-v1`) exists
+even where Dolphin's options were never saved. On my console (title b8d43519) my
+file was set aside, RetroArch wrote the new one with the four profile values and
+every other option as mine had it, and Wind Waker ran at 100% after boot.
+
+Rogue Leader is the exception, and it is the driver's. Its attract sequence runs
+at 73-85% for stretches and its gameplay (my Death Star Attack state) dips to
+90-97%, with every shader cached as much as cold. Sampled, Dolphin's GPU thread
+waits on its CPU thread and the other way round, and on the GPU thread the
+driver's transfers done by the CPU at submission split points -- uploads into
+tiled images, then image copies once texture decoding is on the GPU, each after
+waiting for the GPU -- are the largest cost that is not Dolphin's own. That is
+../PS5_Vulkan R95: those transfers on the GPU. R94 (compiles on several threads
+at once, ../PS5_Vulkan 6078307) removed the GPU thread's waits behind the
+compiler's lock; cold, Rogue Leader's first window went from 77% to 82%.

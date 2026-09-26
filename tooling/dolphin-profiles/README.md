@@ -16,6 +16,7 @@ any launch that is not a test run, so a profile never outlives its run.
 | `p5-ram-efb.txt` | 5: profile 4 with EFB copies to RAM (read back through the CPU) |
 | `p6-scale-Nx.txt` | 6: the scaling ladder, 1x to 6x on the accurate baseline |
 | `p7-msaa-N.txt`, `p7-max-torture.txt` | 7: 2x/4x/8x MSAA on the accurate baseline, and 6x with 8x MSAA and profile 3's settings |
+| `p12-ps5-best.txt` | 12: the PS5 defaults -- 6x, asynchronous ubershaders, 16x AF, GPU texture decoding |
 
 Each file names the options its profile is defined by, rather than relying on the
 core's defaults for them.
