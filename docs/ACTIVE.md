@@ -2,10 +2,10 @@
 
 _Updated: 2026-09-26_
 
-## Now: v0.2.0-alpha.1 released; asynchronous shader compilation next
+## Now: v0.4.0-alpha.4 released; asynchronous shader compilation next
 
 **Released.** Build `870bd1bb` (commits up to `3712ce1`; release notes
-`docs/releases/v0.2.0-alpha.1.md`): eight cores, Dolphin, LRPS2 and PPSSPP on the
+`docs/releases/v0.4.0-alpha.4.md`): eight cores, Dolphin, LRPS2 and PPSSPP on the
 GPU, SDK fork `a110320`, ../PS5_Vulkan `40e9d30`, LRPS2 at its pinned revision
 `6d14775` (6x). It is in `dist/PPSA99169`, staged in `handoff/PPSA99169`, kept in
 `build/release/PPSA99169-870bd1bb` and on the console. The tester's three

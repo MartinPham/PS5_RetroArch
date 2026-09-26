@@ -15,7 +15,7 @@ configuration persistence and content browsing have been verified on a console.
 This is an active development project; the tested paths below do not imply
 complete core compatibility or Vulkan conformance.
 
-**Latest release: v0.2.0-alpha.1** — see the [release notes](docs/releases/v0.2.0-alpha.1.md).
+**Latest release: v0.4.0-alpha.4** — see the [release notes](docs/releases/v0.4.0-alpha.4.md).
 
 ## Table of contents
 
@@ -265,7 +265,7 @@ includes native loading, gameplay, colour checks, audio/input, Quick Menu →
 Close Content, and loading another game. I record my own visual confirmation on
 the console alongside the logs; a camera can miss refresh-synchronous flicker.
 
-The v0.2.0-alpha.1 release passed all five host gates with 74 Python tests;
+The v0.4.0-alpha.4 release passed all five host gates with 74 Python tests;
 52 recorded captures replay successfully. Exact results and limitations are in
 [ACTIVE](docs/ACTIVE.md), rather than implied by a core's upstream feature list.
 
