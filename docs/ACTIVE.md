@@ -24,7 +24,11 @@ emulation and its threads waiting on each other, not the driver.
 
 **Open:**
 
-1. Rogue Leader in Dolphin: its MMU slow path and the threads' hand-offs.
+1. Rogue Leader in Dolphin: I chose to make Dolphin itself faster on the PS5 --
+   its MMU slow path, where 16 KiB host pages limit page-table fastmem, and its
+   GPU-thread cost -- rather than underclock the emulated CPU (75% reached
+   83-100% but changes the game's timing). Queued while the driver's Vulkan 1.4
+   plan is decided (../PS5_Vulkan/docs/VULKAN_1_4_PLAN.md).
 2. The CPU's transfers on the GPU (CP DMA for linear copies, vk_meta for tiled
    ones), with the golden comparisons updated for the new submission shapes.
 3. The 60 Hz fallback on a display that stays at 60 Hz (the tester's trace).
