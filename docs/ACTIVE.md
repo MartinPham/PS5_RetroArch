@@ -15,22 +15,21 @@ are fixed; the release battery (every core, boot, menu and a Quick Menu action,
 Threaded Video on half) and a 10-minute PPSSPP soak had no crash
 (docs/PHASE_LOG.md, 2026-09-26).
 
-**Open from the release:**
+**Dolphin round (after the release):** the PS5 defaults are 6x, Async
+(UberShaders), 16x AF and GPU texture decoding (patches/dolphin, e905c4e): RE4,
+Melee, Wind Waker and Mario Kart Wii at 100% after boot. ../PS5_Vulkan R94
+compiles pipelines on six threads at once; R95 writes tiled uploads a run at a
+time. Rogue Leader still dips (attract 71-87%, gameplay 93-96%): Dolphin's MMU
+emulation and its threads waiting on each other, not the driver.
 
-1. **Asynchronous shader compilation** (my standing requirement: 100% speed
-   while shaders compile). ../PS5_Vulkan compiles every pipeline, cache hits
-   included, under one global mutex (`ps5vk_compile_mutex`), so a core's
-   background compiles queue and the render thread waits behind them; Dolphin
-   defaults to Synchronous. Parallel compiles in the driver, then asynchronous
-   modes as the cores' defaults.
-2. Rogue Leader's attract sequence at 72-85% with every shader cached: the
-   driver's CPU cost on Dolphin's GPU thread (CPU copies that wait for the GPU,
-   a cache flush per draw; profiled 2026-09-25).
-3. The 60 Hz fallback has only run on a 120 Hz display; the tester's next trace
-   confirms it.
-4. LRPS2 after that: the upstream PCSX2 port in ../PS5_LRPS2's working tree
-   (San Andreas' modes, texture replacement), 8x as the PS5 default, the
-   lighting compared with the native picture.
+**Open:**
+
+1. Rogue Leader in Dolphin: its MMU slow path and the threads' hand-offs.
+2. The CPU's transfers on the GPU (CP DMA for linear copies, vk_meta for tiled
+   ones), with the golden comparisons updated for the new submission shapes.
+3. The 60 Hz fallback on a display that stays at 60 Hz (the tester's trace).
+4. LRPS2: the upstream PCSX2 port in ../PS5_LRPS2's working tree, 8x as the PS5
+   default, the lighting compared with the native picture.
 
 **Test runs and core options.** RetroArch here uses per-core options
 (`global_core_options = false` in my config), so a run's `core_options_path`

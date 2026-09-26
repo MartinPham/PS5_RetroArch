@@ -3950,3 +3950,18 @@ waiting for the GPU -- are the largest cost that is not Dolphin's own. That is
 ../PS5_Vulkan R95: those transfers on the GPU. R94 (compiles on several threads
 at once, ../PS5_Vulkan 6078307) removed the GPU thread's waits behind the
 compiler's lock; cold, Rogue Leader's first window went from 77% to 82%.
+
+## 2026-09-26 — Rogue Leader after R94 and R95: what is left is Dolphin's
+
+With ../PS5_Vulkan R95 (tiled uploads a run at a time, c1f82d8) the GPU thread's
+samples in uploads fell from 4,897 to 1,350 over Rogue Leader's 200 s attract
+sequence (title db2f6363, texture decoding on the CPU), and with Dolphin's
+default GPU decoding its CPU work is image copies between two row-stored images
+instead. Neither moved the game's speed: the attract sequence stays at 71-87%
+for stretches and the gameplay from my state dips to 93-96%. Dolphin's own
+settings for the game (GameSettings/GSW.ini) require full MMU emulation ("MMU =
+True -- strictly required") and turn on CPU culling; in the slow stretches both
+of Dolphin's threads are partly idle, waiting on each other, and the CPU thread
+runs the MMU's slow memory path. On this console's 16 KiB pages, Dolphin's
+page-table fastmem maps a host page only where four guest pages are contiguous.
+That is where the next Rogue Leader work lies -- in Dolphin, not the driver.
