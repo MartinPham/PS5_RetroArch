@@ -3965,3 +3965,26 @@ of Dolphin's threads are partly idle, waiting on each other, and the CPU thread
 runs the MMU's slow memory path. On this console's 16 KiB pages, Dolphin's
 page-table fastmem maps a host page only where four guest pages are contiguous.
 That is where the next Rogue Leader work lies -- in Dolphin, not the driver.
+
+## 2026-09-26 — Rogue Leader: what does and does not move its slow stretches
+
+Rogue Leader's attract sequence from boot, 200 s, Dolphin's PS5 defaults, the
+10 s audio windows' speed (the slow stretches are windows 1-2 and 12-13):
+
+| Change | Windows 1, 2 / 12, 13 |
+| --- | --- |
+| none (title db2f6363) | 74, 85 / 72, 87 |
+| CPU culling off (a user GSWE64.ini, removed after) | 74, 85 / 72, 87 |
+| single core | 69, 59 / 78, 49 (but 100 where dual core gave 94) |
+| emulated CPU at 75% (title fb60ec12) | 85, 97 / 83, 100 |
+
+The payload SDK fork's thread probe (58f7765) now times a hand-off between two
+threads on the console: a condition-variable round trip 7.6 us on average,
+27.7 us at worst over 2,000, a spinning flag's 0.9 us -- so the threads' waits
+are not wake-up latency. Nor is it the refresh: in the slow windows the frames
+themselves take 20-32 ms (the present periods), and the frontend's share per
+present rises from 5.7 ms to 10 ms. The heavy stretches need about 40% more per
+frame than a 60 Hz frame holds, in Dolphin's CPU emulation (full MMU, "strictly
+required" by its game settings) and its GPU emulation, which single core shows
+do not fit one core. Underclocking the emulated CPU is the only setting that
+moves them, and it changes the game's own timing, so it is not a default.
