@@ -6,8 +6,8 @@ _Updated: 2026-09-28_
 
 **Released.** Build `f96bdb0e` (release notes `docs/releases/v0.5.0-alpha.5.md`):
 the title links ../PS5_Vulkan's RADV release archive by default (PS5_Mesa
-`cedb774`, built by ../PS5_Vulkan `5d8f37d`), SDK fork `95c08f2`, LRPS2 at its
-pinned revision `6d14775` (6x). `PS5_VULKAN_DRIVER=ps5vk` still builds ps5vk,
+`cedb774`, built by ../PS5_Vulkan `5d8f37d`), SDK fork `95c08f2`, LRPS2 `6d14775` with
+its port patch, the same tree as the fork's `main` at `9c2eea4` (6x). `PS5_VULKAN_DRIVER=ps5vk` still builds ps5vk,
 which v0.4.0-alpha.4 (build `870bd1bb`) shipped. On RADV the release battery
 (every core with a game, the menu, Close Content and a reload, Threaded Video on
 half) passed three times as the driver changed, and PPSSPP's ten-minute soak once

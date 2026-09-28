@@ -12,15 +12,16 @@ driver rounds are in ../PS5_Vulkan/docs/LRPS2_GAPS.md.
 ## Source and workflow
 
 - **Pinned revision:** my fork ../PS5_LRPS2 (github.com/mihawk-99/PS5_LRPS2),
-  master at `6d14775ead86932f48f0107b4f4d7034bfccf344` (2026-09-25). It is
+  main at `9c2eea4cbd76ad6a4fb2340c95a354eb9a63500f` (2026-09-26). It is
   libretro's LRPS2 with an AArch64 port and a C89 x86 emitter, among other
   work; the x86-64 recompilers are upstream PCSX2's.
-- **Every change to the core is made in the fork**, on a local `ps5-port`
-  branch cut from the pinned revision (committed locally, never pushed).
-  `patches/lrps2/ps5-port.patch` is that branch's diff against the pin, written
-  back from the fork after each change. `tools/build-lrps2.sh` clones the pinned
-  revision and applies it, as the Dolphin and PPSSPP builds do, so a clean
-  checkout of this title builds the port without the fork's unpushed commits.
+- **Every change to the core is made in the fork**, committed on its `main`
+  branch and pushed. `tools/build-lrps2.sh` clones the pinned revision (from
+  ../PS5_LRPS2 when it is beside this repository, from GitHub otherwise) and
+  builds it as it is: there is no patch on top. After a change in the fork,
+  the pin moves to the new revision. Until 2026-09-28 the port was a branch of
+  the fork (`ps5-port`) carried here as `patches/lrps2/ps5-port.patch` against
+  `6d14775`; that tree is the same as `9c2eea4`'s.
   `LRPS2_DEV=1` builds the fork's working tree directly while I edit it.
 - The build follows the other native cores: `tooling/lrps2/ps5-toolchain.cmake`
   (FreeBSD x86-64 through the SDK's prospero-clang), libc shims where the core

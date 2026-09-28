@@ -7,33 +7,31 @@
 # software renderer. docs/LRPS2_PORT.md has the plan and the requirements.
 #
 # The source is my fork, ../PS5_LRPS2 (github.com/mihawk-99/PS5_LRPS2). Every
-# change the port makes to the core is committed there, on its local ps5-port
-# branch, and patches/lrps2/ps5-port.patch is that branch's diff against the
-# pinned revision below. An ordinary build clones the pinned revision, applies
-# the patch and builds it, so the title never depends on the fork's unpushed
-# commits. LRPS2_DEV=1 builds the fork's working tree as it stands instead,
-# which is how the port is edited: change ../PS5_LRPS2, build with LRPS2_DEV=1,
-# commit there, then write the patch back with
-#   git -C ../PS5_LRPS2 diff <revision> ps5-port > patches/lrps2/ps5-port.patch
+# change the port makes to the core is committed there, on its main branch,
+# and the build pins the fork by revision: an ordinary build clones the pinned
+# revision below and builds it as it is. LRPS2_DEV=1 builds the fork's working
+# tree as it stands instead, which is how the port is edited: change
+# ../PS5_LRPS2, build with LRPS2_DEV=1, commit there and push main, then move
+# the pin to the new revision.
 set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$root"
 source "$root/tools/core-stamp.sh"
 # An LRPS2_DEV build stages whatever the fork holds, a temporary capture
 # included, so it withdraws the stamp: the next ordinary build rebuilds from
-# the pinned revision and the committed patch.
+# the pinned revision.
 [[ -z ${LRPS2_DEV:-} ]] || rm -f -- "$core_stamp_dir/pcsx2"
 [[ -n ${LRPS2_DEV:-} ]] || core_stamp_skip pcsx2 \
     "$root/build/cores/stage/cores/pcsx2_libretro.so" \
     "$root/build/cores/stage/info/pcsx2_libretro.info" \
-    -- "$root/tools/build-lrps2.sh" "$root/patches/lrps2" "$root/tooling/lrps2"
+    -- "$root/tools/build-lrps2.sh" "$root/tooling/lrps2"
 [[ $# == 0 ]] || { echo "usage: ${0##*/}" >&2; exit 2; }
 sdk="$root/.deps/native/ps5-payload-sdk"
 [[ -x $sdk/bin/prospero-clang ]] || { echo "error: bootstrap this project's SDK first" >&2; exit 2; }
 export PS5_PAYLOAD_SDK="$sdk"
 export PS5_CLANG=/usr/bin/clang
 
-revision=6d14775ead86932f48f0107b4f4d7034bfccf344  # ../PS5_LRPS2 master, 2026-09-25
+revision=9c2eea4cbd76ad6a4fb2340c95a354eb9a63500f  # ../PS5_LRPS2 main, 2026-09-26
 info_revision=5a74858ab2f7a50cebb5a6330895bc38899531c0
 info_sha=b263ac17902eb36be08e90a939b1699178e4abe32505d032b96b50f7db2d9fec
 cache="$root/.deps/downloads"
@@ -67,10 +65,9 @@ else
     fi
     git -C "$source_dir" cat-file -e "$revision^{commit}" 2>/dev/null ||
         git -C "$source_dir" fetch --quiet origin "$revision"
-    echo "==> [lrps2] resetting the pinned tree and applying the port patch"
+    echo "==> [lrps2] resetting the pinned tree"
     git -C "$source_dir" checkout --force --quiet "$revision"
     git -C "$source_dir" clean -qfdx
-    git -C "$source_dir" apply --whitespace=nowarn "$root/patches/lrps2/ps5-port.patch"
     got=$(git -C "$source_dir" rev-parse HEAD)
     [[ $got == "$revision" ]] || { echo "error: the tree is at $got, wanted $revision" >&2; exit 2; }
 fi
@@ -128,7 +125,7 @@ report.update(source_revision=revision, source_date_epoch=int(epoch),
 report['port_inputs_sha256'] = {name: sha(pathlib.Path(name)) for name in
     ['tools/build-lrps2.sh', 'tooling/lrps2/ps5-toolchain.cmake',
      'tooling/lrps2/ps5-libc-shims.cpp', 'tooling/native/core_cxx_runtime.cpp',
-     'tooling/native/ps5-core.ld', 'patches/lrps2/ps5-port.patch']}
+     'tooling/native/ps5-core.ld']}
 (build / 'build.json').write_text(json.dumps(report, indent=2) + '\n')
 PY
 [[ -n ${LRPS2_DEV:-} ]] || core_stamp_write

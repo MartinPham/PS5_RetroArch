@@ -4090,3 +4090,17 @@ PPSSPP with a filled cache: pipeline creation 1,419 ms to 29 ms (median
 as ps5vk from an empty cache (86% and 99%). The release battery (every core,
 close and reload, threaded video on half) passes again with it: no crash.
 The installed title was put back as before.
+
+## 2026-09-28 — LRPS2 pinned on the fork's main, without a patch
+
+../PS5_LRPS2's port moved from its `ps5-port` branch to `main`, pushed to
+github.com/mihawk-99/PS5_LRPS2. `tools/build-lrps2.sh` now pins that branch's
+revision, `9c2eea4`, and builds it as it is; `patches/lrps2/ps5-port.patch`
+(the branch's diff against `6d14775`) is gone. The patch was byte-for-byte
+`git diff 6d14775 9c2eea4`, with no binary hunks, so the source tree is the
+same. Built both ways in this checkout, the two `pcsx2_libretro.so` are
+identical (23,105,064 bytes, no byte differs). All five host gates pass on
+`main` with it (title build `e30b3650`). The release, `f96bdb0e`, was built
+in the PS5_RetroArch-radv checkout, and its LRPS2 core carries that path in
+1,427 strings where this build carries PS5_RetroArch's. The installed title
+is unchanged.

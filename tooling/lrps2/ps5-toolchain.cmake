@@ -2,8 +2,8 @@
 # host headers or libraries.
 #
 # The pinned tree is configured directly, as the Dolphin and PPSSPP builds
-# configure theirs. Everything the port changes in the core is in
-# patches/lrps2/ps5-port.patch (made in ../PS5_LRPS2); what the build adds from
+# configure theirs. Everything the port changes in the core is committed in
+# the fork, ../PS5_LRPS2, at the pinned revision; what the build adds from
 # outside the tree is here and in tools/build-lrps2.sh.
 set(CMAKE_SYSTEM_NAME FreeBSD)
 set(CMAKE_SYSTEM_PROCESSOR x86_64)
