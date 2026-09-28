@@ -90,6 +90,44 @@ index f45ef3ce5..03c07091b 100644
  #endif
  	if (logical_cpu_count <= 0)
  		logical_cpu_count = 1;
+diff --git a/Common/GPU/Vulkan/VulkanContext.cpp b/Common/GPU/Vulkan/VulkanContext.cpp
+index 9b384731e..4c761c842 100644
+--- a/Common/GPU/Vulkan/VulkanContext.cpp
++++ b/Common/GPU/Vulkan/VulkanContext.cpp
+@@ -566,7 +566,10 @@ VkResult VulkanContext::CreateDevice(int physical_device) {
+ 	physical_device_ = physical_device;
+ 	INFO_LOG(Log::G3D, "Chose physical device %d: %s", physical_device, physicalDeviceProperties_[physical_device].properties.deviceName);
+ 
+-	vulkanDeviceApiVersion_ = physicalDeviceProperties_[physical_device].properties.apiVersion;
++	// The device offers no more of Vulkan than the instance was created for: a core command above
++	// that version is not there (vkGetDeviceProcAddr returns null for it), so what it promoted must
++	// still be enabled as an extension.
++	vulkanDeviceApiVersion_ = std::min(physicalDeviceProperties_[physical_device].properties.apiVersion, vulkanInstanceApiVersion_);
+ 
+ 	queue_count = 0;
+ 	vkGetPhysicalDeviceQueueFamilyProperties(physical_devices_[physical_device_], &queue_count, nullptr);
+diff --git a/Common/GPU/Vulkan/VulkanContext.h b/Common/GPU/Vulkan/VulkanContext.h
+index 617d231de..ecfba4a47 100644
+--- a/Common/GPU/Vulkan/VulkanContext.h
++++ b/Common/GPU/Vulkan/VulkanContext.h
+@@ -1,5 +1,6 @@
+ #pragma once
+ 
++#include <algorithm>
+ #include <cstdint>
+ #include <cstring>
+ #include <string>
+@@ -429,6 +430,10 @@ class VulkanContext {
+ 		return frame_[curFrame_].deleteList.GetLastDeleteCount();
+ 	}
+ 
++	// A frontend that creates the instance itself (libretro) created it for this API version.
++	void LimitInstanceApiVersion(u32 apiVersion) {
++		vulkanInstanceApiVersion_ = std::min(vulkanInstanceApiVersion_, apiVersion);
++	}
+ 	u32 InstanceApiVersion() const {
+ 		return vulkanInstanceApiVersion_;
+ 	}
 diff --git a/Common/GPU/Vulkan/thin3d_vulkan.cpp b/Common/GPU/Vulkan/thin3d_vulkan.cpp
 index d0f2fd37f..248bc9402 100644
 --- a/Common/GPU/Vulkan/thin3d_vulkan.cpp
@@ -499,6 +537,38 @@ index cc7a272e2..c6edc680b 100644
  
  #ifndef HAVE_LIBNX
  	if (preferred == RETRO_HW_CONTEXT_DUMMY || preferred == RETRO_HW_CONTEXT_VULKAN) {
+diff --git a/libretro/LibretroVulkanContext.cpp b/libretro/LibretroVulkanContext.cpp
+index d222cd03c..0ad209614 100644
+--- a/libretro/LibretroVulkanContext.cpp
++++ b/libretro/LibretroVulkanContext.cpp
+@@ -31,6 +31,10 @@ void LibretroVulkanContext::SwapBuffers() {
+ 	LibretroHWRenderContext::SwapBuffers();
+ }
+ 
++// The API version asked of the frontend, which creates the instance: RetroArch raises 1.0 to 1.1
++// where the loader has it, and asking for 1.1 makes that the version this core knows it has.
++static const uint32_t libretro_api_version = VK_API_VERSION_1_1;
++
+ static bool create_device(retro_vulkan_context *context, VkInstance instance, VkPhysicalDevice gpu, VkSurfaceKHR surface, PFN_vkGetInstanceProcAddr get_instance_proc_addr, const char **required_device_extensions, unsigned num_required_device_extensions, const char **required_device_layers, unsigned num_required_device_layers, const VkPhysicalDeviceFeatures *required_features) {
+ 	init_glslang();
+ 
+@@ -41,6 +45,7 @@ static bool create_device(retro_vulkan_context *context, VkInstance instance, Vk
+ 	// TODO: Here we'll inject the instance and all of the stuff into the VulkanContext.
+ 
+ 	vk->CreateInstance({});
++	vk->LimitInstanceApiVersion(libretro_api_version);
+ 
+ 	int physical_device = 0;
+ 	while (gpu && vk->GetPhysicalDevice(physical_device) != gpu) {
+@@ -86,7 +91,7 @@ static const VkApplicationInfo *GetApplicationInfo(void) {
+ 	app_info.applicationVersion = Version(PPSSPP_GIT_VERSION).ToInteger();
+ 	app_info.pEngineName = "PPSSPP";
+ 	app_info.engineVersion = 2;
+-	app_info.apiVersion = VK_API_VERSION_1_0;
++	app_info.apiVersion = libretro_api_version;
+ 	return &app_info;
+ }
+ 
 diff --git a/libretro/libretro.cpp b/libretro/libretro.cpp
 index 3b2f10317..64f47e11b 100644
 --- a/libretro/libretro.cpp

@@ -3988,3 +3988,42 @@ frame than a 60 Hz frame holds, in Dolphin's CPU emulation (full MMU, "strictly
 required" by its game settings) and its GPU emulation, which single core shows
 do not fit one core. Underclocking the emulated CPU is the only setting that
 moves them, and it changes the game's own timing, so it is not a default.
+
+## 2026-09-28 — RetroArch on RADV: the menu, PPSSPP, Dolphin and LRPS2 run
+
+First console runs of this branch's title (PS5_VULKAN_DRIVER=radv; ../PS5_Vulkan's
+release archive at ps5-port 884f954, SDK 489467e) against the installed ps5vk
+build (fb60ec12), each launched from `/app0/args.txt` with `/app0/test-run.txt`
+and a capture at a fixed frame. The 10 s audio windows give the speed: 480,000
+samples and no silence is 100%.
+
+| Run | RADV | ps5vk |
+| --- | --- | --- |
+| Menu (frame 600) | renders; no fault | — |
+| PPSSPP, God of War: Ghost of Sparta (frame 3600) | the same title menu as ps5vk; every window full after boot with the shader cache filled | the same |
+| Dolphin, Wind Waker (frame 3600) | title screen; every window full after boot | — |
+| LRPS2, GTA San Andreas (frame 3600) | the logo, 0.1% of pixels differing from ps5vk's by more than 16 (the video's timing); two late windows 99.8% and 98.9% | one late window 99.4% |
+
+- **PPSSPP faulted at first,** calling a null vkCreateRenderPass2 3.6 s in. It
+  took the physical device's API version (1.4 on RADV) as the version it could
+  use, so it treated render pass 2 as core and never enabled the extension,
+  while the frontend created the instance for 1.1, and a device offers no core
+  command above its instance's version. ps5vk reports 1.1, and PPSSPP's MSAA
+  needs render pass 2, which ps5vk does not offer, so the path never ran there.
+  The port patch now caps the device's version at the instance's
+  (VulkanContext::CreateDevice, which PPSSPP's own allocator setup already did)
+  and asks the frontend for 1.1, the version RetroArch creates anyway: on ps5vk
+  nothing changes (1.1 and 1.1), and on RADV render pass 2 and the others are
+  enabled as extensions.
+- **With an empty shader cache** PPSSPP on RADV lost 0.7% of one window to
+  pipeline compiles (3,277 samples); with the cache filled the run matched
+  ps5vk's window for window. Compiles must not cost speed, so that is open.
+- **A capture run does not quit** under my configuration, on either driver:
+  `quit_press_twice = "true"` turns the capture's quit request into the first of
+  two presses. The runs ended at their watchdogs.
+
+The installed title was put back afterwards: the main checkout's build
+redeployed (its record's five changed files dropped first), a capture run showed
+build fb60ec12 presenting at 119.88 Hz, the capture files and RADV's shader
+cache folder removed, and my configuration, core options, history playlist and
+trace compared with the copies taken before (the history playlist restored).
