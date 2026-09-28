@@ -4168,3 +4168,47 @@ etaHEN's Legacy CMD server enabled), which I have not used.
 
 The installed title is this build (`4be9e814`). It launched and passed every
 run above.
+
+## 2026-09-28 — Executable memory with no limit: Rogue Leader's crash leaving a mission
+
+A tester's Rogue Leader crashed going from a mission back to the main menu
+(v0.5.0-alpha.5). Their trace ends with `dolphin ps5: no executable memory for
+4096 bytes`, and the kernel's record with a write fault at address 0. Dolphin
+takes 4 KiB of code for each vertex format a game draws with. The platform
+layer's `ps5_exec_allocate` kept its regions in a table of 128, and the trace's
+last count was 127. The next allocation returned NULL, and Dolphin filled the
+null block with breakpoints. The same table served every JIT on that call:
+Dolphin, PPSSPP, Mupen64Plus (new_dynarec and ParaLLEl-RSP), DeSmuME and
+Azahar's dynarmic. LRPS2 and the core loader use the region form, which had no
+table.
+
+The SDK fork (d3e8625, probe 588998e) has no limit now, as mmap has none. A
+request of 64 KiB or more is a region of its own, in a list. A smaller one is a
+block of whole 16 KiB pages in a shared 4 MiB arena within reach of its anchor,
+zeroed when handed out. Whole pages mean a core's protection change touches
+only its own block (PPSSPP takes execute away before it frees one), and a freed
+block is made read, write and execute again. Near regions are asked for just
+past the last one, so they pack instead of taking a 64 MiB step each.
+
+On the console, the platform probe inside the title (build ac6e64c2):
+
+| | Result |
+| --- | --- |
+| 2,000 blocks of 4 KiB near the code | all handed out, each runs its own code, in 8 arenas, 1.3 µs each |
+| 300 regions of 64 KiB | all handed out, each runs, 31 µs each |
+| release | 25 µs each (a freed block's protection is restored) |
+| a block freed read-write, handed out again | the same page, and its code runs |
+| direct memory and the heap around the step | unchanged |
+
+An allocation costs microseconds, where a frame has 16.7 ms, so it was never
+behind the audio stutter the tester also reported. That comes from Dolphin's
+speed at transitions, the next piece of work. The battery (a game, the menu
+twice, Close Content, the same game again) passes for Dolphin, PPSSPP,
+Mupen64Plus, DeSmuME, Azahar and LRPS2 on this build, with full speed after
+the reload.
+
+The probe's own last check had failed on the console by 6 MiB. Its four
+threads leave their stacks in the platform's stack cache, which the check
+predates. It now allows for the stacks left cached. The title's build identity
+now includes the SDK's revision: a change to the platform layer alone had
+kept the old identity.

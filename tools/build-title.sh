@@ -251,6 +251,9 @@ inputs = sorted(p for p in (root / "src").rglob("*") if p.is_file())
 inputs += [root / name for name in (
     "build/ra/libretroarch.a", "build/ra-conf/config.h", "tools/build-title.sh",
     "build/core_imports.inc",
+    # The SDK fork's revision: its platform layer is linked into the title, and
+    # a change there alone changes no other input.
+    ".deps/native/ps5-payload-sdk/.ps5-sdk-revision",
     *(f"build/cores/stage/cores/{name}_libretro.so" for name in os.environ["CORE_NAMES"].split()),
     "tools/build.sh", "tools/retroarch-flags.sh")]
 inputs += [pathlib.Path(name) for name in sys.argv[3:]]
