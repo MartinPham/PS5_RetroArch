@@ -4051,3 +4051,30 @@ the configuration on exit. The test folder and files were removed afterwards.
 The installed title was put back as before: main's build fb60ec12 presenting
 at 119.88 Hz, and my configuration, core options, history and trace identical
 to the copies taken first.
+
+## 2026-09-28 — Shader compiles on RADV: the heap's lock, and arenas
+
+With an empty shader cache PPSSPP lost 0.7% of a window to pipeline compiles
+on RADV. RADV's own timings on the console, for PPSSPP's God of War from an
+empty cache: 45 ms a pipeline (SPIR-V to NIR 15 ms, ACO 14 ms, the rest NIR),
+where the same pipelines, captured from the console, compile in 7.4 ms on one
+host thread. Dolphin's pipelines compile as fast on the console as on the
+host, and Dolphin compiles on few threads; PPSSPP compiles on many. On the host, one
+lock over every allocation doubled the time a pipeline took at eight threads
+(19.6 ms median against 9.3), and the compiler allocates constantly.
+
+This title's overflow heap, where small blocks go, was one locked dlmalloc
+mspace. It is now the payload SDK's title heap (95c08f2): up to eight arenas,
+one for each allocating thread, with each block going back to its own. On the
+console, RADV and an empty cache:
+
+| | Before | Arenas |
+| --- | --- | --- |
+| PPSSPP compiles | 5,480 ms, median 37.4 ms, p90 105 ms | 2,043 ms, median 17.4 ms, p90 28 ms |
+| PPSSPP windows | 94, 100, 99, 100, 100 | 96, 100, 100, 100, 100 |
+| Dolphin windows | 82, 91, 99, 100, 100 | 83, 92, 100, 100, 100 |
+
+Dolphin's first two windows are its boot, which compiles its ubershaders.
+The release battery (every core, close and reload, threaded video on half)
+and PPSSPP's ten-minute soak ran again on RADV with the arenas: no crash,
+the soak's windows 98-100%. The installed title was put back as before.
