@@ -29,9 +29,14 @@
 #include <cstring>
 #include <ctime>
 
+#include <poll.h>
 #include <pthread.h>
+#include <sched.h>
+#include <semaphore.h>
 #include <signal.h>
+#include <sys/select.h>
 #include <ucontext.h>
+#include <unistd.h>
 
 #include <ps5platform/context.h>
 #include "present_clock.h"
@@ -85,6 +90,30 @@ void on_sample(int, siginfo_t *, void *context_pointer)
     sample[1] = static_cast<std::uint64_t>(registers.mc_rip);
     sample[2] = (rsp & 7) == 0 && rsp != 0 ? *reinterpret_cast<const std::uint64_t *>(rsp) : 0;
     std::uint64_t frame = static_cast<std::uint64_t>(registers.mc_rbp);
+    const std::uint64_t rip = static_cast<std::uint64_t>(registers.mc_rip);
+    if (rip >= 0x800000000ull && rip < 0x800200000ull && (rsp & 7) == 0 && rsp != 0)
+    {
+        /* Inside libkernel, whose callers in the system libc keep no frame
+         * chain: scan the stack instead, keeping the words that point into
+         * the title (below 0x10000000), a loaded core (0x400000000 up) or the
+         * system libraries, in order. A scan, so a stale word can appear; the
+         * chain line says which kind it is (a leading 1). */
+        const auto *const words = reinterpret_cast<const std::uint64_t *>(rsp);
+        unsigned kept = 3;
+        sample[3] = 1;
+        for (unsigned word = 0; word < 256 && kept < kFrames; ++word)
+        {
+            const std::uint64_t value = words[word];
+            const bool title = value >= 0x400000ull && value < 0x10000000ull;
+            const bool core = value >= 0x400000000ull && value < 0x480000000ull;
+            const bool system = value >= 0x800000000ull && value < 0x800200000ull;
+            if (title || core || system)
+                sample[++kept] = value;
+        }
+        for (unsigned depth = kept + 1; depth <= kFrames; ++depth)
+            sample[depth] = 0;
+        return;
+    }
     for (unsigned depth = 3; depth <= kFrames; ++depth)
     {
         if ((frame & 7) != 0 || frame < rsp || frame + 16 > rsp + kStackSpan)
@@ -213,6 +242,82 @@ void *sampler(void *)
 }
 } // namespace
 
+/* The rest of the waiting functions by their exported names, declared under
+ * assembler names so no header's declaration of them is contradicted. */
+extern "C" void sampler_export_pthread_yield() __asm__("pthread_yield");
+extern "C" void sampler_export_sceKernelUsleep() __asm__("sceKernelUsleep");
+extern "C" void sampler_export_sceKernelNanosleep() __asm__("sceKernelNanosleep");
+extern "C" void
+sampler_export_pthread_cond_reltimedwait_np() __asm__("pthread_cond_reltimedwait_np");
+extern "C" void sampler_export_pthread_mutex_timedlock() __asm__("pthread_mutex_timedlock");
+extern "C" void sampler_export_pthread_mutex_trylock() __asm__("pthread_mutex_trylock");
+extern "C" void sampler_export_pthread_spin_lock() __asm__("pthread_spin_lock");
+extern "C" void sampler_export_umtx_op() __asm__("_umtx_op");
+extern "C" void sampler_export_sceKernelWaitEventFlag() __asm__("sceKernelWaitEventFlag");
+extern "C" void sampler_export_sceKernelWaitSema() __asm__("sceKernelWaitSema");
+extern "C" void sampler_export_pthread_barrier_wait() __asm__("pthread_barrier_wait");
+extern "C" void sampler_export_sceKernelWaitEqueue() __asm__("sceKernelWaitEqueue");
+extern "C" void sampler_export_kevent() __asm__("kevent");
+extern "C" void sampler_export_sem_post() __asm__("sem_post");
+extern "C" void sampler_export_sceKernelGetProcessTime() __asm__("sceKernelGetProcessTime");
+
+/* Where the console's waiting functions are, once: a blocked thread's samples
+ * sit inside one of them, and its caller may leave no frame chain (JIT code),
+ * so the nearest export at or below a sampled address names the wait. Only
+ * functions the title imports anyway, by their exported names. */
+static void report_exports()
+{
+    const struct
+    {
+        const char *name;
+        const void *address;
+    } exports[] = {
+        {"nanosleep", reinterpret_cast<const void *>(&nanosleep)},
+        {"usleep", reinterpret_cast<const void *>(&usleep)},
+        {"sched_yield", reinterpret_cast<const void *>(&sched_yield)},
+        {"pthread_cond_wait", reinterpret_cast<const void *>(&pthread_cond_wait)},
+        {"pthread_cond_timedwait", reinterpret_cast<const void *>(&pthread_cond_timedwait)},
+        {"pthread_cond_signal", reinterpret_cast<const void *>(&pthread_cond_signal)},
+        {"pthread_cond_broadcast", reinterpret_cast<const void *>(&pthread_cond_broadcast)},
+        {"pthread_mutex_lock", reinterpret_cast<const void *>(&pthread_mutex_lock)},
+        {"pthread_mutex_unlock", reinterpret_cast<const void *>(&pthread_mutex_unlock)},
+        {"pthread_join", reinterpret_cast<const void *>(&pthread_join)},
+        {"pthread_rwlock_rdlock", reinterpret_cast<const void *>(&pthread_rwlock_rdlock)},
+        {"pthread_rwlock_wrlock", reinterpret_cast<const void *>(&pthread_rwlock_wrlock)},
+        {"sem_wait", reinterpret_cast<const void *>(&sem_wait)},
+        {"sem_timedwait", reinterpret_cast<const void *>(&sem_timedwait)},
+        {"clock_gettime", reinterpret_cast<const void *>(&clock_gettime)},
+        {"poll", reinterpret_cast<const void *>(&poll)},
+        {"select", reinterpret_cast<const void *>(&select)},
+        {"read", reinterpret_cast<const void *>(&read)},
+        {"write", reinterpret_cast<const void *>(&write)},
+        {"pthread_yield", reinterpret_cast<const void *>(&sampler_export_pthread_yield)},
+        {"sceKernelUsleep", reinterpret_cast<const void *>(&sampler_export_sceKernelUsleep)},
+        {"sceKernelNanosleep", reinterpret_cast<const void *>(&sampler_export_sceKernelNanosleep)},
+        {"pthread_cond_reltimedwait_np",
+         reinterpret_cast<const void *>(&sampler_export_pthread_cond_reltimedwait_np)},
+        {"pthread_mutex_timedlock",
+         reinterpret_cast<const void *>(&sampler_export_pthread_mutex_timedlock)},
+        {"pthread_mutex_trylock",
+         reinterpret_cast<const void *>(&sampler_export_pthread_mutex_trylock)},
+        {"pthread_spin_lock", reinterpret_cast<const void *>(&sampler_export_pthread_spin_lock)},
+        {"_umtx_op", reinterpret_cast<const void *>(&sampler_export_umtx_op)},
+        {"sceKernelWaitEventFlag",
+         reinterpret_cast<const void *>(&sampler_export_sceKernelWaitEventFlag)},
+        {"sceKernelWaitSema", reinterpret_cast<const void *>(&sampler_export_sceKernelWaitSema)},
+        {"pthread_barrier_wait",
+         reinterpret_cast<const void *>(&sampler_export_pthread_barrier_wait)},
+        {"sceKernelWaitEqueue",
+         reinterpret_cast<const void *>(&sampler_export_sceKernelWaitEqueue)},
+        {"kevent", reinterpret_cast<const void *>(&sampler_export_kevent)},
+        {"sem_post", reinterpret_cast<const void *>(&sampler_export_sem_post)},
+        {"sceKernelGetProcessTime",
+         reinterpret_cast<const void *>(&sampler_export_sceKernelGetProcessTime)},
+    };
+    for (const auto &entry : exports)
+        std::fprintf(stderr, "sampler: export %s=%p\n", entry.name, entry.address);
+}
+
 /* Starts the sampler on the calling thread when /app0/ps5-sampler.txt exists. */
 extern "C" void ps5_sampler_start()
 {
@@ -235,6 +340,7 @@ extern "C" void ps5_sampler_start()
             g_starts[g_start_count++] = start;
     }
     std::fclose(flag);
+    report_exports();
     g_threads[0] = pthread_self();
     g_thread_count.store(1, std::memory_order_release);
     g_running.store(true, std::memory_order_release);
@@ -266,7 +372,13 @@ extern "C" void ps5_sampler_add_thread(pthread_t thread, const void *start)
     for (unsigned at = 0; at < g_start_count; ++at)
         named = named || g_starts[at] == reinterpret_cast<std::uintptr_t>(start);
     if (!named)
+    {
+        /* Where each core thread starts, once, so a run can name the ones to
+         * sample in the next: the addresses depend on the core build and where
+         * the loader put it. */
+        std::fprintf(stderr, "sampler: core thread not sampled, start=%p\n", start);
         return;
+    }
     const unsigned index = g_thread_count.load(std::memory_order_relaxed);
     if (index >= kMaxThreads)
         return;

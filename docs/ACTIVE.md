@@ -35,6 +35,13 @@ one way), Saturn gameplay with a BIOS and a vector game at 4K in MAME. The
 forks are published on github.com/mihawk-99 at the pinned revisions, so a
 checkout without the sibling forks builds from there.
 
+**Dolphin transitions (paused 2026-09-28 for RPCS3):** Rogue Leader's dips are
+not shader compiles. The emulation thread spins in `sched_yield` inside a
+libkernel lock for about half its slow time, and runs the MMU slow path for
+the rest (docs/PHASE_LOG.md). Next: name that lock with the sampler's stack
+scan, then compile-thread priority, the boot INI save, the GPU-thread cost and
+the MMU fast path.
+
 **Open:**
 
 1. Dolphin's first start of a game on RADV, from an empty shader cache: Wind

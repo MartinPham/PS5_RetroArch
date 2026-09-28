@@ -4212,3 +4212,50 @@ threads leave their stacks in the platform's stack cache, which the check
 predates. It now allows for the stacks left cached. The title's build identity
 now includes the SDK's revision: a change to the platform layer alone had
 kept the old identity.
+
+## 2026-09-28 — Rogue Leader's slow windows on RADV: where the time goes (paused)
+
+A tester found Rogue Leader smoother on v0.5.0-alpha.5, but still stuttering
+at transitions. I profiled its attract sequence from boot with the sampler
+on the main thread (Dolphin's GPU loop and RetroArch), Dolphin's emulation
+thread, its four shader-compiler threads, its DVD thread and its work queue
+(stall threshold 20 ms). The 10 s windows ran (%): 83 78 96 100 95 100 100 96
+90 100 100 94 76 98 100 95 100 100 96, and the next two runs gave the same
+within a point or two.
+
+- **Not shader compiles.** In the mid-game dips (windows 9 and 13) all four
+  compiler threads were idle, waiting for work.
+- **The main thread waits for frames.** 85-90% of its stalled samples are a
+  timed wait inside Dolphin: the GPU loop waiting for the emulation thread's
+  commands.
+- **The emulation thread spins in `sched_yield`** for about half its stalled
+  samples. I found that from the addresses of the exported waiting functions,
+  which the sampler now logs at start: `sched_yield` is where those samples
+  sit. It is called from libkernel code just past `pthread_rwlock_wrlock` and
+  before `nanosleep`, by a caller that keeps no frame chain. libc++'s
+  `shared_mutex` does not use rwlocks, and Dolphin's throttle is off under
+  libretro, so this is neither Dolphin's config lock nor its pacing. The
+  sampler now scans the stack for callers when a sample is inside a system
+  library, to name the Dolphin code that ends up there; I stopped before that
+  scan ran on the console.
+- **The other half** is the MMU's slow path (`ReadFromHardware`,
+  `TranslatePageAddr`, `Memcheck`), as on 2026-09-26.
+- **At boot**, 69% of the main thread's stalled samples in the first window
+  are Dolphin saving an INI file (`IniFile::Save`, `fflush`) on the thread
+  that runs the GPU loop.
+
+Frame pointers are already this target's default: Dolphin built with
+`-fno-omit-frame-pointer` came out byte-identical, so chains stop only at JIT
+code and the system libraries. The sampler also logs every core thread's
+start address when a thread is created, so a run can name the ones to sample.
+
+The thread probe (SDK 9a57ba7) measured how the console schedules the title's
+threads, for the priority work that comes next. Threads run at policy 1,
+priority 700, in a range of 256 (highest) to 767. A priority set on a running
+thread reads back. Sixteen spinning threads ran on CPUs 0-12, thirteen in all.
+`pthread_getaffinity_np` with FreeBSD's `cpuset_t` returns ERANGE.
+
+Next for Dolphin, when I come back to it: run the stack scan and name what
+the emulation thread spins on, then the compile-thread priority, the boot INI
+save, the GPU-thread cost and the MMU fast path. The installed title is
+build 6abfd89d, and the Dolphin battery passes on it.
