@@ -9,7 +9,8 @@
 namespace
 {
 std::string fixture;
-std::vector<std::string> roots;
+std::vector<std::string> root_paths;
+std::vector<std::string> root_names;
 std::string physical(const char *path)
 {
     std::string p(path);
@@ -69,14 +70,20 @@ extern "C"
     {
         return closedir(p);
     }
-    bool menu_entries_append(file_list_t *, const char *path, const char *, msg_hash_enums label,
-                             unsigned type, size_t, size_t, rarch_setting_t *)
+    bool menu_entries_append(file_list_t *list, const char *path, const char *,
+                             msg_hash_enums label, unsigned type, size_t, size_t, rarch_setting_t *)
     {
         assert(label == MENU_ENUM_LABEL_FILE_DETECT_CORE_LIST_PUSH_DIR ||
                label == MENU_ENUM_LABEL_FILE_BROWSER_DIRECTORY);
         assert(type == FILE_TYPE_DIRECTORY);
-        roots.emplace_back(path);
+        root_paths.emplace_back(path);
+        ++list->size;
         return true;
+    }
+    void file_list_set_alt_at_offset(file_list_t *list, size_t index, const char *alt)
+    {
+        assert(index == list->size - 1 && index == root_names.size());
+        root_names.emplace_back(alt);
     }
 }
 int main(int argc, char **argv)
@@ -116,8 +123,11 @@ int main(int argc, char **argv)
     assert(frontend_ctx_ps5.environment_get);
     frontend_ctx_ps5.environment_get(&count, argv, nullptr, &untouched);
     assert(count == argc && untouched == 0x1234);
-    assert(frontend_ctx_ps5.parse_drive_list(nullptr, true) == 0);
-    assert((roots == std::vector<std::string>{"/app0", "/mnt/usb0", "/"}));
-    std::puts(
-        "frontend_ps5: config seed/preservation, directories, argv and accessible roots PASS");
+    // The browser's top is two named roots, the title's folder and the mounts.
+    file_list_t list{};
+    assert(frontend_ctx_ps5.parse_drive_list(&list, true) == 0);
+    assert((root_paths == std::vector<std::string>{"/app0", "/mnt"}));
+    assert((root_names == std::vector<std::string>{"INTERNAL", "EXTERNAL"}));
+    std::puts("frontend_ps5: config seed/preservation, directories, argv and the INTERNAL and "
+              "EXTERNAL roots PASS");
 }

@@ -3126,6 +3126,64 @@ EDITS = [
         "#endif\n",
         "patches/series, 0096): the console's default",
     ),
+    (
+        # 0097: Load Content lists the frontend's roots (src/frontend_ps5.cpp)
+        # and nothing else. Upstream adds its Start Directory, its Downloads
+        # folder and the File Browser Settings around them; kiosk mode keeps
+        # upstream's list, which leaves the roots out.
+        "menu/menu_displaylist.c",
+        "      case DISPLAYLIST_LOAD_CONTENT_LIST:\n"
+        "      case DISPLAYLIST_LOAD_CONTENT_SPECIAL:\n"
+        "      {\n"
+        "         core_info_list_t *info_list = NULL;\n",
+        "      case DISPLAYLIST_LOAD_CONTENT_LIST:\n"
+        "      case DISPLAYLIST_LOAD_CONTENT_SPECIAL:\n"
+        "#ifdef __PROSPERO__\n"
+        "         /* Added by this port (patches/series, 0097): Load Content is the\n"
+        "          * frontend's roots alone, INTERNAL and EXTERNAL. */\n"
+        "         if (!settings->bools.kiosk_mode_enable)\n"
+        "         {\n"
+        "            frontend_driver_parse_drive_list(list, true);\n"
+        "            count += (unsigned)list->size;\n"
+        "            break;\n"
+        "         }\n"
+        "#endif\n"
+        "      {\n"
+        "         core_info_list_t *info_list = NULL;\n",
+        "patches/series, 0097): Load Content is the",
+    ),
+    (
+        # 0097 too: a root shows the name the frontend gave it (the entry's alt
+        # text), not its path; opening it still uses the path.
+        "menu/cbs/menu_cbs_get_value.c",
+        "#else\n"
+        "   MENU_ACTION_SETTING_GENERIC_DISP_SET_LABEL_2(w, s, len,\n"
+        "         path, \"(DIR)\", STRLEN_CONST(\"(DIR)\"), s2, len2);\n",
+        "#else\n"
+        "   /* Added by this port (patches/series, 0097): a directory the frontend\n"
+        "    * names, a root of the browser, shows its name rather than its path. */\n"
+        "   if (list && list->list[i].alt)\n"
+        "      path = list->list[i].alt;\n"
+        "   MENU_ACTION_SETTING_GENERIC_DISP_SET_LABEL_2(w, s, len,\n"
+        "         path, \"(DIR)\", STRLEN_CONST(\"(DIR)\"), s2, len2);\n",
+        "patches/series, 0097): a directory the frontend",
+    ),
+    (
+        # 0097 too: Parent Directory from a root (/app0, /mnt) reaches the
+        # roots, as Back does, rather than a listing of the filesystem's /.
+        "menu/cbs/menu_cbs_ok.c",
+        "         fill_pathname_parent_dir(parent_dir,\n"
+        "               parent_dir, sizeof(parent_dir));\n",
+        "         fill_pathname_parent_dir(parent_dir,\n"
+        "               parent_dir, sizeof(parent_dir));\n"
+        "#ifdef __PROSPERO__\n"
+        "         /* Added by this port (patches/series, 0097): the top of this\n"
+        "          * console's browser is the frontend's roots, not the filesystem. */\n"
+        "         if (string_is_equal(parent_dir, \"/\"))\n"
+        "            parent_dir[0] = '\\0';\n"
+        "#endif\n",
+        "patches/series, 0097): the top of this",
+    ),
 ]
 
 # Changes that are withdrawn rather than deleted, by marker.

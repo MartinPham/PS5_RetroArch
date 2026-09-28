@@ -6,6 +6,7 @@ extern "C"
 {
 #include <defaults.h>
 #include <frontend/frontend_driver.h>
+#include <lists/file_list.h>
 #include <menu/menu_entries.h>
 }
 #include <cerrno>
@@ -18,6 +19,17 @@ extern "C"
 namespace
 {
 constexpr const char *saved_config = "/app0/config/retroarch.cfg";
+
+// The top of the file browser, Load Content included (patches/series, 0097):
+// INTERNAL, the title's own folder, and EXTERNAL, where the console mounts USB
+// drives, an extended storage drive and any other external storage. Each shows
+// its name, and opening it opens its folder.
+struct Root
+{
+    const char *path;
+    const char *name;
+};
+constexpr Root roots[] = {{"/app0", "INTERNAL"}, {"/mnt", "EXTERNAL"}};
 
 void set_directory(default_dirs slot, const char *path)
 {
@@ -85,7 +97,7 @@ void initialize(void *)
     set_directory(DEFAULT_DIR_LOGS, "/app0");
     std::fprintf(stderr, "frontend ps5: config=%s browser=/app0 cores=/app0/cores\n", saved_config);
     // Startup summary: known roots only; never log the user's file names.
-    for (const char *path : {"/", "/app0", "/app0/cores", "/data", "/mnt/usb0"})
+    for (const char *path : {"/app0", "/app0/cores", "/mnt", "/mnt/usb0"})
     {
         errno = 0;
         DIR *dir = ps5_opendir(path);
@@ -112,14 +124,9 @@ int drives(void *data, bool content)
     auto *list = static_cast<file_list_t *>(data);
     const auto label = content ? MENU_ENUM_LABEL_FILE_DETECT_CORE_LIST_PUSH_DIR
                                : MENU_ENUM_LABEL_FILE_BROWSER_DIRECTORY;
-    for (const char *path : {"/app0", "/data", "/mnt/usb0", "/mnt/usb1", "/"})
-    {
-        DIR *dir = ps5_opendir(path);
-        if (!dir)
-            continue;
-        ps5_closedir(dir);
-        menu_entries_append(list, path, "", label, FILE_TYPE_DIRECTORY, 0, 0, nullptr);
-    }
+    for (const Root &root : roots)
+        if (menu_entries_append(list, root.path, "", label, FILE_TYPE_DIRECTORY, 0, 0, nullptr))
+            file_list_set_alt_at_offset(list, list->size - 1, root.name);
     return 0;
 }
 } // namespace
