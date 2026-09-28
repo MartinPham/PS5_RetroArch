@@ -56,12 +56,23 @@ def generate(imports):
                'realloc': 'ps5_core_realloc', 'aligned_alloc': 'ps5_core_aligned_alloc',
                'posix_memalign': 'ps5_core_posix_memalign', 'strdup': 'ps5_core_strdup',
                '_Znwm': 'ps5_core_new', '_Znam': 'ps5_core_new',
-               '_ZnwmRKSt9nothrow_t': 'ps5_core_new_nothrow',
+               '_ZnwmRKSt9nothrow_t': 'ps5_core_new_nothrow', '_ZnamRKSt9nothrow_t': 'ps5_core_new_nothrow',
+               '_ZnwmSt11align_val_t': 'ps5_core_new_aligned', '_ZnamSt11align_val_t': 'ps5_core_new_aligned',
+               '_ZnwmSt11align_val_tRKSt9nothrow_t': 'ps5_core_new_aligned_nothrow',
+               '_ZnamSt11align_val_tRKSt9nothrow_t': 'ps5_core_new_aligned_nothrow',
                # The platform layer: the SDK resolves this import to nothing.
                'arc4random': 'ps5_arc4random',
                # The platform layer: the console libc's statvfs faults (it
                # rests on statfs, which only libkernel_sys carries).
-               'statvfs': 'ps5_statvfs'}
+               'statvfs': 'ps5_statvfs', 'strcasestr': 'ps5_strcasestr',
+               'memccpy': 'ps5_memccpy', 'times': 'ps5_times', 'sockatmark': 'ps5_sockatmark',
+               'getpwuid': 'ps5_getpwuid', 'gethostbyaddr': 'ps5_gethostbyaddr',
+               'gethostbyname': 'ps5_gethostbyname', 'getnameinfo': 'ps5_getnameinfo',
+               # libc's getcwd calls __getcwd, which only libkernel_sys has.
+               'getcwd': 'ps5_getcwd', 'tmpfile': 'ps5_tmpfile',
+               'if_nametoindex': 'ps5_if_nametoindex', 'if_indextoname': 'ps5_if_indextoname',
+               'mkstemp': 'ps5_mkstemp', 'isatty': 'ps5_isatty', 'link': 'ps5_link',
+               'symlink': 'ps5_symlink', 'readlink': 'ps5_readlink', 'fchown': 'ps5_fchown'}
     for index, (name, kind) in enumerate(sorted(imports.items())):
         target = aliases.get(name, name)
         declaration = f'void core_import_{index}()' if kind == 'FUNC' else f'char core_import_{index}[]'

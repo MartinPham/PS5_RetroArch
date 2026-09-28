@@ -60,12 +60,19 @@ bash "$root/tools/setup-native-dependencies.sh" >/dev/null
 
 echo "==> [title] step 1/3: the frontend"
 "$root/tools/build-retroarch.sh"
-core_names=(fceumm mgba snes9x fbneo genesis_plus_gx ppsspp dolphin pcsx2)
+core_names=(fceumm mgba snes9x fbneo genesis_plus_gx ppsspp dolphin pcsx2
+    mednafen_psx_hw mupen64plus_next mednafen_saturn vice_x64sc desmume azahar mame)
 core_files=()
 for core_name in "${core_names[@]}"; do
-    # LRPS2's library keeps PCSX2's name; its build script is the port's.
-    script=${core_name//_/-}
-    [[ $core_name != pcsx2 ]] || script=lrps2
+    # Each library keeps its libretro name; the build script is the port's.
+    case $core_name in
+        pcsx2) script=lrps2 ;;
+        mednafen_psx_hw) script=beetle-psx ;;
+        mednafen_saturn) script=beetle-saturn ;;
+        mupen64plus_next) script=mupen64plus ;;
+        vice_x64sc) script=vice ;;
+        *) script=${core_name//_/-} ;;
+    esac
     bash "$root/tools/build-$script.sh"
     core_files+=("$root/build/cores/stage/cores/${core_name}_libretro.so")
 done
@@ -237,20 +244,14 @@ fi
 
 # Bind the running trace and FTP readback to these exact source/archive inputs.
 # The console transforms the SELF container, so its whole-file digest differs.
-python3 - "$root" "$memory_diagnostics" "${vulkan_archives[@]}" "${vulkan_objects[@]}" <<'PY'
-import hashlib, pathlib, sys
+CORE_NAMES="${core_names[*]}" python3 - "$root" "$memory_diagnostics" "${vulkan_archives[@]}" "${vulkan_objects[@]}" <<'PY'
+import hashlib, os, pathlib, sys
 root = pathlib.Path(sys.argv[1])
 inputs = sorted(p for p in (root / "src").rglob("*") if p.is_file())
 inputs += [root / name for name in (
     "build/ra/libretroarch.a", "build/ra-conf/config.h", "tools/build-title.sh",
-    "build/core_imports.inc", "build/cores/stage/cores/fceumm_libretro.so",
-    "build/cores/stage/cores/mgba_libretro.so",
-    "build/cores/stage/cores/snes9x_libretro.so",
-    "build/cores/stage/cores/fbneo_libretro.so",
-    "build/cores/stage/cores/genesis_plus_gx_libretro.so",
-    "build/cores/stage/cores/ppsspp_libretro.so",
-    "build/cores/stage/cores/dolphin_libretro.so",
-    "build/cores/stage/cores/pcsx2_libretro.so",
+    "build/core_imports.inc",
+    *(f"build/cores/stage/cores/{name}_libretro.so" for name in os.environ["CORE_NAMES"].split()),
     "tools/build.sh", "tools/retroarch-flags.sh")]
 inputs += [pathlib.Path(name) for name in sys.argv[3:]]
 digest = hashlib.sha256()

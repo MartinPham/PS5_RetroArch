@@ -10,13 +10,11 @@
  * stub lists one the console does not provide at runtime. They are defined in
  * the core so the reference resolves where it is made.
  *
+ * atexit, which VideoCommon/Spirv.cpp calls for glslang's finalizer, comes from
+ * the destructor registry every core links (tooling/native/core_cxx_runtime.cpp).
+ *
  * Real implementations, because Dolphin depends on the answer:
  *
- *   atexit        VideoCommon/Spirv.cpp registers glslang's finalizer. The
- *                 process-wide list would call into the core after RetroArch
- *                 unmapped it, so it joins this core's own destructor registry
- *                 (tooling/native/core_cxx_runtime.cpp), which the native loader
- *                 runs before unmapping.
  *   __cxa_thread_atexit
  *                 thread_local destructors (Common, glslang). A thread that
  *                 outlives the core (the frontend's main thread) would call them
@@ -50,19 +48,8 @@
 #include <netdb.h>
 #include <sys/types.h>
 
-extern "C"
-{
-    int __cxa_atexit(void (*callback)(void *), void *argument, void *dso);
-    extern void *__dso_handle;
-}
-
 namespace
 {
-void run_atexit(void *function)
-{
-    reinterpret_cast<void (*)()>(function)();
-}
-
 /* Days from 1970-01-01 to the given civil date (Howard Hinnant's algorithm). */
 long long days_from_civil(long long year, unsigned month, unsigned day)
 {
@@ -83,11 +70,6 @@ alignas(16) unsigned char resolver_state[1024];
 
 extern "C"
 {
-    int atexit(void (*function)())
-    {
-        return __cxa_atexit(run_atexit, reinterpret_cast<void *>(function), &__dso_handle);
-    }
-
     int __cxa_thread_atexit(void (*)(void *), void *, void *)
     {
         return 0;

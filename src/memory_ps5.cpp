@@ -440,3 +440,18 @@ extern "C" void *ps5_core_new_nothrow(size_t size, const void *)
 {
     return ps5_core_malloc(size ? size : 1);
 }
+
+/* operator new for over-aligned types (std::align_val_t is a size_t). The
+ * title's own went to libc's small heap, where MAME's large aligned buffers did
+ * not fit, and it traps on failure. */
+extern "C" void *ps5_core_new_aligned(size_t size, size_t alignment)
+{
+    if (void *p = overflow_memalign(alignment, size ? size : 1))
+        return p;
+    __builtin_trap();
+}
+
+extern "C" void *ps5_core_new_aligned_nothrow(size_t size, size_t alignment, const void *)
+{
+    return overflow_memalign(alignment, size ? size : 1);
+}

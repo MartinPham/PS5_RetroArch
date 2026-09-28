@@ -55,6 +55,18 @@ extern "C"
             callback(argument);
         }
     }
+
+    /* C's atexit belongs to the core too: a handler on the process-wide list
+     * would outlive the module that holds it. */
+    static void call_atexit_handler(void *handler)
+    {
+        reinterpret_cast<void (*)()>(handler)();
+    }
+
+    int atexit(void (*handler)())
+    {
+        return __cxa_atexit(call_atexit_handler, reinterpret_cast<void *>(handler), &__dso_handle);
+    }
 }
 
 __attribute__((destructor)) static void finish_core()

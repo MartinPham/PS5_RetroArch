@@ -96,7 +96,7 @@ extern "C" void *ps5_core_import(const char *name) {
     def test_missing_import_is_rejected_then_valid_load_recovers(self):
         self.lib.allow_import(False)
         self.assertFalse(self.open(self.core))
-        self.assertIn(b'unresolved native runtime import: native_add', self.lib.ps5_core_dlerror())
+        self.assertIn(b'unresolved native runtime import (1): native_add', self.lib.ps5_core_dlerror())
         self.lib.allow_import(True)
         handle = self.open(self.core)
         self.assertTrue(handle)

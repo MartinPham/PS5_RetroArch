@@ -29,6 +29,16 @@ class CoreImports(unittest.TestCase):
         self.assertIn('asm("ps5_rewinddir")', generated)
         self.assertIn('asm("ps5_opendir")', generated)
 
+    def test_aligned_new_and_getcwd_bind_to_the_title(self):
+        # Over-aligned operator new comes from direct memory, as plain new does,
+        # and getcwd from the platform layer (libc's faults for a title).
+        generated = imports.generate({'_ZnwmSt11align_val_t': 'FUNC', '_ZnamSt11align_val_t': 'FUNC',
+                                      '_ZnwmSt11align_val_tRKSt9nothrow_t': 'FUNC', 'getcwd': 'FUNC'})
+        self.assertIn('asm("ps5_core_new_aligned")', generated)
+        self.assertIn('asm("ps5_core_new_aligned_nothrow")', generated)
+        self.assertIn('asm("ps5_getcwd")', generated)
+        self.assertNotIn('asm("_ZnwmSt11align_val_t")', generated)
+
     def test_reject_conflicting_types_and_tls(self):
         with patch.object(imports.subprocess, 'check_output', side_effect=[
                 '1: 0 0 FUNC GLOBAL DEFAULT UND symbol',

@@ -7,6 +7,7 @@
 #include <cerrno>
 #include <cstdarg>
 #include <cstdint>
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -15,18 +16,134 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/mman.h>
+#ifdef __PROSPERO__
+#include <ps5platform/exec.h>
+#endif
 
 #ifndef R_X86_64_JUMP_SLOT
 #define R_X86_64_JUMP_SLOT R_X86_64_JMP_SLOT
 #endif
 
 extern "C" void *ps5_core_import(const char *name);
+#ifdef __PROSPERO__
+extern "C" void *ps5_core_malloc(size_t size);
+// The title's unwinder: the payload SDK's libunwind, linked into the title, to
+// which the cores' _Unwind_* and __cxa_* imports are bound.
+extern "C" void __unw_add_dynamic_eh_frame_section(uintptr_t eh_frame_start);
+extern "C" void __unw_remove_dynamic_eh_frame_section(uintptr_t eh_frame_start);
+#endif
 
 namespace
 {
 constexpr size_t page = 0x4000;
-constexpr size_t max_file = 128 * 1024 * 1024;
-constexpr size_t max_image = 512 * 1024 * 1024;
+// MAME's full core is a 424 MiB file with a 462 MiB image.
+constexpr size_t max_file = 1024 * 1024 * 1024;
+constexpr size_t max_image = 1024 * 1024 * 1024;
+
+// A core's file and image live in direct memory on the PS5. The title's
+// flexible memory (403 MiB free when it starts) is the pool the system
+// libraries allocate from, and a large core's file and image together can be
+// twice that. The file comes from the cores' allocator (src/memory_ps5.cpp);
+// the image from the platform layer's executable regions
+// (ps5platform/exec.h), which start read-write and turn read-execute segment by
+// segment. A region offers no read-only or no-access state, so the core's
+// read-only data stays writable. Host builds (the unit tests) use anonymous
+// memory for both.
+struct Image
+{
+#ifdef __PROSPERO__
+    ps5_exec_region region;
+#endif
+    unsigned char *base;
+    size_t bytes;
+};
+
+void *file_allocate(size_t bytes)
+{
+#ifdef __PROSPERO__
+    return ps5_core_malloc(bytes);
+#else
+    return std::malloc(bytes);
+#endif
+}
+
+bool image_reserve(Image &image, size_t bytes)
+{
+#ifdef __PROSPERO__
+    ps5_exec_request request{};
+    request.bytes = bytes;
+    request.flags = PS5_EXEC_TOGGLED;
+    image.region = ps5_exec_region{};
+    if (ps5_exec_alloc(&request, &image.region) != 0)
+        return false;
+    image.base = static_cast<unsigned char *>(image.region.base);
+    // Direct memory comes back holding what it last held, not zeroes as an
+    // anonymous mapping does, and a core's .bss is the part of the image the
+    // file does not fill: a reloaded core found its static mutex set to its
+    // predecessor's and faulted. The whole image starts zeroed.
+    std::memset(image.base, 0, bytes);
+#else
+    void *allocation =
+        mmap(nullptr, bytes + page, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    if (allocation == MAP_FAILED)
+        return false;
+    const uintptr_t address = reinterpret_cast<uintptr_t>(allocation);
+    const uintptr_t aligned = (address + page - 1) & ~(page - 1);
+    const size_t prefix = aligned - address;
+    const size_t suffix = page - prefix;
+    if (prefix)
+        munmap(allocation, prefix);
+    if (suffix)
+        munmap(reinterpret_cast<void *>(aligned + bytes), suffix);
+    image.base = reinterpret_cast<unsigned char *>(aligned);
+#endif
+    image.bytes = bytes;
+    return true;
+}
+
+// Code turns read-execute; everything else stays read-write.
+bool image_protect(Image &image, size_t offset, size_t bytes, bool executable)
+{
+#ifdef __PROSPERO__
+    return !executable || ps5_exec_protect(&image.region, offset, bytes, false) == 0;
+#else
+    return mprotect(image.base + offset, bytes,
+                    PROT_READ | (executable ? PROT_EXEC : PROT_WRITE)) == 0;
+#endif
+}
+
+// A core's own frames, for the unwinder to find when the core throws: the system
+// linker never sees a core, so nothing else tells it where they are. Host
+// builds (libgcc's unwinder) leave them out.
+void frames_register(uintptr_t eh_frame)
+{
+#ifdef __PROSPERO__
+    __unw_add_dynamic_eh_frame_section(eh_frame);
+#else
+    (void)eh_frame;
+#endif
+}
+
+void frames_unregister(uintptr_t eh_frame)
+{
+#ifdef __PROSPERO__
+    __unw_remove_dynamic_eh_frame_section(eh_frame);
+#else
+    (void)eh_frame;
+#endif
+}
+
+void image_release(Image &image)
+{
+#ifdef __PROSPERO__
+    ps5_exec_free(&image.region);
+#else
+    if (image.base)
+        munmap(image.base, image.bytes);
+#endif
+    image.base = nullptr;
+}
+
 struct Module
 {
     Module *next;
@@ -37,6 +154,8 @@ struct Module
     size_t file_span;
     unsigned char *base;
     size_t span;
+    Image image;
+    uintptr_t eh_frame;
     const Elf64_Phdr *ph;
     size_t ph_count;
     const Elf64_Sym *symbols;
@@ -94,10 +213,11 @@ bool mapped(const Module *m, uint64_t address, uint64_t bytes, unsigned flags = 
 
 void release(Module *m)
 {
+    if (m->eh_frame)
+        frames_unregister(m->eh_frame);
     if (m->base)
-        munmap(m->base, m->span);
-    if (m->file)
-        munmap(m->file, m->file_span);
+        image_release(m->image);
+    std::free(m->file);
     std::free(m);
 }
 
@@ -144,13 +264,12 @@ bool load(Module *m)
     }
     m->file_size = size_t(size);
     m->file_span = (m->file_size + page - 1) & ~(page - 1);
-    void *buffer =
-        mmap(nullptr, m->file_span, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
-    if (buffer == MAP_FAILED)
+    void *buffer = file_allocate(m->file_span);
+    if (!buffer)
     {
         const int error = errno;
         close(fd);
-        return fail("core file buffer mapping failed: bytes=%zu errno=%d", m->file_span, error);
+        return fail("core file buffer allocation failed: bytes=%zu errno=%d", m->file_span, error);
     }
     m->file = static_cast<unsigned char *>(buffer);
     size_t done = 0;
@@ -248,6 +367,9 @@ bool load(Module *m)
         return fail("invalid dynamic entries");
     bool terminated = false;
     uint64_t init_array = 0, init_bytes = 0, fini_array = 0, fini_bytes = 0;
+    // A sanity bound on the constructor and destructor arrays, not a budget:
+    // Azahar's core has 2,476 constructors (its C++ static objects).
+    constexpr uint64_t max_initializers = 65536;
     bool have_fini_array = false, have_fini_size = false;
     bool have_init_array = false, have_init_size = false;
     for (size_t i = 0; i < dynamic->p_filesz / sizeof(Elf64_Dyn); ++i)
@@ -295,7 +417,7 @@ bool load(Module *m)
             have_fini_size = true;
             fini_bytes = value;
         }
-        // Legacy init/fini functions, TLS and C++ unwinding remain unsupported.
+        // Legacy init/fini functions and TLS remain unsupported.
         if (tag == DT_TEXTREL || ((tag == DT_INIT || tag == DT_FINI || tag == DT_PREINIT_ARRAYSZ ||
                                    tag == DT_RELSZ || tag == 35 /* DT_RELRSZ */) &&
                                   value))
@@ -305,40 +427,49 @@ bool load(Module *m)
         return fail("unterminated dynamic entries");
     if (init_bytes &&
         (!have_init_array || init_array % sizeof(uint64_t) || init_bytes % sizeof(uint64_t) ||
-         init_bytes > 1024 * sizeof(uint64_t) || !mapped(m, init_array, init_bytes, PF_R)))
+         init_bytes > max_initializers * sizeof(uint64_t) ||
+         !mapped(m, init_array, init_bytes, PF_R)))
         return fail("invalid initializer array range/size");
     if (have_init_array && !have_init_size)
         return fail("initializer array has no size");
     if (fini_bytes &&
         (!have_fini_array || fini_array % sizeof(uint64_t) || fini_bytes % sizeof(uint64_t) ||
-         fini_bytes > 1024 * sizeof(uint64_t) || !mapped(m, fini_array, fini_bytes, PF_R)))
+         fini_bytes > max_initializers * sizeof(uint64_t) ||
+         !mapped(m, fini_array, fini_bytes, PF_R)))
         return fail("invalid finalizer array range/size");
     if (have_fini_array && !have_fini_size)
         return fail("finalizer array has no size");
-    // Reserve aligned memory without ever making a page writable and executable.
-    void *allocation =
-        mmap(nullptr, m->span + page, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
-    if (allocation == MAP_FAILED)
-        return fail("core mmap failed errno=%d", errno);
-    const uintptr_t address = reinterpret_cast<uintptr_t>(allocation);
-    const uintptr_t aligned = (address + page - 1) & ~(page - 1);
-    const size_t prefix = aligned - address;
-    const size_t suffix = page - prefix;
-    if (prefix)
-        munmap(allocation, prefix);
-    if (suffix)
-        munmap(reinterpret_cast<void *>(aligned + m->span), suffix);
-    m->base = reinterpret_cast<unsigned char *>(aligned);
+    // Reserve the image, read-write and not executable until its code is in place.
+    if (!image_reserve(m->image, m->span))
+        return fail("core image allocation failed: bytes=%zu errno=%d", m->span, errno);
+    m->base = m->image.base;
     for (size_t i = 0; i < m->ph_count; ++i)
         if (m->ph[i].p_type == PT_LOAD && m->ph[i].p_filesz)
             std::memcpy(m->base + m->ph[i].p_vaddr, m->file + m->ph[i].p_offset, m->ph[i].p_filesz);
-    // Resolve every import before publishing the handle or executing code.
+    // Resolve every import before publishing the handle or executing code, and
+    // name every import the console does not provide, not only the first.
+    char missing[sizeof(error_text) - 64] = "";
+    size_t missing_count = 0, missing_used = 0;
     for (size_t i = 1; i < m->symbol_count; ++i)
     {
+        const auto &s = m->symbols[i];
+        const char *name = string_at(m, s.st_name);
+        if (name && s.st_shndx == SHN_UNDEF && ELF64_ST_BIND(s.st_info) != STB_WEAK &&
+            !ps5_core_import(name))
+        {
+            const int wrote = std::snprintf(missing + missing_used, sizeof(missing) - missing_used,
+                                            "%s%s", missing_count++ ? ", " : "", name);
+            if (wrote > 0)
+                missing_used = std::min(sizeof(missing) - 1, missing_used + size_t(wrote));
+            continue;
+        }
         uintptr_t unused;
         if (!symbol_address(m, i, unused))
             return false;
     }
+    if (missing_count)
+        return fail("unresolved native runtime import%s (%zu): %s", missing_count == 1 ? "" : "s",
+                    missing_count, missing);
     size_t relocations = 0;
     for (size_t i = 0; i < eh->e_shnum; ++i)
     {
@@ -402,19 +533,35 @@ bool load(Module *m)
         if (finalizers[i] < base || !mapped(m, finalizers[i] - base, 1, PF_X))
             return fail("finalizer callback outside executable segment");
     }
-    if (mprotect(m->base, m->span, PROT_NONE))
-        return fail("core protect reserve failed errno=%d", errno);
     for (size_t i = 0; i < m->ph_count; ++i)
     {
         const auto &p = m->ph[i];
         if (p.p_type != PT_LOAD || !p.p_memsz)
             continue;
-        int protection = ((p.p_flags & PF_R) ? PROT_READ : 0) |
-                         ((p.p_flags & PF_W) ? PROT_WRITE : 0) |
-                         ((p.p_flags & PF_X) ? PROT_EXEC : 0);
         const size_t length = (p.p_memsz + page - 1) & ~(page - 1);
-        if (mprotect(m->base + p.p_vaddr, length, protection))
-            return fail("core segment mprotect flags=%u failed errno=%d", p.p_flags, errno);
+        if (!image_protect(m->image, p.p_vaddr, length, (p.p_flags & PF_X) != 0))
+            return fail("core segment protection flags=%u failed errno=%d", p.p_flags, errno);
+    }
+    // C++ exceptions thrown inside the core (MAME reports a missing ROM by
+    // throwing) unwind through its .eh_frame, registered before any code runs.
+    if (eh->e_shstrndx < eh->e_shnum)
+    {
+        const auto &names = sections[eh->e_shstrndx];
+        if (!range(names.sh_offset, names.sh_size, m->file_size))
+            return fail("invalid section name table");
+        const char *const name_table = reinterpret_cast<const char *>(m->file + names.sh_offset);
+        for (size_t i = 0; i < eh->e_shnum; ++i)
+        {
+            const auto &s = sections[i];
+            if (!(s.sh_flags & SHF_ALLOC) || !s.sh_size || s.sh_name >= names.sh_size ||
+                !std::memchr(name_table + s.sh_name, 0, names.sh_size - s.sh_name) ||
+                std::strcmp(name_table + s.sh_name, ".eh_frame"))
+                continue;
+            if (m->eh_frame || !mapped(m, s.sh_addr, s.sh_size, PF_R))
+                return fail("invalid unwind table");
+            m->eh_frame = reinterpret_cast<uintptr_t>(m->base) + s.sh_addr;
+            frames_register(m->eh_frame);
+        }
     }
     for (size_t i = 0; i < initializer_count; ++i)
         reinterpret_cast<void (*)()>(initializers[i])();

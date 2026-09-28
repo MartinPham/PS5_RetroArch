@@ -10,13 +10,10 @@
  * are defined in the core so the reference resolves where it is made. The
  * pattern is the Dolphin port's (tooling/dolphin/ps5-libc-shims.cpp).
  *
- * A real implementation, because the core depends on the answer:
+ * atexit, which glslang calls for its finalizer, comes from the destructor
+ * registry every core links (tooling/native/core_cxx_runtime.cpp).
  *
- *   atexit        glslang registers its finalizer. The process-wide list would
- *                 call into the core after RetroArch unmapped it, so it joins
- *                 this core's own destructor registry
- *                 (tooling/native/core_cxx_runtime.cpp), which the native loader
- *                 runs before unmapping.
+ * A real implementation, because the core depends on the answer:
  *
  *   clock_nanosleep
  *                 Granite's timer (paraLLEl-GS) sleeps to an absolute deadline.
@@ -37,25 +34,6 @@
 
 extern "C"
 {
-    int __cxa_atexit(void (*callback)(void *), void *argument, void *dso);
-    extern void *__dso_handle;
-}
-
-namespace
-{
-void run_atexit(void *function)
-{
-    reinterpret_cast<void (*)()>(function)();
-}
-} // namespace
-
-extern "C"
-{
-    int atexit(void (*function)())
-    {
-        return __cxa_atexit(run_atexit, reinterpret_cast<void *>(function), &__dso_handle);
-    }
-
     int clock_nanosleep(clockid_t clock, int flags, const struct timespec *request,
                         struct timespec *remaining)
     {
