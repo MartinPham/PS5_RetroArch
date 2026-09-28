@@ -4027,3 +4027,27 @@ redeployed (its record's five changed files dropped first), a capture run showed
 build fb60ec12 presenting at 119.88 Hz, the capture files and RADV's shader
 cache folder removed, and my configuration, core options, history playlist and
 trace compared with the copies taken before (the history playlist restored).
+
+## 2026-09-28 — The release battery on RADV
+
+The checks the release candidate passed on ps5vk (2026-09-26), run on this
+branch's RADV title (15ea4b2's PPSSPP fix included). My configuration, saves
+and history were kept out of the way: `--appendconfig` with a test file that
+turns history off, sends saves and states to a test folder and does not save
+the configuration on exit. The test folder and files were removed afterwards.
+
+- **Every core with a game** -- FCEUmm (Super Mario Bros.), snes9x (A Link to
+  the Past), mGBA (Mario Pinball Land), Genesis Plus GX (Sonic), FBNeo (Metal
+  Slug), PPSSPP (Ghost of Sparta), Dolphin (Wind Waker), LRPS2 (God of War
+  II's demo), threaded video on for FCEUmm, mGBA, PPSSPP and LRPS2. A pad
+  script opened and closed the menu twice, closed the content through the
+  Quick Menu, then loaded the same core and content again (RELOAD). No crash,
+  no fatal signal. Each run initialised the Vulkan driver three times (start,
+  close, reload), and the windows after the reload were full, except PPSSPP's
+  third (99.2%) and Dolphin's second (99.2%), both with the shader cache empty.
+- **PPSSPP for ten minutes** with threaded video, the menu opened and closed
+  every 20 s (25 times): no crash, every audio window 98-100%, as on ps5vk.
+
+The installed title was put back as before: main's build fb60ec12 presenting
+at 119.88 Hz, and my configuration, core options, history and trace identical
+to the copies taken first.
