@@ -45,9 +45,9 @@ was the last on ps5vk, the project's first driver.
 | Native audio | ✅ `audio_ps5` stereo PCM output, audible channel test and buffering diagnostics |
 | Filesystem and configuration | ✅ Directory browsing, configuration loading/saving and FTP-writable application folders |
 | Core loading | ✅ Native shared-core loader, official `.info` discovery and recovery from rejected loads |
-| Content loading | ✅ Tested games and archives with the cores below |
+| Content loading | ✅ Tested games and archives with the cores below. Load Content opens two roots: **INTERNAL**, the title's folder, and **EXTERNAL**, the console's `/mnt`, where USB drives and extended storage mount. The title's sandbox hides `/mnt` for now, so EXTERNAL is empty |
 | Colour and menu transitions | ✅ Corrected pixel uploads; Quick Menu/Close Content/next-game transitions I verified on the console |
-| Hardware-rendered cores | ✅ PPSSPP, Dolphin and LRPS2 render on RADV (their Vulkan renderers, with JITs), tested at up to 10× internal resolution; PPSSPP's MSAA works |
+| Hardware-rendered cores | ✅ PPSSPP, Dolphin, LRPS2, Beetle PSX HW, Mupen64Plus-Next (ParaLLEl-RDP) and Azahar render on RADV through their Vulkan renderers, with JITs where they have them, at up to 18× internal resolution; PPSSPP's MSAA works |
 | Shader cache | ✅ RADV keeps compiled pipelines in `radv-shader-cache/`: a game's next start reads them back instead of compiling |
 | Save states and fast-forward | ✅ Save/load states (including `--entryslot`) and fast-forward, tested with PPSSPP and mGBA |
 | 120 Hz output | ✅ 120 Hz by default where the display offers it; the refresh is measured, and a display that stays at 60 Hz gets 60 Hz |
@@ -63,10 +63,15 @@ test coverage and known exceptions.
 
 ## Available cores
 
-The title build includes these cores and their official metadata. Five of them
+The title build includes these cores and their official metadata. FCEUmm,
+mGBA, Snes9x, FBNeo, Genesis Plus GX, Beetle Saturn, VICE, MAME and DeSmuME
 **render emulated games in software**; RetroArch uploads their frames and presents
-them through Vulkan. PPSSPP, Dolphin and LRPS2 **render on the GPU** through
-RADV, with their Vulkan renderers and their JITs.
+them through Vulkan. PPSSPP, Dolphin, LRPS2, Beetle PSX HW, Mupen64Plus-Next and
+Azahar **render on the GPU** through RADV, with their Vulkan renderers.
+
+Each core's PS5 defaults are its highest graphical settings that hold full speed
+in the games I tested: the most internal resolution the core offers, unless a
+lower one is the most that keeps full speed (DeSmuME).
 
 | Core | Systems covered by the core | Console verification in this port |
 | --- | --- | --- |
@@ -78,6 +83,13 @@ RADV, with their Vulkan renderers and their JITs.
 | [PPSSPP](https://github.com/hrydgard/ppsspp) v1.20.4 | PlayStation Portable | ✅ God of War: Ghost of Sparta and Yu-Gi-Oh! GX Tag Force at 10× internal resolution (4800×2720), 16× anisotropy: correct picture, full speed at 120 Hz, save states, fast-forward, and closing and reopening games. MSAA renders on RADV (it needs render pass 2, which ps5vk lacked). |
 | [Dolphin](https://github.com/libretro/dolphin) 2609 | GameCube, Wii | ✅ Wind Waker (an hour), Resident Evil 4 (30 minutes), Super Smash Bros. Melee, Mario Kart Wii and Rogue Leader, with the JIT and fast memory, save states and closing and reopening games. Rogue Leader's attract sequence still dips to 72–85% (see the release notes). |
 | [LRPS2](https://github.com/libretro/LRPS2) (PCSX2) | PlayStation 2 | ✅ The God of War II and Final Fantasy X demos and GTA San Andreas at 6× internal resolution on the Vulkan hardware renderer, full speed, with multi-threaded VU1 and save states. Needs your own BIOS in `system/pcsx2/bios/`. |
+| [Beetle PSX HW](https://github.com/libretro/beetle-psx-libretro) | PlayStation | ✅ Crash Bandicoot at 16× internal resolution on the Vulkan renderer, 32-bit colour, PGXP (no wobbling polygons), full speed, and closing and reopening the game. The disc image is read into memory at load. It runs with its built-in OpenBIOS; your own BIOS (`scph5501.bin` and the others its metadata lists) in `system/` is used when present. |
+| [Mupen64Plus-Next](https://github.com/libretro/mupen64plus-libretro-nx) | Nintendo 64 | ✅ Mario Kart 64 with ParaLLEl-RDP at 8× upscaling and ParaLLEl-RSP, both JITs on, full speed after boot, and closing and reopening the game. |
+| [Beetle Saturn](https://github.com/libretro/beetle-saturn-libretro) | Sega Saturn | ⚠️ Loads, then needs your own BIOS in `system/`: `mpr-17933.bin` (US/EU) or `sega_101.bin` (JP). Without it the game refuses to load and the menu stays usable. Gameplay not yet tested. |
+| [VICE](https://github.com/libretro/vice-libretro) x64sc | Commodore 64 | ✅ A `.d64` disk game at full speed, and closing and reopening it. |
+| [MAME](https://github.com/libretro/mame) 0.289 | Arcade | ✅ Metal Slug 3 from a 0.289 non-merged set, BIOS in the same folder: full speed, and closing and reopening it. Raster games render at their native size and are scaled on the GPU. Vector games are drawn at 4K by MAME's alternate renderer (not yet tested on the console). Sets must match 0.289. |
+| [DeSmuME](https://github.com/libretro/desmume) | Nintendo DS | ✅ Pokémon Diamond at 5× (1280×960) with the JIT and eight rasterizer threads, full speed, and closing and reopening it. 6× measured 93–95%. |
+| [Azahar](https://github.com/azahar-emu/azahar) | Nintendo 3DS | ✅ Mario & Luigi: Superstar Saga + Bowser's Minions at 18× internal resolution (the most Azahar offers) on Vulkan, with asynchronous shader compilation and the JIT, full speed after boot, and closing and reopening it. Decrypted games only. |
 
 Use **FBNeo for Sega System 16/32 arcade sets**, rather than Genesis Plus GX.
 FBNeo needs compatible arcade sets and receives its ZIP/7z archives intact.
@@ -166,9 +178,14 @@ in this port, even if upstream RetroArch already offers the feature.**
 | ❌ | Beetle PCE — PC Engine / TurboGrafx-16, SuperGrafx and CD; next proposed addition |
 | ❌ | Stella — Atari 2600; candidate |
 | ❌ | PicoDrive — add Sega 32X coverage; candidate |
-| ❌ | MAME — expand arcade coverage beyond FBNeo |
-| ❌ | Beetle PSX HW — PlayStation, targeting the Vulkan renderer |
-| ❌ | Nintendo 64 — evaluate Mupen64Plus-Next / ParaLLEl-N64 with ParaLLEl-RDP |
+| ✅ | MAME 0.289 — arcade; tested games only |
+| ✅ | Beetle PSX HW — PlayStation, Vulkan renderer at 16× |
+| ✅ | Mupen64Plus-Next — Nintendo 64, ParaLLEl-RDP at 8× |
+| 🚧 | Beetle Saturn — Sega Saturn; needs a gameplay test with a BIOS |
+| ✅ | VICE x64sc — Commodore 64 |
+| ✅ | DeSmuME — Nintendo DS at 5× |
+| ✅ | Azahar — Nintendo 3DS, Vulkan at 18× |
+| ❌ | EXTERNAL storage (USB, extended storage) readable from inside the title's sandbox |
 | ✅ | PPSSPP — PSP, Vulkan rendering and JIT; tested games only |
 | ✅ | PPSSPP MSAA — render pass 2 and depth/stencil resolve, on RADV |
 | ✅ | Dolphin — GameCube and Wii, Vulkan rendering and JIT; tested games, long play and the enhancement profiles |
@@ -198,6 +215,12 @@ workspace/
 └── PS5_PayloadSDK/   # My payload SDK fork and its platform layer, at a pinned revision
 ```
 
+The cores that needed changes for the console build from my forks of them
+(PS5_LRPS2, PS5_BeetlePSX, PS5_Mupen64Plus, PS5_BeetleSaturn, PS5_VICE,
+PS5_MAME, PS5_DeSmuME, PS5_Azahar with PS5_Dynarmic), each pinned by revision in
+its build script. The script uses the sibling checkout when there is one, and
+`github.com/mihawk-99/<fork>` otherwise.
+
 The title build consumes PS5_Vulkan's RADV release archive
 (`tools/build-radv.sh release` there, built from PS5_Mesa at the revision it
 pins) and links it with that project's `tools/radv-link.sh`; it does not build
@@ -220,7 +243,7 @@ bash tools/verify.sh
 
 The five gates are **format → unit → build → integration → evidence**. The build
 pins RetroArch 1.22.2, fetches core sources/metadata with checked hashes, builds the
-frontend and all eight cores, and stages the native title in `dist/PPSA99169/`.
+frontend and all fifteen cores, and stages the native title in `dist/PPSA99169/`.
 The initial dependency/source fetch requires network access.
 
 For an already configured checkout:
@@ -229,8 +252,11 @@ For an already configured checkout:
 bash tools/build-title.sh     # Build/stage the frontend and all shipped cores
 make genesis-plus-gx         # Build and ABI-check one core only
 # Other core targets: fceumm, mgba, snes9x, fbneo
-bash tools/build-ppsspp.sh   # The hardware cores have scripts of their own:
-                             # build-ppsspp.sh, build-dolphin.sh, build-lrps2.sh
+bash tools/build-ppsspp.sh   # The larger cores have scripts of their own:
+                             # build-ppsspp.sh, build-dolphin.sh, build-lrps2.sh,
+                             # build-beetle-psx.sh, build-mupen64plus.sh,
+                             # build-beetle-saturn.sh, build-vice.sh,
+                             # build-mame.sh, build-desmume.sh, build-azahar.sh
 ```
 
 When adding or updating a core, rebuild the title too: the frontend's native

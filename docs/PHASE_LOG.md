@@ -4104,3 +4104,67 @@ identical (23,105,064 bytes, no byte differs). All five host gates pass on
 in the PS5_RetroArch-radv checkout, and its LRPS2 core carries that path in
 1,427 strings where this build carries PS5_RetroArch's. The installed title
 is unchanged.
+
+## 2026-09-28 — Seven more systems: PS1, N64, Saturn, C64, MAME, DS and 3DS
+
+One core a system, each chosen for its fit with RADV and for how far it
+upscales, built from my fork of it and pinned by revision (`tools/core-fork.sh`
+and a `tools/build-<core>.sh` each). The defaults are the most each core offers
+that holds full speed in the games I tested:
+
+| System | Core | PS5 defaults | On the console |
+| --- | --- | --- | --- |
+| PlayStation | Beetle PSX HW | Vulkan, 16×, 32-bit colour, no dithering, PGXP, the disc precached | Crash Bandicoot, full speed |
+| Nintendo 64 | Mupen64Plus-Next | ParaLLEl-RDP at 8×, ParaLLEl-RSP, both JITs | Mario Kart 64, full speed after boot |
+| Saturn | Beetle Saturn | as upstream | loads, then needs a BIOS (`mpr-17933.bin` or `sega_101.bin`) |
+| Commodore 64 | VICE x64sc | as upstream | a `.d64` game, full speed |
+| Arcade | MAME 0.289 | native renderer for raster screens, 4K alternate renderer for vector ones | Metal Slug 3, full speed |
+| Nintendo DS | DeSmuME | JIT, 5× (1280×960), eight rasterizer threads | Pokémon Diamond, full speed; 6× 93–95%, 8× 60% |
+| Nintendo 3DS | Azahar | Vulkan, 18×, asynchronous shaders, JIT | Mario & Luigi: Superstar Saga + Bowser's Minions, full speed after boot |
+
+The 16× Beetle renderer allows no MSAA, so that stays 1×. Reading the disc in
+synchronous 2 KiB pieces cost up to 4%, so the image is now read into memory at
+load. The JITs (ParaLLEl-RSP, new_dynarec, DeSmuME's, dynarmic's code cache)
+take their code memory from `ps5_exec_allocate`. They had used the title's
+flexible pool, which a JIT's cache exhausted.
+
+The loader grew to fit the larger cores. MAME's image is 413 MB, so a core's
+file and image now come from direct memory, up to 1 GiB each. Azahar has 2,476
+initializers (the cap is now 65,536). A load that misses imports lists every
+one, not only the first. Each image's `.eh_frame` is registered with the
+title's unwinder, because MAME throws. The platform layer gained the libc
+functions the cores import: `getcwd` (libc's calls a function only
+libkernel_sys has), `tmpfile`, `mkstemp`, `strcasestr`, `getnameinfo` and the
+rest. The title's aligned `operator new` now comes from the core heap.
+
+The loader's move to direct memory broke unloading: a reload faulted in every
+core. Unlike an anonymous mapping, direct memory is not zeroed. A reloaded
+core's `.bss`, the part of the image the file does not fill, held its
+predecessor's bytes, and a static mutex that should have been zero was not.
+Moving each image to a new address did not help. Zeroing the image when it is
+reserved fixed it.
+
+Metal Slug 3 stuttered at 69%: MAME's alternate renderer scales a raster game's
+bitmap on the CPU, and at 4K that took a third of the frame. The fork's new
+"Vector Screens Only" mode, the PS5 default, uses the alternate renderer,
+cropped at 3840×2160, only for a machine with a vector screen. Raster games keep
+their native size and RetroArch scales them on the GPU. Metal Slug 3 now plays
+at 99.4% (the rest is the window's share of boot). I had no vector game to test
+the 4K path with.
+
+The battery (a game, the menu twice, Close Content, the same game again) passes
+with no crash for all seven, with full speed after the reload. Saturn stops at
+its missing BIOS and leaves the menu usable.
+
+**Load Content's two roots (patch 0097).** Load Content, and the file browser's
+top level, list only INTERNAL (`/app0`, the title's folder) and EXTERNAL
+(`/mnt`). Parent Directory from either goes back to the two, not to the
+sandbox's `/`. A pad script went Load Content → INTERNAL → Parent Directory →
+INTERNAL → content → Nintendo DS → the game, and DeSmuME loaded it. EXTERNAL is
+empty for now: inside the title, `/mnt` is ENOENT, because the app sandbox hides
+the console's mounts. Reading USB and extended storage needs the title
+jailbroken, for example through etaHEN's jailbreak call (127.0.0.1:9028, with
+etaHEN's Legacy CMD server enabled), which I have not used.
+
+The installed title is this build (`4be9e814`). It launched and passed every
+run above.

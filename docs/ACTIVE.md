@@ -22,6 +22,18 @@ compiles pipelines on six threads at once; R95 writes tiled uploads a run at a
 time. Rogue Leader still dips (attract 71-87%, gameplay 93-96%): Dolphin's MMU
 emulation and its threads waiting on each other, not the driver.
 
+**Seven more systems (2026-09-28, docs/PHASE_LOG.md):** Beetle PSX HW (16x),
+Mupen64Plus-Next (ParaLLEl-RDP 8x), Beetle Saturn (needs a BIOS), VICE x64sc,
+MAME 0.289 (vector screens at 4K, raster native), DeSmuME (5x) and Azahar (18x),
+each from my fork at a pinned revision. They all pass the battery, and every
+tested game runs at full speed. Load Content lists INTERNAL and EXTERNAL
+(patch 0097). The installed title is build `4be9e814`.
+
+Still open for them: EXTERNAL (`/mnt`) is empty inside the title's sandbox
+(USB and extended storage need the title jailbroken; etaHEN's jailbreak call is
+one way), Saturn gameplay with a BIOS, a vector game at 4K in MAME, and
+publishing the new forks on github.com/mihawk-99.
+
 **Open:**
 
 1. Dolphin's first start of a game on RADV, from an empty shader cache: Wind
