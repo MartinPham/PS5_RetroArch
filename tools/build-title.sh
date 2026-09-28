@@ -126,21 +126,24 @@ cp -f -- "$root/build/ra-conf/config.h" "$root/build/config.h"
 # console is their runner title's: link the driver and call its entry point as an
 # ordinary symbol.
 #
-# Their released set, exactly as tools/build.sh links it for a driver-enabled title:
+# The driver is RADV, Mesa's Vulkan driver, from ../PS5_Vulkan's port (its route
+# B, docs/VULKAN_1_4_PLAN.md there): the release archive its tools/build-radv.sh
+# release builds, or the one RADV_ARCHIVE names, linked by that project's
+# tools/radv-link.sh, whose platform bindings this title takes but for the heap:
+# the title's allocator (src/memory_ps5.cpp) stays, as the cores' imports are
+# bound to its routes. src/locale_shims.c steps aside for the platform layer's
+# locale functions. Releases since v0.5.0-alpha.5 ship it.
+#
+# PS5_VULKAN_DRIVER=ps5vk links ps5vk, the project's first driver, which the
+# releases up to v0.4.0-alpha.4 shipped - its released set, exactly as
+# tools/build.sh links it for a driver-enabled title:
 #   libps5vk.ps5.a        the driver            (build/driver/ps5/)
 #   libvk_runtime.ps5.a   Mesa's Vulkan runtime (.deps/native/vulkan-runtime/lib/)
 #   libpsbc_driver.ps5.a  the shader compiler   (build/driver/ps5/)
 #   libpsbc_support.ps5.a the package writer    (.deps/native/psbc/lib/)
 # PS5_VULKAN_DIR overrides the sibling's root, so a release kept elsewhere works.
 vulkan_dir="${PS5_VULKAN_DIR:-$root/../PS5_Vulkan}"
-# PS5_VULKAN_DRIVER=radv links ../PS5_Vulkan's RADV port instead (its route B,
-# docs/VULKAN_1_4_PLAN.md there): the release archive its tools/build-radv.sh
-# release builds, or the one RADV_ARCHIVE names, linked by that project's
-# tools/radv-link.sh, whose platform bindings this title takes but for
-# the heap: the title's allocator (src/memory_ps5.cpp) stays, as the cores'
-# imports are bound to its routes. src/locale_shims.c steps aside for the
-# platform layer's locale functions.
-vulkan_driver=${PS5_VULKAN_DRIVER:-ps5vk}
+vulkan_driver=${PS5_VULKAN_DRIVER:-radv}
 case $vulkan_driver in
     ps5vk | radv) ;;
     *) echo "PS5_VULKAN_DRIVER must be ps5vk or radv" >&2; exit 2 ;;
@@ -326,22 +329,16 @@ if [[ -d $root/build/cores/stage/system/dolphin-emu ]]; then
         "$(find "$dist/system/dolphin-emu" -type f | wc -l)" "$dist"
 fi
 
-# The Vulkan driver, beside the title, when it exists.
+# ps5vk's shared object, beside a ps5vk title, when it exists.
 #
-# RetroArch does not link Vulkan: it dlopens "libvulkan.so.1" at run time
-# (gfx/common/vulkan_common.c), so the driver has to be a shared object in the
-# title's own folder. That object is ../PS5_Vulkan's released artifact - this
-# project consumes released drivers and never builds them (docs/PLAN.md, "What is
-# deliberately not planned") - and its own build puts it at
-# build/driver/ps5/libvulkan.so.1.
-#
-# It is copied only when it is there, and its absence is reported rather than
-# fatal: the driver is a separate project's release, and a title built without it
-# still runs (the video driver's compiled default is Vulkan, so it will report a
-# failed load in /app0/retroarch.log rather than exit silently). PS5_VULKAN_ICD
-# overrides the path for a release kept somewhere else.
+# Both drivers are linked into eboot.bin (above), and nothing loads this file: a
+# title cannot dlopen a driver. ps5vk builds keep staging it as the releases up
+# to v0.4.0-alpha.4 did; a RADV build ships without it, since it would be ps5vk's
+# code in a RADV title. PS5_VULKAN_ICD overrides the path.
 icd="${PS5_VULKAN_ICD:-$root/../PS5_Vulkan/build/driver/ps5/libvulkan.so.1}"
-if [[ -f $icd ]]; then
+if [[ $vulkan_driver == radv ]]; then
+    echo "==> [title] RADV is linked into eboot.bin; no driver library is staged"
+elif [[ -f $icd ]]; then
     cp -a -- "$icd" "$dist/libvulkan.so.1"
     # Beside libc.prx as well, which is the one module path the console's loader
     # is known to look at: libc.prx is resolved from sce_module/ by every title

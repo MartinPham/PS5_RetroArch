@@ -1,7 +1,8 @@
 # PS5 RetroArch 🎮
 
-**Native RetroArch for jailbroken PlayStation 5 consoles, with GPU presentation
-through [PS5_Vulkan](https://github.com/mihawk-99/PS5_Vulkan).**
+**Native RetroArch for jailbroken PlayStation 5 consoles, rendering through
+[PS5_Vulkan](https://github.com/mihawk-99/PS5_Vulkan)'s port of Mesa's RADV
+Vulkan driver.**
 
 Maintained by [Mihawk](https://github.com/mihawk-99). Based on
 [RetroArch / libretro](https://github.com/libretro/RetroArch), with a native PS5
@@ -15,7 +16,9 @@ configuration persistence and content browsing have been verified on a console.
 This is an active development project; the tested paths below do not imply
 complete core compatibility or Vulkan conformance.
 
-**Latest release: v0.4.0-alpha.4** — see the [release notes](docs/releases/v0.4.0-alpha.4.md).
+**Latest release: v0.5.0-alpha.5** — see the [release notes](docs/releases/v0.5.0-alpha.5.md).
+It is the first release on RADV; [v0.4.0-alpha.4](docs/releases/v0.4.0-alpha.4.md)
+was the last on ps5vk, the project's first driver.
 
 ## Table of contents
 
@@ -35,7 +38,7 @@ complete core compatibility or Vulkan conformance.
 | Feature | Status |
 | --- | --- |
 | Native title startup and Quit | ✅ Working, including splash dismissal and clean native exit |
-| Vulkan video output | ✅ Menu and software-core frames presented through statically linked `libps5vk` |
+| Vulkan video output | ✅ Menu and software-core frames presented through RADV, Mesa's Vulkan driver, linked into the title (PS5_Vulkan's port, reporting Vulkan 1.4). ps5vk remains a build option |
 | XMB | ✅ Default menu, with icons, fonts and background rendering |
 | RGUI | ✅ Alternative menu |
 | Native controller input | ✅ Buttons, left-stick menu navigation and button/axis binding capture |
@@ -44,16 +47,17 @@ complete core compatibility or Vulkan conformance.
 | Core loading | ✅ Native shared-core loader, official `.info` discovery and recovery from rejected loads |
 | Content loading | ✅ Tested games and archives with the cores below |
 | Colour and menu transitions | ✅ Corrected pixel uploads; Quick Menu/Close Content/next-game transitions I verified on the console |
-| Hardware-rendered cores | ✅ PPSSPP, Dolphin and LRPS2 render through PS5_Vulkan (their Vulkan renderers, with JITs), tested at up to 10× internal resolution |
+| Hardware-rendered cores | ✅ PPSSPP, Dolphin and LRPS2 render on RADV (their Vulkan renderers, with JITs), tested at up to 10× internal resolution; PPSSPP's MSAA works |
+| Shader cache | ✅ RADV keeps compiled pipelines in `radv-shader-cache/`: a game's next start reads them back instead of compiling |
 | Save states and fast-forward | ✅ Save/load states (including `--entryslot`) and fast-forward, tested with PPSSPP and mGBA |
 | 120 Hz output | ✅ 120 Hz by default where the display offers it; the refresh is measured, and a display that stays at 60 Hz gets 60 Hz |
-| Stability | ✅ Every core through boot, menu and Quick Menu actions, with and without Threaded Video, and a 10-minute PPSSPP soak: no crash ([release checks](docs/PHASE_LOG.md)) |
+| Stability | ✅ On RADV: every core with a game through boot, the menu, Close Content and a reload, with and without Threaded Video, and a 10-minute PPSSPP soak with 25 menu toggles: no crash ([release checks](docs/PHASE_LOG.md)) |
 | CPU video fallback | ✅ `video_ps5` remains registered and selectable |
 | Development diagnostics | ✅ `retroarch.log`, startup/GPU trace, kernel captures and optional buffered frame timing |
 
-The latest verified gameplay build recorded zero Vulkan driver refusals, zero
-GPU API failure records, zero kernel fatal signals and zero audio backend errors.
-These results apply to the captured tests, not every possible workload. See
+The Alpha 5 checks recorded no crash and no kernel fatal signal, and full-speed
+audio windows once each game had booted. These results apply to the captured
+tests, not every possible workload. See
 [active state](docs/ACTIVE.md) and [committed evidence](evidence/) for exact builds,
 test coverage and known exceptions.
 
@@ -62,7 +66,7 @@ test coverage and known exceptions.
 The title build includes these cores and their official metadata. Five of them
 **render emulated games in software**; RetroArch uploads their frames and presents
 them through Vulkan. PPSSPP, Dolphin and LRPS2 **render on the GPU** through
-PS5_Vulkan, with their Vulkan renderers and their JITs.
+RADV, with their Vulkan renderers and their JITs.
 
 | Core | Systems covered by the core | Console verification in this port |
 | --- | --- | --- |
@@ -71,7 +75,7 @@ PS5_Vulkan, with their Vulkan renderers and their JITs.
 | [Snes9x](https://github.com/libretro/snes9x) | SNES / Super Famicom | ✅ Tested gameplay, colours, audio/input and menu transitions; not every special chip or video mode. [Evidence](evidence/snes9x-native/) |
 | [FinalBurn Neo](https://github.com/libretro/FBNeo) | Supported arcade boards, including Neo Geo and Sega System 16/32 | ✅ Tested arcade games using both native 32-bit and converted 16-bit output; not every board or ROM set. [Evidence](evidence/fbneo-native/) |
 | [Genesis Plus GX](https://github.com/libretro/Genesis-Plus-GX) | Mega Drive / Genesis, Master System, Game Gear, SG-1000, Sega CD | ✅ Genesis gameplay and clean transitions, which I confirmed on the console. Other Sega systems and disc/BIOS paths still need separate acceptance. [Evidence](evidence/genesis-plus-gx-native/) |
-| [PPSSPP](https://github.com/hrydgard/ppsspp) v1.20.4 | PlayStation Portable | ✅ God of War: Ghost of Sparta and Yu-Gi-Oh! GX Tag Force at 10× internal resolution (4800×2720), 16× anisotropy: correct picture, full speed at 120 Hz, save states, fast-forward, and closing and reopening games. MSAA is not yet available (see below). |
+| [PPSSPP](https://github.com/hrydgard/ppsspp) v1.20.4 | PlayStation Portable | ✅ God of War: Ghost of Sparta and Yu-Gi-Oh! GX Tag Force at 10× internal resolution (4800×2720), 16× anisotropy: correct picture, full speed at 120 Hz, save states, fast-forward, and closing and reopening games. MSAA renders on RADV (it needs render pass 2, which ps5vk lacked). |
 | [Dolphin](https://github.com/libretro/dolphin) 2609 | GameCube, Wii | ✅ Wind Waker (an hour), Resident Evil 4 (30 minutes), Super Smash Bros. Melee, Mario Kart Wii and Rogue Leader, with the JIT and fast memory, save states and closing and reopening games. Rogue Leader's attract sequence still dips to 72–85% (see the release notes). |
 | [LRPS2](https://github.com/libretro/LRPS2) (PCSX2) | PlayStation 2 | ✅ The God of War II and Final Fantasy X demos and GTA San Andreas at 6× internal resolution on the Vulkan hardware renderer, full speed, with multi-threaded VU1 and save states. Needs your own BIOS in `system/pcsx2/bios/`. |
 
@@ -87,20 +91,24 @@ compatible. No games or BIOS files are bundled.
 
 ```text
 Software core → video callback → RetroArch Vulkan video driver
-                                → statically linked libps5vk → PS5 display
+                                → RADV, linked into the title → PS5 display
 XMB / RGUI ──────────────────────┘
-PPSSPP, Dolphin, LRPS2 (hardware cores) → Vulkan through RetroArch's HW context → libps5vk
+PPSSPP, Dolphin, LRPS2 (hardware cores) → Vulkan through RetroArch's HW context → RADV
 ```
 
 [PS5_Vulkan](https://github.com/mihawk-99/PS5_Vulkan), which I also maintain,
-is the separate GPU-driver project used here. RetroArch is already rendering
-through it; completing the driver's Vulkan 1.0 coverage is not a prerequisite
-for the working paths demonstrated by this application. Driver conformance and
-feature coverage remain that project's own milestones.
+is the separate GPU-driver project used here. Since v0.5.0-alpha.5 the title
+links its port of RADV: Mesa's Vulkan driver and ACO compiler, unchanged but
+where the console differs, over a PS5 winsys, built from my Mesa fork
+[PS5_Mesa](https://github.com/mihawk-99/PS5_Mesa). It reports Vulkan 1.4, and
+its conformance is that project's milestone: the full Khronos CTS runs on the
+console. Up to v0.4.0-alpha.4 the title linked ps5vk, the project's first
+driver, which `PS5_VULKAN_DRIVER=ps5vk` still builds.
 
-The driver is **linked into the title**. Updating a driver checkout or replacing
-a loose `libvulkan.so.1` does not update the linked code: rebuild and redeploy the
-RetroArch title against the intended driver artifacts.
+The driver is **linked into the title**. Updating a driver checkout does not
+update the linked code: rebuild and redeploy the RetroArch title against the
+intended driver artifacts. A `libvulkan.so.1` left in the title folder by an
+earlier release is ps5vk's and is not used.
 
 This repository supplies the frontend/platform integration, native audio and
 input backends, core loader, build scripts and console validation. Core-side
@@ -140,7 +148,7 @@ in this port, even if upstream RetroArch already offers the feature.**
 - ❌ RetroAchievements and netplay; networking is disabled in the current frontend build.
 - ❌ User Slang shader presets and multipass effects validated on PS5_Vulkan.
 - ✅ 120 Hz output where the display offers it, with a 60 Hz fallback chosen by measuring the refresh.
-- ❌ Asynchronous shader compilation, so no core stutters while a shader compiles: parallel pipeline compiles in PS5_Vulkan, asynchronous modes by default in the cores.
+- ❌ No core losing speed while a shader compiles. On RADV (Alpha 5), PPSSPP's compiles on its own threads no longer cost it speed, and a game's second start reads its pipelines from the cache; Dolphin's first start of a game still compiles its ubershaders at a cost (see the release notes).
 - ✅ Save states and fast-forward, including PPSSPP.
 - ❌ 4K output/upscaling, VRR and HDR validated in this application.
 - ❌ Low-latency features, runahead and sustained per-core performance measurements.
@@ -162,7 +170,7 @@ in this port, even if upstream RetroArch already offers the feature.**
 | ❌ | Beetle PSX HW — PlayStation, targeting the Vulkan renderer |
 | ❌ | Nintendo 64 — evaluate Mupen64Plus-Next / ParaLLEl-N64 with ParaLLEl-RDP |
 | ✅ | PPSSPP — PSP, Vulkan rendering and JIT; tested games only |
-| ❌ | PPSSPP MSAA — needs render pass 2 and depth/stencil resolve in PS5_Vulkan |
+| ✅ | PPSSPP MSAA — render pass 2 and depth/stencil resolve, on RADV |
 | ✅ | Dolphin — GameCube and Wii, Vulkan rendering and JIT; tested games, long play and the enhancement profiles |
 | ✅ | LRPS2 — PlayStation 2, Vulkan hardware renderer at 4K; tested games only |
 | 🚧 | LRPS2 — upstream PCSX2's newer renderer fixes, 8× internal resolution and texture replacement |
@@ -185,14 +193,19 @@ its own instructions, normally as a sibling directory:
 ```text
 workspace/
 ├── PS5_RetroArch/
-└── PS5_Vulkan/       # Driver archives, dependencies and matching source tree
+├── PS5_Vulkan/       # The RADV release archive, its link recipe and dependencies
+├── PS5_Mesa/         # My Mesa fork, which PS5_Vulkan builds RADV from
+└── PS5_PayloadSDK/   # My payload SDK fork and its platform layer, at a pinned revision
 ```
 
-The title build consumes that project's driver, Vulkan runtime and shader-compiler
-archives; it does not build the driver for you. `PS5_VULKAN_DIR` can select an
-alternative checkout for the build; some host tests currently require the sibling
-layout above. Driver dependencies and setup requirements are documented in the
-driver repository.
+The title build consumes PS5_Vulkan's RADV release archive
+(`tools/build-radv.sh release` there, built from PS5_Mesa at the revision it
+pins) and links it with that project's `tools/radv-link.sh`; it does not build
+the driver for you. `PS5_VULKAN_DRIVER=ps5vk` links ps5vk's driver, Vulkan
+runtime and shader-compiler archives instead, and `RADV_ARCHIVE` names another
+RADV archive. `PS5_VULKAN_DIR` can select an alternative checkout for the
+build; some host tests currently require the sibling layout above. Driver
+dependencies and setup requirements are documented in the driver repository.
 
 From the RetroArch repository root:
 
@@ -245,6 +258,12 @@ title folder instead:
 | Live configuration | `config/retroarch.cfg` | `/app0/config/retroarch.cfg` |
 | Save RAM | `savefiles/` | `/app0/savefiles/` |
 | Save states | `savestates/` | `/app0/savestates/` |
+| RADV shader cache | `radv-shader-cache/` | `/app0/radv-shader-cache/` |
+
+RADV creates `radv-shader-cache/` itself, open to FTP like the other folders;
+deleting it only makes the next start compile again. `ps5vk-shader-cache/` and
+`sce_module/libvulkan.so.1`, left by releases up to v0.4.0-alpha.4, are not used
+since v0.5.0-alpha.5 and can be deleted.
 
 For FBNeo, use `system/fbneo/` for its system files. Genesis Plus GX's Sega CD BIOS
 filenames belong in the configured `system/` root, as listed by its metadata.
@@ -265,7 +284,7 @@ includes native loading, gameplay, colour checks, audio/input, Quick Menu →
 Close Content, and loading another game. I record my own visual confirmation on
 the console alongside the logs; a camera can miss refresh-synchronous flicker.
 
-The v0.4.0-alpha.4 release passed all five host gates with 74 Python tests;
+The v0.5.0-alpha.5 release passed all five host gates with 74 Python tests;
 52 recorded captures replay successfully. Exact results and limitations are in
 [ACTIVE](docs/ACTIVE.md), rather than implied by a core's upstream feature list.
 
@@ -303,14 +322,14 @@ lists and original notices.
 
 | Project / author | Contribution |
 | --- | --- |
-| [Mihawk](https://github.com/mihawk-99) — [PS5_RetroArch](https://github.com/mihawk-99/PS5_RetroArch), [PS5_Vulkan](https://github.com/mihawk-99/PS5_Vulkan) | This native RetroArch port, core integration and the separate PS5 Vulkan implementation |
+| [Mihawk](https://github.com/mihawk-99) — [PS5_RetroArch](https://github.com/mihawk-99/PS5_RetroArch), [PS5_Vulkan](https://github.com/mihawk-99/PS5_Vulkan), [PS5_Mesa](https://github.com/mihawk-99/PS5_Mesa), [PS5_PayloadSDK](https://github.com/mihawk-99/PS5_PayloadSDK) | This native RetroArch port and core integration; the PS5 Vulkan drivers (the RADV port and ps5vk); the Mesa fork with the PS5 winsys; the payload SDK fork and its platform layer |
 | [RetroArch / libretro contributors](https://github.com/libretro/RetroArch) | Frontend, libretro API, menus, video pipeline and shared libraries |
 | [BlackBearReloaded — ProsperoLight](https://github.com/blackbearreloaded/ProsperoLight) | Project starting point and reference for native PS5 input and audio integration |
 | [BlackBearReloaded — PS5 Native App Boilerplate](https://github.com/blackbearreloaded/ps5-native-app-boilerplate) | Underlying native title tooling, ELF/FSELF conversion and runtime-shim foundation |
 | [John Törnblom and ps5-payload-dev contributors](https://github.com/ps5-payload-dev/sdk) | Public PS5 Payload SDK, toolchain and API stubs; [PacBrew](https://github.com/ps5-payload-dev/pacbrew-repo) ports infrastructure |
 | [John Törnblom / ps5-payload-dev — websrv](https://github.com/ps5-payload-dev/websrv) | Reference for per-core fetch/build/stage scripts; this port uses a separate native title pipeline |
 | [BlackBearReloaded — ps5-opengl](https://github.com/blackbearreloaded/ps5-opengl) | Shader-compiler and graphics foundations consumed by PS5_Vulkan; not the active RetroArch video backend |
-| [Mesa contributors](https://gitlab.freedesktop.org/mesa/mesa) | Vulkan runtime, NIR/ACO and utility foundations used through the graphics stack |
+| [Mesa contributors](https://gitlab.freedesktop.org/mesa/mesa) | RADV, the Vulkan driver the title renders through, with its ACO compiler, NIR, the Vulkan runtime and utilities |
 | [Khronos Group](https://github.com/KhronosGroup/Vulkan-Headers) | Vulkan API headers and [specification](https://github.com/KhronosGroup/Vulkan-Docs) |
 | [RetroArch assets contributors](https://github.com/libretro/retroarch-assets) and the [M+ Fonts project](https://mplusfonts.github.io/) | Packaged XMB assets and font; original notices retained |
 | [LLVM / Clang contributors](https://github.com/llvm/llvm-project), [zlib authors Jean-loup Gailly and Mark Adler](https://github.com/madler/zlib) | Compilation and compression tooling |

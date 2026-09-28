@@ -15,7 +15,8 @@
 #include "gfx/include/vulkan/vulkan.h"
 #include "present_clock.h"
 
-VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vk_icdGetInstanceProcAddr(VkInstance instance, const char *name);
+VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vk_icdGetInstanceProcAddr(VkInstance instance,
+                                                                   const char *name);
 
 static _Atomic uint64_t last_present_ns;
 static PFN_vkQueuePresentKHR driver_present;
@@ -43,7 +44,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL present(VkQueue queue, const VkPresentInfo
 /* The driver's command, or the title's in its place. */
 static PFN_vkVoidFunction command(PFN_vkVoidFunction driver, const char *name)
 {
-    if (driver && strcmp(name, "vkQueuePresentKHR") == 0) {
+    if (driver && strcmp(name, "vkQueuePresentKHR") == 0)
+    {
         driver_present = (PFN_vkQueuePresentKHR)driver;
         return (PFN_vkVoidFunction)present;
     }
@@ -55,11 +57,12 @@ static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL device_proc(VkDevice device, con
     return command(driver_device_proc(device, name), name);
 }
 
-VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
-vkGetInstanceProcAddr(VkInstance instance, const char *name)
+VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instance,
+                                                               const char *name)
 {
     PFN_vkVoidFunction driver = vk_icdGetInstanceProcAddr(instance, name);
-    if (driver && strcmp(name, "vkGetDeviceProcAddr") == 0) {
+    if (driver && strcmp(name, "vkGetDeviceProcAddr") == 0)
+    {
         driver_device_proc = (PFN_vkGetDeviceProcAddr)driver;
         return (PFN_vkVoidFunction)device_proc;
     }

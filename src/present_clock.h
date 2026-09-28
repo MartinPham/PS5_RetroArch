@@ -13,13 +13,14 @@
 #include <stdint.h>
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-/* The monotonic clock the times below are on, in nanoseconds. */
-uint64_t ps5_present_clock_now_ns(void);
-/* When the latest present returned; 0 before the first. */
-uint64_t ps5_present_clock_last_ns(void);
+    /* The monotonic clock the times below are on, in nanoseconds. */
+    uint64_t ps5_present_clock_now_ns(void);
+    /* When the latest present returned; 0 before the first. */
+    uint64_t ps5_present_clock_last_ns(void);
 
 #ifdef __cplusplus
 }

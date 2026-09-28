@@ -1,21 +1,21 @@
 # Active work
 
-_Updated: 2026-09-26_
+_Updated: 2026-09-28_
 
-## Now: v0.4.0-alpha.4 released; asynchronous shader compilation next
+## Now: v0.5.0-alpha.5 released, the first on RADV; Dolphin's first start next
 
-**Released.** Build `870bd1bb` (commits up to `3712ce1`; release notes
-`docs/releases/v0.4.0-alpha.4.md`): eight cores, Dolphin, LRPS2 and PPSSPP on the
-GPU, SDK fork `a110320`, ../PS5_Vulkan `40e9d30`, LRPS2 at its pinned revision
-`6d14775` (6x). It is in `dist/PPSA99169`, staged in `handoff/PPSA99169`, kept in
-`build/release/PPSA99169-870bd1bb` and on the console. The tester's three
-problems -- half speed with V-Sync on a 60 Hz display, a crash re-creating the
-video driver on a 64 KiB RetroArch thread, PPSSPP crashes in vkDestroyBuffer --
-are fixed; the release battery (every core, boot, menu and a Quick Menu action,
-Threaded Video on half) and a 10-minute PPSSPP soak had no crash
-(docs/PHASE_LOG.md, 2026-09-26).
+**Released.** Build `f96bdb0e` (release notes `docs/releases/v0.5.0-alpha.5.md`):
+the title links ../PS5_Vulkan's RADV release archive by default (PS5_Mesa
+`cedb774`, built by ../PS5_Vulkan `5d8f37d`), SDK fork `95c08f2`, LRPS2 at its
+pinned revision `6d14775` (6x). `PS5_VULKAN_DRIVER=ps5vk` still builds ps5vk,
+which v0.4.0-alpha.4 (build `870bd1bb`) shipped. On RADV the release battery
+(every core with a game, the menu, Close Content and a reload, Threaded Video on
+half) passed three times as the driver changed, and PPSSPP's ten-minute soak once
+(docs/PHASE_LOG.md, 2026-09-28). PPSSPP's MSAA works, RADV's shader cache is in
+`radv-shader-cache/`, and the title heap has an arena for each thread. The
+console's installed title is still v0.4.0-alpha.4's build.
 
-**Dolphin round (after the release):** the PS5 defaults are 6x, Async
+**Dolphin round (after v0.4.0-alpha.4, on ps5vk):** the PS5 defaults are 6x, Async
 (UberShaders), 16x AF and GPU texture decoding (patches/dolphin, e905c4e): RE4,
 Melee, Wind Waker and Mario Kart Wii at 100% after boot. ../PS5_Vulkan R94
 compiles pipelines on six threads at once; R95 writes tiled uploads a run at a
@@ -24,15 +24,19 @@ emulation and its threads waiting on each other, not the driver.
 
 **Open:**
 
-1. Rogue Leader in Dolphin: I chose to make Dolphin itself faster on the PS5 --
+1. Dolphin's first start of a game on RADV, from an empty shader cache: Wind
+   Waker's first two 10 s windows at 83% and 92%, where ps5vk had 86% and 99%.
+   The time is Mesa's NIR optimisation of Dolphin's ubershaders
+   (../PS5_Vulkan/docs/RADV_PHASE.md).
+2. Rogue Leader in Dolphin (measured on ps5vk; not yet on RADV): I chose to make Dolphin itself faster on the PS5 --
    its MMU slow path, where 16 KiB host pages limit page-table fastmem, and its
    GPU-thread cost -- rather than underclock the emulated CPU (75% reached
    83-100% but changes the game's timing). Queued while the driver's Vulkan 1.4
    plan is decided (../PS5_Vulkan/docs/VULKAN_1_4_PLAN.md).
-2. The CPU's transfers on the GPU (CP DMA for linear copies, vk_meta for tiled
+3. The CPU's transfers on the GPU (CP DMA for linear copies, vk_meta for tiled
    ones), with the golden comparisons updated for the new submission shapes.
-3. The 60 Hz fallback on a display that stays at 60 Hz (the tester's trace).
-4. LRPS2: the upstream PCSX2 port in ../PS5_LRPS2's working tree, 8x as the PS5
+4. The 60 Hz fallback on a display that stays at 60 Hz (the tester's trace).
+5. LRPS2: the upstream PCSX2 port in ../PS5_LRPS2's working tree, 8x as the PS5
    default, the lighting compared with the native picture.
 
 **Test runs and core options.** RetroArch here uses per-core options
