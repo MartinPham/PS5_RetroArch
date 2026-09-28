@@ -133,6 +133,19 @@ cp -f -- "$root/build/ra-conf/config.h" "$root/build/config.h"
 #   libpsbc_support.ps5.a the package writer    (.deps/native/psbc/lib/)
 # PS5_VULKAN_DIR overrides the sibling's root, so a release kept elsewhere works.
 vulkan_dir="${PS5_VULKAN_DIR:-$root/../PS5_Vulkan}"
+# PS5_VULKAN_DRIVER=radv links ../PS5_Vulkan's RADV port instead (its route B,
+# docs/VULKAN_1_4_PLAN.md there): the release archive its tools/build-radv.sh
+# release builds, or the one RADV_ARCHIVE names, linked by that project's
+# tools/radv-link.sh, whose platform bindings this title takes but for
+# the heap: the title's allocator (src/memory_ps5.cpp) stays, as the cores'
+# imports are bound to its routes. src/locale_shims.c steps aside for the
+# platform layer's locale functions.
+vulkan_driver=${PS5_VULKAN_DRIVER:-ps5vk}
+case $vulkan_driver in
+    ps5vk | radv) ;;
+    *) echo "PS5_VULKAN_DRIVER must be ps5vk or radv" >&2; exit 2 ;;
+esac
+[[ $vulkan_driver == ps5vk ]] || title_definition_names+=(PS5_RETROARCH_RADV)
 vulkan_archives=(
     "$vulkan_dir/build/driver/ps5/libps5vk.ps5.a"
     "$vulkan_dir/.deps/native/vulkan-runtime/lib/libvk_runtime.ps5.a"
@@ -180,6 +193,25 @@ fi
 # Mesa's weak entry points resolve at link time, and the driver's own symbols must
 # survive the archive boundary (--whole-archive), which is how the sibling links it.
 vulkan_flags="--no-dynamic-linker -z nodynamic-undefined-weak"
+linker_script=""
+if [[ $vulkan_driver == radv ]]; then
+    radv_archive=${RADV_ARCHIVE:-$vulkan_dir/.deps/native/radv-release/lib/libvulkan_radeon.ps5.a}
+    # shellcheck source=/dev/null
+    source "$vulkan_dir/tools/radv-link.sh"
+    radv_link_recipe "$vulkan_dir" "$sdk" "$radv_archive" || exit 2
+    vulkan_archives=("$radv_archive")
+    for flag in "${radv_link_flags[@]}"; do
+        case $flag in
+            --wrap=malloc | --wrap=calloc | --wrap=realloc | --wrap=free | --wrap=posix_memalign | \
+            --wrap=aligned_alloc | --wrap=memalign | --wrap=malloc_usable_size | --wrap=reallocf | \
+            --wrap=reallocarray | --wrap=getline | --wrap=getdelim) ;;
+            *) vulkan_flags+=" $flag" ;;
+        esac
+    done
+    # The C++ runtime, the compiler's builtins and the platform layer.
+    vulkan_flags+=" ${radv_link_inputs[*]:5}"
+    linker_script="$vulkan_dir/tooling/psbc/ps5-pie-unwind.ld"
+fi
 
 # Three Mesa utility sources the archives above reference but do not carry:
 # ../PS5_Vulkan's PS5 object list filters u_thread.c, anon_file.c and os_file.c
@@ -189,12 +221,16 @@ vulkan_flags="--no-dynamic-linker -z nodynamic-undefined-weak"
 # tools/build-mesa-util.sh says which symbols each one is for. It prints the
 # object paths on stdout, so a compile failure has to be caught here: a process
 # substitution would let the link fail later on symbols this step was to supply.
-if ! vulkan_object_list=$(PS5_VULKAN_DIR="$vulkan_dir" PS5_PAYLOAD_SDK="$sdk" \
+if [[ $vulkan_driver == radv ]]; then
+    # RADV's archive carries Mesa's utilities whole.
+    vulkan_objects=()
+elif ! vulkan_object_list=$(PS5_VULKAN_DIR="$vulkan_dir" PS5_PAYLOAD_SDK="$sdk" \
         PS5_CLANG=/usr/bin/clang bash "$root/tools/build-mesa-util.sh"); then
     echo "error: the driver's Mesa utility objects did not build" >&2
     exit 2
+else
+    mapfile -t vulkan_objects <<< "$vulkan_object_list"
 fi
-mapfile -t vulkan_objects <<< "$vulkan_object_list"
 
 # Bind the running trace and FTP readback to these exact source/archive inputs.
 # The console transforms the SELF container, so its whole-file digest differs.
@@ -246,6 +282,7 @@ APP_SDK_ARCHIVES="libps5platform.a" \
 APP_VULKAN_ARCHIVES="${vulkan_archives[*]}" \
 APP_EXTRA_OBJECTS="${vulkan_objects[*]}" \
 APP_LINK_FLAGS="$vulkan_flags --wrap=malloc --wrap=calloc --wrap=realloc --wrap=free $memory_wrap_flags $directory_wrap_flags" \
+APP_LINKER_SCRIPT="$linker_script" \
     make app
 
 title_id=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["titleId"])' \

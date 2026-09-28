@@ -10,10 +10,10 @@
  * where: a thread interrupts the main thread (the one RetroArch runs the core
  * and the driver on) about every millisecond with a signal, whose handler
  * records the interrupted instruction pointer. A sample taken while no frame
- * has been presented for over 50 ms (the driver's own present clock,
- * ps5vk_debug_last_present_ns) counts as a stall sample; the flag file's
- * "stall-ms N" line sets the threshold, since one just above a game's own
- * frame period is what separates its late frames from its ordinary ones.
+ * has been presented for over 50 ms (src/present_clock.h) counts as a stall
+ * sample; the flag file's "stall-ms N" line sets the threshold, since one just
+ * above a game's own frame period is what separates its late frames from its
+ * ordinary ones.
  *
  * Every ten seconds the window's stall samples are summarised as their most
  * frequent addresses, one line each, which tools resolve against the title's
@@ -34,14 +34,8 @@
 #include <ucontext.h>
 
 #include <ps5platform/context.h>
+#include "present_clock.h"
 #include "title_threads.hpp"
-
-extern "C"
-{
-    /* ../PS5_Vulkan's debug API; the title always links the driver. */
-    std::uint64_t ps5vk_debug_now_ns(void);
-    std::uint64_t ps5vk_debug_last_present_ns(void);
-}
 
 namespace
 {
@@ -189,14 +183,14 @@ void report(std::uint32_t from, std::uint32_t to, std::uint32_t stall_samples)
 void *sampler(void *)
 {
     const timespec interval = {0, 2 * 1000 * 1000};
-    std::uint64_t window_start = ps5vk_debug_now_ns();
+    std::uint64_t window_start = ps5_present_clock_now_ns();
     std::uint32_t window_from = g_head.load();
     std::uint32_t stall_samples = 0;
     for (;;)
     {
         nanosleep(&interval, nullptr);
-        const std::uint64_t now = ps5vk_debug_now_ns();
-        const std::uint64_t last = ps5vk_debug_last_present_ns();
+        const std::uint64_t now = ps5_present_clock_now_ns();
+        const std::uint64_t last = ps5_present_clock_last_ns();
         const bool stall = last != 0 && now > last && now - last > g_stall_ns;
         g_stall.store(stall, std::memory_order_relaxed);
         stall_samples += stall ? 1u : 0u;
