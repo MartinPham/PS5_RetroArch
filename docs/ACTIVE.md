@@ -35,6 +35,14 @@ one way), Saturn gameplay with a BIOS and a vector game at 4K in MAME. The
 forks are published on github.com/mihawk-99 at the pinned revisions, so a
 checkout without the sibling forks builds from there.
 
+**Now: RPCS3 as a libretro core** (docs/RPCS3_PORT.md). The goal is God of
+War HD (NPUA80490, a PSN package plus its RAP) booting from `content/PS3/`
+at a 300% scale on RADV, with the firmware from `system/RPCS3/`. Phase 1, the
+audit, is done: fork github.com/mihawk-99/PS5_RPCS3 at upstream 1707d7fc883e,
+the dependency decisions, the frontend design and the platform gaps (a)-(h).
+Next is ladder step 1: the pinned LLVM and FFmpeg builds and
+`tools/build-rpcs3.sh`.
+
 **Dolphin transitions (paused 2026-09-28 for RPCS3):** Rogue Leader's dips are
 not shader compiles. The emulation thread spins in `sched_yield` inside a
 libkernel lock for about half its slow time, and runs the MMU slow path for
