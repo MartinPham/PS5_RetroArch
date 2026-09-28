@@ -4078,3 +4078,15 @@ Dolphin's first two windows are its boot, which compiles its ubershaders.
 The release battery (every core, close and reload, threaded video on half)
 and PPSSPP's ten-minute soak ran again on RADV with the arenas: no crash,
 the soak's windows 98-100%. The installed title was put back as before.
+
+## 2026-09-28 — RADV's shader cache reads, and the battery again
+
+With the cache filled, PPSSPP's pipelines still took a median 11.3 ms: the
+reads of Mesa's cache database queued behind each other's per-access reopen,
+relock and write-back. ../PS5_Vulkan 5d8f37d links RADV with the database's
+exclusive mode (ps5-port cedb774), the default on the PS5. On the console,
+PPSSPP with a filled cache: pipeline creation 1,419 ms to 29 ms (median
+0.3 ms). Dolphin with a filled cache: 87% and 99% for its first two windows,
+as ps5vk from an empty cache (86% and 99%). The release battery (every core,
+close and reload, threaded video on half) passes again with it: no crash.
+The installed title was put back as before.
