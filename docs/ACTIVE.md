@@ -31,8 +31,9 @@ tested game runs at full speed. Load Content lists INTERNAL and EXTERNAL
 
 Still open for them: EXTERNAL (`/mnt`) is empty inside the title's sandbox
 (USB and extended storage need the title jailbroken; etaHEN's jailbreak call is
-one way), Saturn gameplay with a BIOS, a vector game at 4K in MAME, and
-publishing the new forks on github.com/mihawk-99.
+one way), Saturn gameplay with a BIOS and a vector game at 4K in MAME. The
+forks are published on github.com/mihawk-99 at the pinned revisions, so a
+checkout without the sibling forks builds from there.
 
 **Open:**
 
