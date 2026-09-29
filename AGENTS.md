@@ -19,7 +19,8 @@ Read in this order and stop as soon as you have what you need:
    the workflow, the environment), `docs/FINDINGS.md` (the evidence behind each
    invariant), `docs/TESTING.md`, `docs/DEPLOYMENT.md`,
    `docs/TROUBLESHOOTING.md`, `docs/GPU_PATH_CRITERIA.md` (the acceptance
-   criteria for the Vulkan route), `docs/PHASE_LOG.md` (append-only run logs).
+   criteria for the Vulkan route), `docs/PHASE_LOG.md` (append-only run logs),
+   `docs/RELEASING.md` (what a release carries and the order of its steps).
 
 Never read a long log end to end to answer a status question: `docs/ACTIVE.md`
 and each log's own summary say what passed.

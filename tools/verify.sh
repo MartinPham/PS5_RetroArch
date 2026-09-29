@@ -65,6 +65,7 @@ gate_integration() {
     require tools/check-manifest.sh || return 1
     make test-integration
     bash tools/check-manifest.sh
+    python3 tools/check-notices.py
 }
 
 gate_evidence() {
@@ -78,7 +79,7 @@ case "${1:-}" in
             format      'bash tools/lint-shell.sh && bash tools/lint-format.sh' \
             unit        'make test-unit' \
             build       'bash tools/build-title.sh' \
-            integration 'make test-integration && bash tools/check-manifest.sh' \
+            integration 'make test-integration && bash tools/check-manifest.sh && python3 tools/check-notices.py' \
             evidence    'python3 tools/evidence.py compare evidence/'
         exit 0
         ;;

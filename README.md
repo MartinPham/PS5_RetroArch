@@ -335,6 +335,7 @@ assets and can be removed. Keep the normal development logs when reporting bugs.
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Recorded symptoms, causes and fixes |
 | [Findings](docs/FINDINGS.md) | Technical observations and evidence behind decisions |
 | [Phase log](docs/PHASE_LOG.md) | Dated development and console-test history |
+| [Releasing](docs/RELEASING.md) | What a release carries (licences, component manifest, source archives) and the order that keeps tag, ZIP and source in step; [what each past release was built from](docs/releases/SOURCE_CORRESPONDENCE.md) |
 | [Evidence](evidence/) | Machine-readable captures and expected results |
 | [Contributor/agent instructions](AGENTS.md) | Scope, verification, attribution and commit rules |
 
@@ -376,16 +377,36 @@ lists and original notices.
 
 ## License and third-party terms
 
-Port-authored code uses **GPL-3.0-or-later**, with copyright and SPDX notices in
-the source files. RetroArch and each dependency retain their own license and
-copyright notices. The locally generated runtime shim is described in
-[runtime/README.md](runtime/README.md).
+This repository's own code is **GPL-3.0-or-later** ([LICENSE](LICENSE)). Most source
+files carry a copyright and SPDX notice; the ones that do not (for example
+`src/memory_ps5.cpp` and the build scripts in `tools/`) are under the same licence.
+Code inherited from BlackBearReloaded's ps5-native-app-boilerplate and ProsperoLight
+is Copyright (C) 2026 BlackBearReloaded, GPL-3.0-or-later. The generated
+`sce_module/libc.prx` is described in [runtime/README.md](runtime/README.md).
 
-Emulator cores are not all GPL-3.0: FCEUmm uses GPLv2, PPSSPP and Dolphin use
-GPLv2-or-later, LRPS2 is GPLv3, mGBA uses MPL-2.0, and Snes9x, FBNeo and
-Genesis Plus GX include non-commercial terms. Consult each
-linked upstream repository for the complete applicable terms. Asset and font
-licenses are retained with their files.
+Every built title folder carries `licenses/`: the licence texts each part requires,
+and `components.json`, which ties every executable file to the source revision it
+was built from ([tooling/notices/components.json](tooling/notices/components.json),
+[docs/RELEASING.md](docs/RELEASING.md)). Releases up to v0.5.0-alpha.5 were
+published without it; [docs/releases/SOURCE_CORRESPONDENCE.md](docs/releases/SOURCE_CORRESPONDENCE.md)
+records what each was built from.
+
+The cores keep their own licences, and they differ:
+
+| Licence | Cores |
+| --- | --- |
+| GPL-2.0-or-later | FCEUmm, PPSSPP, Dolphin, Beetle PSX HW, Beetle Saturn, Mupen64Plus-Next (with MIT and LGPL parts), VICE, DeSmuME, Azahar (Dynarmic is 0BSD), MAME (as a whole; many files BSD-3-Clause) |
+| GPL-3.0-or-later | LRPS2 (PCSX2) |
+| GPL-2.0-only | RPCS3, in development here and in no release |
+| MPL-2.0 | mGBA |
+| Non-commercial licences | Snes9x, FinalBurn Neo, Genesis Plus GX: they may not be sold or used commercially, and FBNeo's forbids asking for donations for a project that uses its code |
+
+Assets and fonts keep their licences too: the XMB theme is CC-BY-4.0 with the M+
+font licence, PPSSPP's fonts are OFL-1.1, and Dolphin's `Sys` files carry theirs.
 
 This is an independent homebrew project, not affiliated with or endorsed by Sony
-Interactive Entertainment. PlayStation and PS5 are Sony trademarks.
+Interactive Entertainment, the Khronos Group or the libretro project. PlayStation
+and PS5 are Sony trademarks. Vulkan is a registered trademark of the Khronos Group
+Inc.; the RADV port this title uses is not a Khronos-conformant product (see
+[PS5_Vulkan](https://github.com/mihawk-99/PS5_Vulkan)). RetroArch is the libretro
+project's name and logo, used here to name the frontend this port is built from.

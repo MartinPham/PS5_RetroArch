@@ -376,6 +376,13 @@ else
         "$icd" >&2
 fi
 
+# The licences and notices the parts of this folder require, and the source revision
+# of each (tooling/notices/components.json, docs/RELEASING.md), written before the
+# manifest so the manifest covers them. It fails if a staged core is not the file its
+# build report describes.
+python3 "$root/tools/stage-notices.py" "$dist" --driver "$vulkan_driver" \
+    --vulkan-dir "$vulkan_dir" --release-tag "${PS5_RELEASE_TAG:-}"
+
 # The manifest is recorded here, as part of building, because a folder published
 # without one cannot be told apart from the folder published last week: this
 # project has already produced a title folder whose eboot.bin was a raw link-stage

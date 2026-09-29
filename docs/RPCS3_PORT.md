@@ -45,10 +45,34 @@ PS5_Dynarmic.
 
 ## Licence
 
-RPCS3 is GPLv2. It ships as a separate libretro core, loaded by RetroArch at
-run time, on the same model as the Snes9x and FBNeo cores the title already
-ships, and the fork's source is published at the pinned revision. The title
-bundles no PS3 firmware, keys or games.
+RPCS3 states its licence as GPL-2.0-only (its README; `LICENSE` is the GPLv2).
+The rest of the title is GPL-3.0-or-later (RetroArch, this port, the payload SDK
+fork and its platform layer), and GPL-2.0-only code and GPL-3.0 code cannot be
+combined into one work and distributed. Whether the core and the title are one
+work is not settled by the core being a separate `.so`; these are the facts that
+bear on it (2026-09-29):
+
+- `rpcs3_libretro.so` statically links `tooling/native/core_cxx_runtime.cpp`
+  (this repository, GPL-3.0-or-later by the repository's licence) through
+  `PS5_CORE_LINK_INPUTS`, beside LLVM (Apache-2.0 WITH LLVM-exception, whose
+  exception addresses GPLv2 combinations), FFmpeg and GNU libiconv
+  (LGPL-2.1-or-later).
+- At load time the title's native loader binds the core's libc and file-system
+  imports to the title's own wrappers and to the platform layer
+  (`tools/core-imports.py`, `build/core_imports.inc`), and the core runs in the
+  title's process, on the title's heap, through RetroArch's libretro and Vulkan
+  context interfaces.
+
+So it is not in a release. The ways out are a licence decision for the owner of
+the GPL-3.0 parts that touch the core (dual-licensing `core_cxx_runtime.cpp`
+and the platform layer's bound functions under a GPLv2-compatible licence, which
+is possible only for code whose authors agree), a change of interface, or
+counsel's view that the combination is not one work; the licence audit of
+2026-09-29 sets them out for that decision.
+
+The title bundles no PS3 firmware, keys or games; RPCS3 installs the firmware
+the user supplies and decrypts packages with the user's own licence files
+(RAP); that audit covers those paths too.
 
 ## Phase 1: the audit
 

@@ -4476,3 +4476,39 @@ Earlier" card. Two things were needed:
 A 4K screenshot costs a run its last windows: RetroArch encodes and writes
 it after the last frame (5.5-5.8 MB of PNG, held to the title's write budget),
 and the core does not run meanwhile, so the windows then read 0-70%.
+
+## 2026-09-29 — Licences, notices and source for every build (licence audit)
+
+A licence audit of the published releases found that none of the five ZIPs
+carries the licence texts its parts require (GPLv3, GPLv2, MPL-2.0, the Snes9x,
+FBNeo and Genesis Plus GX licences, MIT notices, OFL for PPSSPP's fonts), and that
+the tags of v0.1.0-alpha.1, v0.3.0-alpha.3 and v0.5.0-alpha.5 name commits older
+than the ones built (docs/releases/SOURCE_CORRESPONDENCE.md). This step changes
+what every build produces; the published ZIPs are unchanged.
+
+- `tooling/notices/components.json`: every part of the title, its licence, the
+  texts that travel with it and where its source is.
+- `tools/stage-notices.py`, run by `tools/build-title.sh` before the manifest:
+  writes `licenses/` into the title folder (texts, `components.json` tying every
+  executable to its source revision, `README.txt`). A core whose digest is not the
+  one its `build/cores/<core>/build.json` records, or a missing licence text,
+  fails the build.
+- `tools/check-notices.py`, in the integration gate: every executable and `.info`
+  belongs to a listed part with its digest; verbatim texts unchanged; `--release`
+  also requires committed, published source.
+- `tools/source-bundle.py`: one source archive per part at the recorded revision,
+  submodules included, with `SHA256SUMS` and `SOURCES.txt`.
+- `LICENSE` (GPLv3), `docs/RELEASING.md`, README licence and trademark sections,
+  `docs/RPCS3_PORT.md` licence section (RPCS3 stays out of releases), and
+  `runtime/README.md` (what libc.prx contains, as verified).
+
+Evidence: `python3 tools/stage-notices.py` on a copy of the 2026-09-29 16-core
+`dist/PPSA99169`: 28 parts, every core's digest equal to its build report, the
+RADV archive equal to its PROVENANCE; `tools/check-notices.py` passes on it and
+`--release` fails on the uncommitted tree, as it should. `tools/source-bundle.py`
+built 10 archives (PPSSPP with 29 submodules, Azahar with 52) whose `SHA256SUMS`
+verify. `make test-unit`: 83 tests OK (7 new in tests/test_notices.py).
+`tools/lint-shell.sh`: PASS. libc.prx rebuilt from the committed files alone is
+byte-identical to the one in every release (`e6ff45d1…`). The full build was not
+rerun (the build tree was in use); a `dist/` built before this change fails the
+integration gate until it is rebuilt.
