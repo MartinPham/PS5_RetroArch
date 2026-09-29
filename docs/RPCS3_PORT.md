@@ -343,3 +343,107 @@ Each step ends with its evidence in `docs/ACTIVE.md` and a dated entry in
    100%, then at 300%: screenshots, the speed of each window, the Close
    Content + reload battery and a ten-minute run. *Evidence:* the screenshot I
    accept, the windows, the battery lines and the ten-minute trace.
+
+## Phase 2: what the port turned out to need
+
+Where the build and the first code differ from the audit above.
+
+**Dependencies.**
+
+- *LLVM* is my fork `../PS5_LLVM` (github.com/mihawk-99/PS5_LLVM), pinned in
+  `tools/build-llvm.sh`. The PS4/PS5 ABI ignores `alignas` on an empty base
+  class, so `SmallVector`'s layout assertions fail for this target; the fork
+  aligns `SmallVector` itself under `__SCE__`. The build uses host tablegen
+  tools (`LLVM_NATIVE_TOOL_DIR`) and builds only the libraries
+  (`LLVM_INCLUDE_TOOLS=OFF`), since no LLVM program links for the console.
+- *FFmpeg* 8.1.1 comes from its signed release tarball (`tools/build-ffmpeg.sh`),
+  with RPCS3's own component list and NASM for its x86 assembly.
+- *GNU libiconv* 1.18, static, comes from its signed release tarball
+  (`tools/build-libiconv.sh`). `cellL10n` converts the PS3's character sets
+  with iconv, and the console's libc has none.
+- *OpenAL Soft* is built rather than compiled out: `cellMic` includes its
+  headers outside `WITHOUT_OPENAL` off Android. Every backend is off, so it
+  opens no device. Its sources are C++20 modules; CMake's dependency scan runs
+  through `tooling/rpcs3/clang-scan-deps`, which gives the scanner the SDK's
+  target and headers.
+- *zlib* is the frontend's pinned build. libpng's generated configuration does
+  not see the submodule's headers.
+- *pkg-config* answers nothing in the toolchain file
+  (`tooling/rpcs3/ps5-toolchain.cmake`). The host's packages would add the
+  host's `/usr/include`.
+- The network clients (RPCN, clans, UPnP) still build, with wolfSSL and curl.
+  They are not stubbed yet; the title has no network use for them.
+- The target defines `__FreeBSD__` as 9, so RPCS3's FreeBSD branches take their
+  pre-13 paths (`shm_open(SHM_ANON)` for `memfd_create`). The PS5 branch below
+  replaces them where memory is concerned.
+
+**Vulkan** (`rpcs3/Emu/RSX/VK/vkutils/swapchain_libretro.*` in the fork).
+RetroArch creates the instance with the core version RPCS3 asks for (1.2), and
+the device through `create_device2`. The core runs RPCS3's own
+`render_device::create` there, so the device has RPCS3's features and
+extensions plus RetroArch's; when the renderer starts, `render_device::create`
+runs again and adopts that device instead of creating one. Features RPCS3
+enables only for some settings are the same whatever the game's configuration,
+so the device a boot needs is the one RetroArch made. Every submission and
+device-wide wait takes RetroArch's queue lock inside RPCS3's own submit lock.
+The swapchain is the core's own images, sampled by RetroArch:
+
+- acquiring an image signals RPCS3's semaphore with an empty submission;
+- presenting waits on RPCS3's semaphore and signals a fence;
+- `retro_run` hands RetroArch the newest finished image with `set_image`, after
+  its fence;
+- an image RetroArch showed is reused only after RetroArch's frame index that
+  last read it comes around again, which is when RetroArch has waited for that
+  frame.
+
+The images are not RPCS3's allocations, so they outlive the renderer while
+RetroArch may still show one; they go when a newer frame replaces them or the
+context is destroyed. The game boots in the first `retro_run` after RetroArch's
+context is up, because RPCS3 builds its renderer while booting.
+
+**Input** (`rpcs3/libretro/libretro_pad_handler.*`). RetroPads 1 to 4 are the
+PS3's controllers, through a pad handler on RPCS3's generic machinery (SDL's
+value conventions). The core compiles `rpcs3/Input/pad_thread.cpp` and what it
+needs, without the HID handlers (no hidapi on the console), and writes the
+input configuration that names the RetroPads before the pad thread loads it.
+
+**Memory** (the `__PROSPERO__` branch of `rpcs3/util/vm_native.cpp`). RPCS3's
+reservations, commits and shared memory go through the platform layer:
+
+- reservations are `ps5_vrange_reserve` and `ps5_vrange_reserve_at`;
+- commits and decommits are `ps5_vrange_commit` and `ps5_vrange_decommit`,
+  direct memory in 64 KiB units (SDK 7f3d3ff);
+- `utils::shm` is a `ps5_shm` direct-memory object with its views.
+
+Guest memory starts at 64 GiB (`0x10_0000_0000`). The 32 GiB hook area is only
+reserved: nothing reads it, and a 32 GiB copy-on-write view of zeros has no
+direct-memory form. The page size is the kernel's 16 KiB. The core's
+reservations are released, with the memory committed in them, when the core is
+unloaded, so the next load finds its addresses free.
+
+**Faults.** In the libretro core, a fault RPCS3 does not handle goes back to the
+handler it replaced (the title's crash reporter), and the title's handlers
+return when the core is unloaded.
+
+**Platform gaps closed in the SDK (a9fbb6a).** Each is aliased in
+`tools/core-imports.py`.
+
+- No export at all: `accept4`, `getpagesizes`, `in6addr_any`.
+- Exported, but resolved to nothing in a title: `gai_strerror`, `statfs`,
+  `fstatfs`, `umask`, `fork`, `setsid`, `wait4`.
+- Formerly taken from the SDK's static payload libc, whose system calls a title
+  may not make: `syscall` (only `SYS_write`), `getpwnam_r`, `posix_madvise`,
+  `strsignal`.
+- Answered differently on the console: `pthread_getaffinity_np` and
+  `pthread_setaffinity_np` (the 64-bit mask), `sysconf` (13 CPUs, not 16),
+  `pthread_exit` (a thread's `thread_local` destructors first).
+- Memory: committed ranges (`ps5_vrange_commit`), exact reservations, zeroing
+  of reused direct memory, and placement up to 1 TiB.
+
+The title's core loader answers a core's `dlopen(NULL)` with the process handle
+(`src/core_loader_ps5.cpp`), which LLVM's JIT needs.
+
+**What the console run needed in the fork** is recorded in docs/PHASE_LOG.md
+(2026-09-28): RSX's start order, VMA's entry points under volk, the kqueue
+trigger RSX audio's timer uses, releasing LLVM's memory-manager ranges, the
+log listeners' lifetime, and quitting through `Emulator::Quit`.

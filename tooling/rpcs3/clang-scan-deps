@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# PS5 RetroArch - C++20 module scanning for the cross build.
+# Copyright (C) 2026 Mihawk
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# clang-scan-deps reads the compile command after "--" without running it, so
+# the target, sysroot and library headers the SDK's prospero-clang wrappers add
+# must be spelled out here, or the scan finds the host's view of the headers.
+set -euo pipefail
+sdk=${PS5_PAYLOAD_SDK:?}
+flags=(--start-no-unused-arguments -target x86_64-sie-ps5
+    -fvisibility-nodllstorageclass=default -isysroot "$sdk" --sysroot "$sdk"
+    -stdlib++-isystem "$sdk/target/include/c++/v1" -fno-stack-protector -fno-plt
+    -femulated-tls -fdenormal-fp-math=ieee -frtti -fexceptions
+    --end-no-unused-arguments)
+args=() state=0
+for arg in "$@"; do
+    args+=("$arg")
+    case $state in
+        0) [[ $arg == -- ]] && state=1 ;;
+        1) args+=("${flags[@]}"); state=2 ;;  # after the compiler's path
+    esac
+done
+exec "${PS5_CLANG_SCAN_DEPS:-clang-scan-deps}" "${args[@]}"

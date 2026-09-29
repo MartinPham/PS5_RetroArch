@@ -9,6 +9,8 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def collect_imports(cores):
+    """Each undefined name: its kind, and whether every core that imports it
+    does so weakly (a weak reference the title need not satisfy)."""
     imports = {}
     for core in cores:
         symbols = subprocess.check_output(['readelf', '--dyn-syms', '-W', str(core)], text=True)
@@ -16,12 +18,12 @@ def collect_imports(cores):
             fields = line.split()
             if len(fields) < 8 or fields[6] != 'UND':
                 continue
-            name, kind = fields[7], fields[3]
+            name, kind, weak = fields[7], fields[3], fields[4] == 'WEAK'
             if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', name) or kind not in ('FUNC', 'OBJECT', 'NOTYPE'):
                 raise ValueError(f'Unsupported native core import: {name} ({kind})')
-            if name in imports and imports[name] != kind:
+            if name in imports and imports[name][0] != kind:
                 raise ValueError(f'Conflicting native import types for {name}')
-            imports[name] = kind
+            imports[name] = (kind, weak and imports.get(name, (kind, True))[1])
     return imports
 
 
@@ -68,15 +70,43 @@ def generate(imports):
                'memccpy': 'ps5_memccpy', 'times': 'ps5_times', 'sockatmark': 'ps5_sockatmark',
                'getpwuid': 'ps5_getpwuid', 'gethostbyaddr': 'ps5_gethostbyaddr',
                'gethostbyname': 'ps5_gethostbyname', 'getnameinfo': 'ps5_getnameinfo',
+               'gai_strerror': 'ps5_gai_strerror',
                # libc's getcwd calls __getcwd, which only libkernel_sys has.
                'getcwd': 'ps5_getcwd', 'tmpfile': 'ps5_tmpfile',
                'if_nametoindex': 'ps5_if_nametoindex', 'if_indextoname': 'ps5_if_indextoname',
                'mkstemp': 'ps5_mkstemp', 'isatty': 'ps5_isatty', 'link': 'ps5_link',
-               'symlink': 'ps5_symlink', 'readlink': 'ps5_readlink', 'fchown': 'ps5_fchown'}
-    for index, (name, kind) in enumerate(sorted(imports.items())):
+               'symlink': 'ps5_symlink', 'readlink': 'ps5_readlink', 'fchown': 'ps5_fchown',
+               # No system module exports them (RPCS3's wolfSSL, asmjit and network).
+               'accept4': 'ps5_accept4', 'getpagesizes': 'ps5_getpagesizes',
+               'in6addr_any': 'ps5_in6addr_any',
+               # The console refuses FreeBSD's cpuset_t (ERANGE); the platform
+               # layer answers through the exported 64-bit mask.
+               'pthread_getaffinity_np': 'ps5_pthread_getaffinity_np',
+               'pthread_setaffinity_np': 'ps5_pthread_setaffinity_np',
+               # It says 16 CPUs where a title's threads run on thirteen.
+               'sysconf': 'ps5_sysconf',
+               # A thread's thread_local destructors run before libkernel's key
+               # destructors, which free its emulated TLS (the platform's cxa.c).
+               'pthread_exit': 'ps5_pthread_exit',
+               # A title may make no system call; SYS_write is write().
+               'syscall': 'ps5_syscall',
+               'getpwnam_r': 'ps5_getpwnam_r', 'posix_madvise': 'ps5_posix_madvise',
+               'strsignal': 'ps5_strsignal',
+               # Only libkernel_sys has them: the imports resolve to nothing.
+               'statfs': 'ps5_statfs', 'fstatfs': 'ps5_fstatfs', 'umask': 'ps5_umask',
+               'fork': 'ps5_fork', 'setsid': 'ps5_setsid', 'wait4': 'ps5_wait4',
+               # src/core_loader_ps5.cpp: the console's, plus dlopen(NULL), the
+               # process handle LLVM's JIT asks for.
+               'dlopen': 'ps5_cores_dlopen', 'dlsym': 'ps5_cores_dlsym',
+               'dlclose': 'ps5_cores_dlclose', 'dlerror': 'ps5_cores_dlerror'}
+    for index, (name, (kind, weak)) in enumerate(sorted(imports.items())):
         target = aliases.get(name, name)
         declaration = f'void core_import_{index}()' if kind == 'FUNC' else f'char core_import_{index}[]'
-        lines.append(f'extern "C" {declaration} asm("{target}");')
+        # A weak reference (a thread_local's initialisation routine, gcov's
+        # hooks) stays null when nothing in the title defines it, as the
+        # loader leaves it for a core.
+        attribute = ' __attribute__((weak))' if weak else ''
+        lines.append(f'extern "C" {declaration} asm("{target}"){attribute};')
     lines.extend(['extern "C" void *ps5_core_import(const char *name)', '{'])
     for index, name in enumerate(sorted(imports)):
         lines.append(f'    if (!std::strcmp(name, "{name}")) return reinterpret_cast<void *>(&core_import_{index});')

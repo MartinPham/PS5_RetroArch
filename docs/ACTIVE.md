@@ -37,11 +37,15 @@ checkout without the sibling forks builds from there.
 
 **Now: RPCS3 as a libretro core** (docs/RPCS3_PORT.md). The goal is God of
 War HD (NPUA80490, a PSN package plus its RAP) booting from `content/PS3/`
-at a 300% scale on RADV, with the firmware from `system/RPCS3/`. Phase 1, the
-audit, is done: fork github.com/mihawk-99/PS5_RPCS3 at upstream 1707d7fc883e,
-the dependency decisions, the frontend design and the platform gaps (a)-(h).
-Next is ladder step 1: the pinned LLVM and FFmpeg builds and
-`tools/build-rpcs3.sh`.
+at a 300% scale on RADV, with the firmware from `system/RPCS3/`. Ladder steps
+1 to 5 are done (docs/PHASE_LOG.md, 2026-09-28): the core builds from my fork
+PS5_RPCS3 (`main`, published) with the pinned LLVM, FFmpeg and libiconv, loads
+on the console, installs the firmware, and runs RPCS3's `gs_gcm_hello_world`
+test with the LLVM recompilers on RADV, picture and full-speed audio, exiting
+cleanly. Next is step 6: the game's package install and boot at 100%, then
+300%, the battery and the ten-minute run. Known costs: the shader
+interpreter's 6,650 pipelines compile before a first boot (about 100 s, then
+cached), with no loading screen yet.
 
 **Dolphin transitions (paused 2026-09-28 for RPCS3):** Rogue Leader's dips are
 not shader compiles. The emulation thread spins in `sched_yield` inside a

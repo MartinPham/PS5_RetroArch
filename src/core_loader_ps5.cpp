@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <dlfcn.h>
 #include <pthread.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -698,4 +699,62 @@ extern "C" int ps5_core_dlclose(void *handle)
 extern "C" char *ps5_core_dlerror()
 {
     return error_text[0] ? error_text : nullptr;
+}
+
+/* The dl* functions a core imports (tools/core-imports.py). They are the
+ * console's, as a core's imports always were, with one addition: dlopen(NULL),
+ * the process's own handle, which the console refuses and whose dlerror() is
+ * then NULL. LLVM's JIT asks for it before anything else (RPCS3's PPU and SPU
+ * recompilers, through llvm::sys::DynamicLibrary) and copied that NULL into a
+ * string. The handle's symbols are the ones a core may import: the title's
+ * bindings for cores (ps5_core_import). */
+namespace
+{
+char g_process_handle;
+thread_local char g_core_dl_error[160];
+} // namespace
+
+extern "C" void *ps5_cores_dlopen(const char *path, int mode)
+{
+    g_core_dl_error[0] = 0;
+    if (!path)
+        return &g_process_handle;
+    void *const handle = dlopen(path, mode);
+    if (!handle)
+    {
+        const char *const why = dlerror();
+        std::snprintf(g_core_dl_error, sizeof(g_core_dl_error), "%s: %s", path,
+                      why ? why : "not loadable by a title");
+    }
+    return handle;
+}
+
+extern "C" void *ps5_cores_dlsym(void *handle, const char *name)
+{
+    g_core_dl_error[0] = 0;
+    if (handle != &g_process_handle)
+        return dlsym(handle, name);
+    void *const address = name ? ps5_core_import(name) : nullptr;
+    if (!address)
+        std::snprintf(g_core_dl_error, sizeof(g_core_dl_error),
+                      "%s: not a symbol a core may import", name ? name : "<null>");
+    return address;
+}
+
+extern "C" int ps5_cores_dlclose(void *handle)
+{
+    return handle == &g_process_handle ? 0 : dlclose(handle);
+}
+
+extern "C" char *ps5_cores_dlerror()
+{
+    if (g_core_dl_error[0])
+    {
+        /* Reported once, as dlerror() does. */
+        static thread_local char reported[sizeof(g_core_dl_error)];
+        std::memcpy(reported, g_core_dl_error, sizeof(reported));
+        g_core_dl_error[0] = 0;
+        return reported;
+    }
+    return dlerror();
 }

@@ -61,7 +61,7 @@ bash "$root/tools/setup-native-dependencies.sh" >/dev/null
 echo "==> [title] step 1/3: the frontend"
 "$root/tools/build-retroarch.sh"
 core_names=(fceumm mgba snes9x fbneo genesis_plus_gx ppsspp dolphin pcsx2
-    mednafen_psx_hw mupen64plus_next mednafen_saturn vice_x64sc desmume azahar mame)
+    mednafen_psx_hw mupen64plus_next mednafen_saturn vice_x64sc desmume azahar mame rpcs3)
 core_files=()
 for core_name in "${core_names[@]}"; do
     # Each library keeps its libretro name; the build script is the port's.

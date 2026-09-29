@@ -4259,3 +4259,90 @@ Next for Dolphin, when I come back to it: run the stack scan and name what
 the emulation thread spins on, then the compile-thread priority, the boot INI
 save, the GPU-thread cost and the MMU fast path. The installed title is
 build 6abfd89d, and the Dolphin battery passes on it.
+
+## 2026-09-28 — RPCS3: the core builds, loads, installs the firmware and runs a PS3 program (ladder steps 1, 3, 4 and 5)
+
+**Build (steps 1 and 3).** `tools/build-rpcs3.sh` builds `rpcs3_libretro.so`
+from my fork PS5_RPCS3 (github.com/mihawk-99/PS5_RPCS3, `main`, pinned in the
+script) with the pinned dependencies:
+
+| Dependency | Script | Result |
+| --- | --- | --- |
+| LLVM 22.1 (my fork PS5_LLVM, X86 only, libraries only) | `tools/build-llvm.sh` | 105 archives, 223 MB |
+| FFmpeg 8.1.1 (signed tarball, RPCS3's component list) | `tools/build-ffmpeg.sh` | 12 MB of archives |
+| GNU libiconv 1.18 (signed tarball) | `tools/build-libiconv.sh` | 1.1 MB |
+
+The core is about 105 MB. `tools/check-core.py` passes, and it now also fails
+any core that makes a system call itself: the first RPCS3 link carried 233
+system-call stubs from the SDK's static payload libc, which asmjit's CMake had
+linked by name (`-lc`). The console killed the title the first time one ran
+(`fstatat` in `Emu.Init`). asmjit links no C library by name in the fork now,
+and no other core had any.
+
+**Load (step 4).** On the console the loader maps the core (1,344 static
+initialisers; RPCS3's 56 GiB guest layout reserved from 64 GiB up), and
+`retro_init` runs `Emu.Init`. What it took, in the order the console showed it:
+
+- *Imports the console resolves to nothing* at run time although the SDK's
+  stubs link them: `gai_strerror`, then `statfs`, `fstatfs`, `umask`, `fork`,
+  `setsid` and `wait4` (only libkernel_sys has them). With the static libc
+  gone: `syscall` (Abseil's raw logging), `getpwnam_r`, `posix_madvise` and
+  `strsignal`. All are in the platform layer now (SDK a9fbb6a), aliased in
+  `tools/core-imports.py`.
+- *Weak references* (thread-local initialisation routines, gcov's hooks) are
+  bound weakly in the title's import table, so they stay null.
+- *RetroArch loads the core once to read its information* and unloads it
+  without `retro_init`: RPCS3's log listeners now live from `retro_init` to
+  `retro_deinit`, since one with static storage outlived RPCS3's logger.
+- *Thread exit.* libkernel runs a thread's key destructors in one pass and in
+  no set order, and emulated TLS frees a thread's storage from its own key, so
+  a C++ `thread_local` destructor could run on freed storage (the first thread
+  to exit crashed in the heap). The platform's `pthread_create` wrapper runs a
+  thread's `thread_local` destructors when its start routine returns, as glibc
+  does; the probe's check reads the thread's value in its destructor.
+- *Direct memory is handed out again as it was*: 64 KiB released and
+  allocated again read back its old bytes. The platform zeroes what it
+  promises fresh (shared objects, committed units, executable regions), and
+  the title heap's large `calloc` clears again (dlmalloc's `MMAP_CLEARS` had
+  been on, a latent bug for every core).
+- *CPUs:* `sysconf` says 16, a title runs on 13; `ps5_sysconf` answers 13,
+  and `pthread_getaffinity_np` accepts sets of 8 and 16 bytes only (FreeBSD's
+  32-byte `cpuset_t` gets ERANGE), so the affinity calls go through the
+  exported 64-bit mask.
+- *Emulated TLS* costs 4.7 ns a read against 1.3 ns for a global.
+
+**Firmware and a program (step 5).** `PS3UPDAT.PUP` from `system/RPCS3/`
+installs inside `retro_load_game` (the TAR loader writes `dev_flash`; about
+9 s). RetroArch brings up Vulkan through the core's negotiation, and RPCS3's
+own device code makes the device on the PS5's GPU (RADV). Then:
+
+- VMA needs volk's entry points handed to it (Vulkan is loaded at run time).
+- RSX starts the PPU only if it finds the emulator starting when its thread
+  begins; the renderer set up faster than the boot, so the program stayed in
+  `starting`. The core's frame now waits for the boot, which is the order the
+  Qt application gets by timing.
+- RPCS3's shader interpreter compiles 6,650 base pipelines before the program
+  starts (about 100 s the first time, RADV's cache after that), without a
+  loading screen yet.
+- LLVM's JIT asks for `dlopen(NULL)`; the console refuses it and `dlerror()`
+  is then NULL. Cores' `dl*` imports go through the title's loader now, which
+  answers the process handle from the core import table and is otherwise the
+  console's.
+- Every LLVM compile reserved 768 MiB and kept it; the firmware's modules ran
+  out the area reservations were placed in. The platform places them on up to
+  1 TiB, and on the PS5 the fork releases the range when the compiler goes.
+- The console's kqueue does not wake a waiter for a user event re-added with
+  `NOTE_TRIGGER` (measured): RSX audio's thread never stopped, so every
+  shutdown timed out. The fork triggers it the canonical way.
+- The image handed to RetroArch was a stack copy, which RetroArch reads again
+  to repeat a frame or take a screenshot (a crash in `radv_UpdateDescriptorSets`).
+
+With all of that, RPCS3's own test program `gs_gcm_hello_world.elf` boots
+with the LLVM recompilers: 71 firmware modules compile (about 50 s the first
+time), the program runs, and its "Hello World!" is on RetroArch's screenshot
+(3840×2160, of RPCS3's 720p output). cellAudio's output reaches RetroArch at
+full speed (10 s windows at 100%), the program exits on RetroArch's quit, and
+the core unloads cleanly. The CTS run was paused for these runs and resumed
+afterwards.
+
+Next: God of War HD from its package and licence, first at 100%.

@@ -22,6 +22,20 @@ ALLOWED_IMPORTS = {'libkernel_web.sprx', 'libSceLibcInternal.sprx',
                    'libScePosixForWebKit.sprx'}
 
 
+def raw_system_calls(path):
+    """The functions whose code executes syscall or sysenter itself."""
+    listing = subprocess.run(['llvm-objdump', '-d', '--no-show-raw-insn', str(path)],
+                             capture_output=True, text=True, check=True).stdout
+    functions, current = [], None
+    for line in listing.splitlines():
+        label = re.match(r'^[0-9a-f]+ <(.+)>:$', line)
+        if label:
+            current = label.group(1)
+        elif re.search(r'\s(syscall|sysenter)$', line) and current and current not in functions:
+            functions.append(current)
+    return functions
+
+
 def inspect(path):
     data = Path(path).read_bytes()
     if len(data) < 64 or data[:8] != b'\x7fELF\x02\x01\x01\x09':
@@ -62,6 +76,13 @@ def inspect(path):
         loads.append({'flags': flags, 'alignment': align})
     if not loads:
         raise ValueError('no loadable segments')
+    # A title may make no system call itself; a core that carries one (the SDK's
+    # static payload libc linked by a dependency's "-lc") is killed by the
+    # console the first time it runs it.
+    raw = raw_system_calls(path)
+    if raw:
+        shown = ', '.join(raw[:8]) + (f' and {len(raw) - 8} more' if len(raw) > 8 else '')
+        raise ValueError(f'raw system calls in {len(raw)} functions: {shown}')
     return {'sha256': hashlib.sha256(data).hexdigest(), 'bytes': len(data),
             'elf': 'ELF64 x86-64 ET_DYN FreeBSD/PS5', 'needed': needed,
             'libretro_exports': sorted(REQUIRED), 'undefined_symbols': sorted(undefined),

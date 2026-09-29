@@ -32,12 +32,29 @@ class CoreImports(unittest.TestCase):
     def test_aligned_new_and_getcwd_bind_to_the_title(self):
         # Over-aligned operator new comes from direct memory, as plain new does,
         # and getcwd from the platform layer (libc's faults for a title).
-        generated = imports.generate({'_ZnwmSt11align_val_t': 'FUNC', '_ZnamSt11align_val_t': 'FUNC',
-                                      '_ZnwmSt11align_val_tRKSt9nothrow_t': 'FUNC', 'getcwd': 'FUNC'})
+        generated = imports.generate({'_ZnwmSt11align_val_t': ('FUNC', False),
+                                      '_ZnamSt11align_val_t': ('FUNC', False),
+                                      '_ZnwmSt11align_val_tRKSt9nothrow_t': ('FUNC', False),
+                                      'getcwd': ('FUNC', False)})
         self.assertIn('asm("ps5_core_new_aligned")', generated)
         self.assertIn('asm("ps5_core_new_aligned_nothrow")', generated)
         self.assertIn('asm("ps5_getcwd")', generated)
         self.assertNotIn('asm("_ZnwmSt11align_val_t")', generated)
+
+    def test_weak_only_when_every_core_imports_weakly(self):
+        # A thread_local's initialisation routine, weak in the one core that
+        # names it, stays null when the title defines none; a name one core
+        # imports strongly is bound strongly.
+        first = '''1: 0 0 NOTYPE WEAK DEFAULT UND _ZTH16g_tls_log_prefix
+2: 0 0 FUNC WEAK DEFAULT UND shared'''
+        second = '1: 0 0 FUNC GLOBAL DEFAULT UND shared'
+        with patch.object(imports.subprocess, 'check_output', side_effect=[first, second]):
+            collected = imports.collect_imports(['one.so', 'two.so'])
+        self.assertEqual(collected['_ZTH16g_tls_log_prefix'], ('NOTYPE', True))
+        self.assertEqual(collected['shared'], ('FUNC', False))
+        generated = imports.generate(collected)
+        self.assertIn('asm("_ZTH16g_tls_log_prefix") __attribute__((weak));', generated)
+        self.assertIn('asm("shared");', generated)
 
     def test_reject_conflicting_types_and_tls(self):
         with patch.object(imports.subprocess, 'check_output', side_effect=[

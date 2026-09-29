@@ -66,6 +66,10 @@ std::atomic<bool> g_running{false};
 constexpr unsigned kMaxStarts = 16;
 std::uint64_t g_starts[kMaxStarts];
 unsigned g_start_count = 0;
+/* The flag file's "all-threads" line: every core thread, up to kMaxThreads,
+ * for a core whose threads start from code it generates (RPCS3's trampolines
+ * move from run to run) and that tolerates the interruptions. */
+bool g_all_threads = false;
 std::atomic<bool> g_stall{false};
 std::atomic<std::uint32_t> g_head{0};
 std::uint64_t g_ring[kRingSize][kFrames + 1];
@@ -327,11 +331,16 @@ extern "C" void ps5_sampler_start()
     char line[64];
     while (g_start_count < kMaxStarts && std::fgets(line, sizeof(line), flag) != nullptr)
     {
+        if (std::strncmp(line, "all-threads", 11) == 0)
+        {
+            g_all_threads = true;
+            continue;
+        }
         if (std::strncmp(line, "stall-ms", 8) == 0)
         {
-            const unsigned long long ms = std::strtoull(line + 8, nullptr, 10);
-            if (ms != 0)
-                g_stall_ns = ms * 1000ull * 1000ull;
+            /* 0 counts every sample, for a core that stalls while RetroArch
+             * keeps presenting. */
+            g_stall_ns = std::strtoull(line + 8, nullptr, 10) * 1000ull * 1000ull;
             continue;
         }
         char *end = nullptr;
@@ -368,7 +377,7 @@ extern "C" void ps5_sampler_add_thread(pthread_t thread, const void *start)
 {
     if (!g_running.load(std::memory_order_acquire))
         return;
-    bool named = false;
+    bool named = g_all_threads;
     for (unsigned at = 0; at < g_start_count; ++at)
         named = named || g_starts[at] == reinterpret_cast<std::uintptr_t>(start);
     if (!named)

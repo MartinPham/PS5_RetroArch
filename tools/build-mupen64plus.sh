@@ -17,7 +17,7 @@ source "$root/tools/core-fork.sh"
 core_stamp_skip mupen64plus \
     "$root/build/cores/stage/cores/mupen64plus_next_libretro.so" \
     "$root/build/cores/stage/info/mupen64plus_next_libretro.info" \
-    -- "$root/tools/build-mupen64plus.sh" "$root/tools/core-fork.sh"
+    -- "$root/tools/build-mupen64plus.sh" "$root/tools/core-fork.sh" "$root/tools/host-nasm.sh"
 [[ $# == 0 ]] || { echo "usage: ${0##*/}" >&2; exit 2; }
 
 revision=98ec1019d191fc3c0e1c2d031f2574e95bd8d30d  # ../PS5_Mupen64Plus main
@@ -26,27 +26,9 @@ core_fork_checkout PS5_Mupen64Plus "$revision"
 core_fork_info mupen64plus_next_libretro.info 8d1fcd13a17310e233be4ff247bf1032f8f786fe685e24cef5ed4ea474ccdfb6
 
 # NASM for the dynarec's linkage (x64/linkage_x64.asm), built for the host.
-nasm_version=2.16.03
-nasm_sha=1412a1c760bbd05db026b6c0d1657affd6631cd0a63cddb6f73cc6d4aa616148
-nasm="$root/.deps/native/nasm-$nasm_version/bin/nasm"
-if [[ ! -x $nasm ]]; then
-    archive="$root/.deps/downloads/nasm-$nasm_version.tar.xz"
-    mkdir -p "$root/.deps/downloads"
-    [[ -f $archive ]] || curl --fail --location --retry 3 \
-        "https://www.nasm.us/pub/nasm/releasebuilds/$nasm_version/nasm-$nasm_version.tar.xz" -o "$archive"
-    printf '%s  %s\n' "$nasm_sha" "$archive" | sha256sum --check --status || {
-        echo "error: NASM archive digest mismatch" >&2; exit 1; }
-    nasm_src="$core_work/nasm-src"
-    rm -rf -- "$nasm_src"
-    mkdir -p "$nasm_src"
-    tar -xJf "$archive" -C "$nasm_src" --strip-components=1
-    # A host tool: the host's compiler, not the console's in CC.
-    (cd "$nasm_src" && env -u CFLAGS -u LDFLAGS CC=cc ./configure -q > /dev/null &&
-        make -s -j"${JOBS:-16}" CC=cc nasm > /dev/null)
-    mkdir -p "$(dirname -- "$nasm")"
-    cp -- "$nasm_src/nasm" "$nasm"
-fi
+source "$root/tools/host-nasm.sh"
+host_nasm
 
 # LDFLAGS goes in the environment: the makefiles add their own to it.
 LDFLAGS="$core_ldflags $core_libs" make -C "$source_dir" -j"${JOBS:-16}" platform=ps5 NASM="$nasm" CC="$core_cc" CXX="$core_cxx" AR="$AR" CC_AS="$CC"
-core_fork_stage "$source_dir/mupen64plus_next_libretro.so" "$core_info" "$revision" tools/build-mupen64plus.sh
+core_fork_stage "$source_dir/mupen64plus_next_libretro.so" "$core_info" "$revision" tools/build-mupen64plus.sh tools/host-nasm.sh
