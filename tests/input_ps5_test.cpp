@@ -87,6 +87,17 @@ extern "C"
         return true;
     }
 }
+// The runloop and video state the script's STOP action arms.
+runloop_state_t test_runloop{};
+video_driver_state_t test_video{};
+runloop_state_t *runloop_state_get_ptr(void)
+{
+    return &test_runloop;
+}
+video_driver_state_t *video_state_get_ptr(void)
+{
+    return &test_video;
+}
 int main()
 {
     void *input = input_ps5.init("");
@@ -226,6 +237,17 @@ int main()
     ps5_joypad.destroy();
     assert(opens == 2 && closes == 2);
     ps5_input_reset_autoconfig(); // Safe before/after driver lifetime.
-    std::puts(
-        "PS5 joypad: raw binding capture, axes, user mappings, poll retention and lifecycle PASS");
+
+    // STOP ends the run on the next frame, as --max-frames does, and only once.
+    test_video.frame_count = 1234;
+    actions[0] = ScriptAction{0.0, false, true};
+    action_count = 1;
+    run_script_actions();
+    assert(test_runloop.max_frames == 1235 && actions[0].done);
+    test_video.frame_count = 2000;
+    run_script_actions();
+    assert(test_runloop.max_frames == 1235);
+    action_count = 0;
+    std::puts("PS5 joypad: raw binding capture, axes, user mappings, poll retention, lifecycle and "
+              "the script's STOP PASS");
 }

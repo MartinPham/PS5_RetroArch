@@ -45,10 +45,11 @@ level at 100% and at 300%, every 10 s window after the boot at 100% speed.
 Getting there took the platform's `realpath`, a layout fix in the LLVM fork's
 `TrailingObjects` (the PS5 ABI ignores `alignas` on an empty base), a mutex
 held across a wait callback in RPCS3's atomic wait engine, the frontend's path
-and image callbacks, and the RetroPads' bindings. Still to do for step 6: the
-ten-minute run, the Close Content + reload battery (122 core threads were
-still running at quit), and my acceptance of the 300% screenshot. After that:
-installing a package's large files without copying them.
+and image callbacks, and the RetroPads' bindings. The ten-minute run at 300%
+(71 of 71 windows at 100%) and the Close Content + reload battery pass; the
+core now unloads at Close Content. Left for step 6: my acceptance of the 300%
+screenshot. Next: installing a package's large files without copying them,
+and RPCS3's overlay icons (`Icons/ui`), which the title does not stage yet.
 
 **Dolphin transitions (paused 2026-09-28 for RPCS3):** Rogue Leader's dips are
 not shader compiles. The emulation thread spins in `sched_yield` inside a

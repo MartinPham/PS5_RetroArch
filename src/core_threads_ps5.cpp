@@ -31,6 +31,7 @@
 #include <mutex>
 
 #include <pthread.h>
+#include <ps5platform/libc.h>
 #include "title_threads.hpp"
 
 extern "C" void ps5_sampler_add_thread(pthread_t thread, const void *start);
@@ -58,13 +59,31 @@ struct Start
     void *argument;
 };
 
+void core_thread_finished(void *)
+{
+    live_core_threads.fetch_sub(1, std::memory_order_acq_rel);
+}
+
+/* A core thread counts as finished after its C++ thread_local destructors,
+ * which are the core's code: registered before any of them, the count's own
+ * runs last, whether the start routine returns or the thread calls
+ * pthread_exit (bound to ps5_pthread_exit, which runs them first). RPCS3's
+ * threads end in pthread_exit and were counted as running for ever, so the
+ * loader kept RPCS3 mapped after Close Content and mapped a second copy on the
+ * reload. A start routine that returns ends the thread the same way, so its
+ * destructors run while its thread-local storage is whole, as the platform's
+ * own threads do, not from libkernel's key destructors (no set order, and
+ * emulated TLS frees a thread's storage from one of them). */
 void *core_thread_trampoline(void *opaque)
 {
     const Start run = *static_cast<Start *>(opaque);
     std::free(opaque);
+    const bool registered =
+        ps5___cxa_thread_atexit_impl(core_thread_finished, nullptr, nullptr) == 0;
     void *const result = run.start(run.argument);
-    live_core_threads.fetch_sub(1, std::memory_order_acq_rel);
-    return result;
+    if (!registered)
+        core_thread_finished(nullptr);
+    ps5_pthread_exit(result);
 }
 
 /* The attributes a core's thread is created with: the core's own, with the stack

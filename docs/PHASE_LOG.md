@@ -4444,5 +4444,35 @@ ship in the Aegean, with RPCS3's Vulkan renderer on RADV:
 
 The two windows after the 300% run's last (7%, 0%) are RetroArch encoding its
 5.8 MB screenshot and quitting after the frame limit, when the core no longer
-runs. At that quit the loader found 122 core threads still running and kept
-the core mapped; the Close Content and reload battery is what tests that.
+runs.
+
+**Ten minutes at 300%.** A twelve-minute run with a scripted Square and Cross
+every 5 s after the menus (124 presses) ran to its end without a crash: 71 of
+71 windows after the boot at 100%. The script is no fighter: Kratos died and
+restarted from checkpoints throughout, so the run covered combat, deaths and
+checkpoint loads, and ended on the game's "You Are Dead" screen.
+
+**Close Content and reload.** The battery (the game to its first level, the
+menu opened and closed twice, Close Content through the Quick Menu, the same
+core and content again, New Game once more) passes: no crash, every window at
+100% but the two boots', and the second boot reaches the game's "Three Weeks
+Earlier" card. Two things were needed:
+
+- *The core never unloaded.* The loader counts a core thread as running until
+  its start routine returns, and RPCS3's threads end in `pthread_exit`: 122
+  were "still running" at every close, so the core stayed mapped and the
+  reload mapped a second copy. A core thread now counts itself finished from
+  its first-registered `thread_local` destructor, which runs last of them,
+  whether it returns or calls `pthread_exit`; a start routine that returns
+  ends through `ps5_pthread_exit`, so its destructors run while its TLS is
+  whole rather than from libkernel's key destructors; and the loader allows
+  20 ms after the count reaches zero for the key destructors that follow. RPCS3
+  now unloads at Close Content and reloads at the same base. PPSSPP's battery
+  (Ghost of Sparta) still passes, the core unloaded at each close.
+- *RetroArch forgets `--max-frames` when a core closes*, so a run that reloads
+  never took its screenshot or ended. The pad script has a `STOP` action,
+  which ends the run as the frame limit does, screenshot included.
+
+A 4K screenshot costs a run its last windows: RetroArch encodes and writes
+it after the last frame (5.5-5.8 MB of PNG, held to the title's write budget),
+and the core does not run meanwhile, so the windows then read 0-70%.

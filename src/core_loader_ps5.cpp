@@ -666,11 +666,21 @@ extern "C" int ps5_core_dlclose(void *handle)
                  * crashed (2026-09-24). Their exit is waited for, up to two
                  * seconds; a core whose threads outlive that stays mapped. */
                 unsigned live = ps5_core_threads_live();
+                const bool waited_for_threads = live != 0;
                 for (unsigned waited = 0; live != 0 && waited < 200; ++waited)
                 {
                     const timespec pause = {0, 10 * 1000 * 1000};
                     nanosleep(&pause, nullptr);
                     live = ps5_core_threads_live();
+                }
+                /* A thread counts itself finished after its thread_local
+                 * destructors (src/core_threads_ps5.cpp) and then still runs
+                 * libkernel's key destructors, in no set order: a moment for
+                 * the last ones to end before their code goes. */
+                if (waited_for_threads && live == 0)
+                {
+                    const timespec settle = {0, 20 * 1000 * 1000};
+                    nanosleep(&settle, nullptr);
                 }
                 for (size_t i = m->finalizer_count; i; --i)
                     reinterpret_cast<void (*)()>(m->finalizers[i - 1])();

@@ -27,8 +27,11 @@
  * menu's history does. It is meant for the menu, after the script closed the
  * content through the Quick Menu: the poll runs inside the core's retro_run
  * while content runs, and unloading a core from there crashed Dolphin inside
- * its own frame (2026-09-25), which is why there is no CLOSE action. Testing
- * only: the file is never shipped.
+ * its own frame (2026-09-25), which is why there is no CLOSE action. And
+ * `<seconds> STOP` ends the run as --max-frames does, with its screenshot:
+ * RetroArch forgets --max-frames when a core closes, so a run that reloads
+ * content otherwise never ends or takes its screenshot. Testing only: the file
+ * is never shipped.
  *
  * Reference: docs/REFERENCE.md, "Input".
  */
@@ -45,7 +48,9 @@
 
 #include <input/input_driver.h>
 #include "content.h"
+#include "gfx/video_driver.h"
 #include "retroarch_types.h"
+#include "runloop.h"
 #include "tasks/task_content.h"
 #include <tasks/tasks_internal.h>
 
@@ -153,12 +158,13 @@ constexpr int script_capacity = 128;
 constexpr double script_default_hold = 0.15;
 ScriptPress script[script_capacity];
 int script_count = 0;
-/* The script's RELOAD actions (the top of this file), run once each from the
- * poll on the main thread. */
+/* The script's RELOAD and STOP actions (the top of this file), run once each
+ * from the poll on the main thread. */
 struct ScriptAction
 {
     double at;
     bool done;
+    bool stop;
 };
 constexpr int action_capacity = 32;
 ScriptAction actions[action_capacity];
@@ -194,9 +200,10 @@ void load_script() noexcept
         const int fields = std::sscanf(line, "%lf %95s %lf", &at, buttons, &held);
         if (fields < 2)
             continue;
-        if (std::strcmp(buttons, "RELOAD") == 0 && action_count < action_capacity)
+        if ((std::strcmp(buttons, "RELOAD") == 0 || std::strcmp(buttons, "STOP") == 0) &&
+            action_count < action_capacity)
         {
-            actions[action_count++] = ScriptAction{at, false};
+            actions[action_count++] = ScriptAction{at, false, std::strcmp(buttons, "STOP") == 0};
             continue;
         }
         std::uint32_t mask = 0;
@@ -456,7 +463,7 @@ bool args_paths(char *core, std::size_t core_size, char *content, std::size_t co
     return core[0] != '\0' && content[0] != '\0';
 }
 
-/* Runs the script's RELOAD actions whose time has come. */
+/* Runs the script's RELOAD and STOP actions whose time has come. */
 void run_script_actions() noexcept
 {
     if (action_count == 0)
@@ -474,6 +481,16 @@ void run_script_actions() noexcept
         if (action.done || seconds < action.at)
             continue;
         action.done = true;
+        if (action.stop)
+        {
+            // The next frame is the last, as when --max-frames is reached.
+            runloop_state_get_ptr()->max_frames =
+                static_cast<unsigned>(video_state_get_ptr()->frame_count + 1);
+            char note[96];
+            std::snprintf(note, sizeof(note), "input: pad script STOP at %.2f s", seconds);
+            ps5_input_trace(note);
+            continue;
+        }
         char core[256];
         char content[256];
         bool pushed = false;
