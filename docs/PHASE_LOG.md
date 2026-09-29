@@ -4346,3 +4346,103 @@ the core unloads cleanly. The CTS run was paused for these runs and resumed
 afterwards.
 
 Next: God of War HD from its package and licence, first at 100%.
+
+## 2026-09-28 — RPCS3: God of War HD installs behind a loading screen and boots to its SPU compiles (ladder step 6, begun)
+
+**The package installs.** RPCS3's installer normalises its path with
+`std::filesystem::weakly_canonical`, which libc++ builds on `realpath`, and the
+console refuses a title's `realpath` with EPERM, even for `/app0` (the files
+probe, measured). The platform answers it now (`ps5_realpath`, SDK 8160289):
+the path made absolute from `ps5_getcwd`, `.` and `..` resolved by name, each
+component checked with `stat`. The title links it too (`--wrap=realpath`), and
+the cores' imports are aliased to it.
+
+God of War HD's 6.3 GB package then installed in 31.5 minutes: 13 MB/s for the
+first 2.7 GB, 2.2 MB/s after that. The sampler put the writing thread in
+`write()` for almost every sample, not in AES (AES-NI) or the reads. The SDK's
+new sustained write probe (`writes`, SDK c769422) measured why: a title writes
+242 MiB/s for about 1.3 GiB, even with `O_DIRECT`, then 2.0-2.1 MiB/s however
+it writes, while the FTP server wrote the same folder at 22 MiB/s at the same
+moment. The storage is not the limit; a title's writes are (the SDK's
+docs/PROBE.md, "Sustained writes"). Installing a package's large files without
+copying them, read and decrypted from the package the way RPCS3 reads an ISO,
+would remove both the wait and the second copy; that is the next step for
+installs.
+
+**A loading screen.** The install ran inside `retro_load_game`, so RetroArch
+showed a black screen for as long as it took. The fork (78dfa8f) installs the
+firmware and packages on a worker thread and shows a loading screen until
+RPCS3's first frame (docs/RPCS3_PORT.md, "Content loading and the loading
+screen"): the game's own art tinted violet, its icon, the title in Inter, and a
+violet-to-orchid bar with the sizes, speed and time left, then "Starting" with
+RPCS3's compile progress, or what failed. RetroArch's screenshot on the console,
+one minute into the install, showed it at 36% (2.32 GB of 6.32 GB). Along the
+way:
+
+- the screen called `vkCreateImage` before RPCS3 had loaded any device
+  function through volk (a jump to 0); it loads them for RetroArch's device;
+- a package header's `title_id` is the content ID (`UP9000-NPUA80490_00-...`),
+  so the check for an installed game never matched and each load installed the
+  package again, overwriting the installed game (which then had to be
+  installed again); the title ID now comes from its PARAM.SFO, and a finished
+  install is recorded in `system/RPCS3/libretro/installed/`;
+- closing content during the install waited for the whole 6 GB file: RPCS3's
+  installer saw an abort only between files. It checks after every block now,
+  and a file left part way counts the package as aborted.
+
+The resolution scale became a core option (100% to 300%, 300% by default).
+
+**The boot.** With the game installed, the boot got through the PPU executable
+and then stopped at RPCS3's boot music: the overlay plays SND0.AT3 through the
+frontend's video source, and the core made none. It makes a silent one now.
+Next, the shader interpreter's 6,650 pipelines (115 s the first time, a few
+seconds from RADV's cache after that), then SPU compiles, where every run
+crashed within seconds in LLVM's `MachineInstr::hasOrderedMemoryRef`, reading
+`0x2_xxxx_xxxx`. The crash report now prints every register and the heap words
+around them, which showed the instruction's two memory operands with the
+second one's upper 32 bits replaced by 2: the next allocation's first field.
+LLVM's `TrailingObjects` takes its alignment from an empty `alignas` base,
+which the PS4/PS5 ABI ignores, so on the console such classes were allocated
+4 bytes short (docs/RPCS3_PORT.md, "LLVM"). The LLVM fork (98b45cc) fixes it;
+the PS5 target now lays such a class out as the host does.
+
+**To gameplay.** Four more stops, each found from the console's own report:
+
+- *The game's folder lost its first letter.* Emulator::Load cuts the folder
+  name after the resolved `<hdd0>/game` plus a separator of its own, and the
+  core had left the path callbacks at their default, which returns a path as
+  given, trailing separator and all: the game booted as
+  `/dev_hdd0/game/PUA80490/` and found none of its files. The core resolves
+  paths as the Qt application does (`QFileInfo::canonicalFilePath`), through
+  `std::filesystem` on the platform's `realpath`.
+- *Three frontend callbacks were unset* (`get_scaled_image`, `get_image_info`,
+  `get_photo_path`). The first overlay with an icon called an empty
+  `std::function`, and a core built without exceptions terminates on the
+  `std::bad_function_call`. They are stb_image's now. RPCS3's terminate
+  handler also names an uncaught exception and prints its message, and the
+  title's crash report lists the code addresses on the crashing stack, up to
+  its top: the throw site survives, since nothing unwinds before terminate.
+- *"mutex lock failed: Resource deadlock avoided".* On FreeBSD and the PS5
+  the atomic wait engine waits on a `std::condition_variable`, and the waiting
+  thread held its own mutex while running its wait callback; an SPU thread's
+  callback notifies lv2 objects, the notification locks every waiter's mutex,
+  its own among them, and the console's default mutex checks for that
+  (EDEADLK). The fork releases the mutex around the callback; a notification
+  meanwhile sets `sync` first, which is checked again under the mutex.
+- *No button reached the game.* The core named the RetroPads in the input
+  configuration but left RPCS3's default bindings, which are empty. Each pad
+  gets the RetroPad handler's own now (`pad_thread::InitPadConfig`).
+
+With those, God of War HD boots through its logo video to its menu, and a
+scripted Cross on "New Game" and the difficulty reaches the first level, the
+ship in the Aegean, with RPCS3's Vulkan renderer on RADV:
+
+| Scale | Evidence | 10 s windows after the boot |
+| --- | --- | --- |
+| 100% (720p) | gameplay screenshot, 3840×2160 | 17 of 17 at 100% |
+| 300% (2160p) | gameplay screenshot, 3840×2160 | 17 of 17 at 100% |
+
+The two windows after the 300% run's last (7%, 0%) are RetroArch encoding its
+5.8 MB screenshot and quitting after the frame limit, when the core no longer
+runs. At that quit the loader found 122 core threads still running and kept
+the core mapped; the Close Content and reload battery is what tests that.

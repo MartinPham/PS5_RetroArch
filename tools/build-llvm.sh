@@ -19,7 +19,7 @@ set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$root"
 
-revision=f8d662cce7162d70bfb315344623eca7ab9eef88  # PS5_LLVM main: llvmorg-22.1.8 and the port
+revision=98b45cc22e98844b7d49bbedefdfee04a740650a  # PS5_LLVM main: llvmorg-22.1.8 and the port
 prefix="$root/.deps/native/llvm-ps5"
 [[ -f $prefix/.revision && $(<"$prefix/.revision") == "$revision" ]] && {
     echo "==> [llvm] $revision already built in $prefix"; exit 0; }

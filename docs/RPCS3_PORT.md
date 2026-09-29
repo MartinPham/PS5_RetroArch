@@ -353,8 +353,21 @@ Where the build and the first code differ from the audit above.
 
 - *LLVM* is my fork `../PS5_LLVM` (github.com/mihawk-99/PS5_LLVM), pinned in
   `tools/build-llvm.sh`. The PS4/PS5 ABI ignores `alignas` on an empty base
-  class, so `SmallVector`'s layout assertions fail for this target; the fork
-  aligns `SmallVector` itself under `__SCE__`. The build uses host tablegen
+  class, and LLVM relies on it twice. `SmallVector<T, 0>`'s layout assertions
+  failed at build time; the fork aligns `SmallVector` itself under `__SCE__`.
+  `TrailingObjects` failed silently: its empty aligner base is what raises a
+  class to its trailing objects' alignment, so on the PS5 a header of an `int`
+  and some `bool`s stayed 4-aligned and 12 bytes, and two trailing pointers
+  were given 28 bytes while `getTrailingObjects` read them from 16 to 32. The
+  next allocation's first field overwrote the last pointer's upper half
+  (`MachineInstr::ExtraInfo`'s memory operands: God of War HD's SPU compiles
+  crashed in `MachineInstr::hasOrderedMemoryRef` on `0x2_xxxx_xxxx`, heap
+  pointers with their upper 32 bits replaced by the count 2). The fork gives
+  the aligner a zero-length member there, a non-empty base without storage;
+  the PS5 target then lays such a class out as the host does (8-aligned, 16
+  bytes, 32 allocated, trailing objects at 16). The other empty `alignas`
+  classes in LLVM and RPCS3 are standalone objects, whose alignment the ABI
+  keeps. The build uses host tablegen
   tools (`LLVM_NATIVE_TOOL_DIR`) and builds only the libraries
   (`LLVM_INCLUDE_TOOLS=OFF`), since no LLVM program links for the console.
 - *FFmpeg* 8.1.1 comes from its signed release tarball (`tools/build-ffmpeg.sh`),

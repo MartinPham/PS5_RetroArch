@@ -1,6 +1,6 @@
 # Active work
 
-_Updated: 2026-09-28_
+_Updated: 2026-09-29_
 
 ## Now: v0.5.0-alpha.5 released, the first on RADV; Dolphin's first start next
 
@@ -37,15 +37,18 @@ checkout without the sibling forks builds from there.
 
 **Now: RPCS3 as a libretro core** (docs/RPCS3_PORT.md). The goal is God of
 War HD (NPUA80490, a PSN package plus its RAP) booting from `content/PS3/`
-at a 300% scale on RADV, with the firmware from `system/RPCS3/`. Ladder steps
-1 to 5 are done (docs/PHASE_LOG.md, 2026-09-28): the core builds from my fork
-PS5_RPCS3 (`main`, published) with the pinned LLVM, FFmpeg and libiconv, loads
-on the console, installs the firmware, and runs RPCS3's `gs_gcm_hello_world`
-test with the LLVM recompilers on RADV, picture and full-speed audio, exiting
-cleanly. Next is step 6: the game's package install and boot at 100%, then
-300%, the battery and the ten-minute run. Known costs: the shader
-interpreter's 6,650 pipelines compile before a first boot (about 100 s, then
-cached), with no loading screen yet.
+at a 300% scale on RADV, with the firmware from `system/RPCS3/`. Steps 1 to 5
+are done, and step 6 has reached gameplay (docs/PHASE_LOG.md, 2026-09-28): the
+package installs behind the core's loading screen (31.5 minutes for 6.3 GB,
+held to a title's ~2 MiB/s write budget), and the game boots to its first
+level at 100% and at 300%, every 10 s window after the boot at 100% speed.
+Getting there took the platform's `realpath`, a layout fix in the LLVM fork's
+`TrailingObjects` (the PS5 ABI ignores `alignas` on an empty base), a mutex
+held across a wait callback in RPCS3's atomic wait engine, the frontend's path
+and image callbacks, and the RetroPads' bindings. Still to do for step 6: the
+ten-minute run, the Close Content + reload battery (122 core threads were
+still running at quit), and my acceptance of the 300% screenshot. After that:
+installing a package's large files without copying them.
 
 **Dolphin transitions (paused 2026-09-28 for RPCS3):** Rogue Leader's dips are
 not shader compiles. The emulation thread spins in `sched_yield` inside a
