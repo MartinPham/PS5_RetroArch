@@ -98,6 +98,7 @@ class Notices(unittest.TestCase):
         self.report(b"another build")
         with self.assertRaisesRegex(stage.NoticeError, "build.json describes"):
             self.run_stage()
+        self.assertFalse((self.title / "licenses").exists(), "a partial licenses/ was left")
 
     def test_a_missing_licence_text_is_refused(self):
         (self.repo / "src/demo-license.txt").unlink()

@@ -215,9 +215,18 @@ def readme(components, tag):
 
 
 def stage(title, driver, tag, tokens, root=ROOT, table=TABLE):
+    """Write licenses/; on any failure leave no partial folder behind."""
+    target = title / "licenses"
+    try:
+        return write(title, driver, tag, tokens, root, table, target)
+    except BaseException:
+        shutil.rmtree(target, ignore_errors=True)
+        raise
+
+
+def write(title, driver, tag, tokens, root, table, target):
     table = json.loads(Path(table).read_text(encoding="utf-8"))
     files = title_files(title)
-    target = title / "licenses"
     if target.exists():
         shutil.rmtree(target)
     target.mkdir()
