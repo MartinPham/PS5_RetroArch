@@ -216,25 +216,29 @@ void report(std::uint32_t from, std::uint32_t to, std::uint32_t stall_samples)
     {
         if (busy[thread] * 10u < totals[thread] || busy[thread] == 0)
             continue;
-        std::uint32_t best = slots;
-        for (std::uint32_t slot = 0; slot < slots; ++slot)
-            if (g_counts[slot].samples != 0 && g_counts[slot].thread == thread &&
-                !system_address(g_counts[slot].leaf) &&
-                (best == slots || g_counts[slot].samples > g_counts[best].samples))
-                best = slot;
-        std::fprintf(stderr, "sampler: thread=%u samples=%u busy=%u top=0x%016llx n=%u\n", thread,
-                     totals[thread], busy[thread],
-                     best == slots ? 0ull : static_cast<unsigned long long>(g_counts[best].leaf),
-                     best == slots ? 0u : g_counts[best].samples);
-        if (best == slots)
-            continue;
-        const std::uint64_t *const chain = g_ring[g_counts[best].example & (kRingSize - 1)];
-        char line[512];
-        int used = std::snprintf(line, sizeof(line), "sampler:   chain");
-        for (unsigned depth = 1; depth <= kFrames && used > 0 && used < 480; ++depth)
-            used += std::snprintf(line + used, sizeof(line) - used, " %llx",
-                                  static_cast<unsigned long long>(chain[depth]));
-        std::fprintf(stderr, "%s\n", line);
+        std::fprintf(stderr, "sampler: thread=%u samples=%u busy=%u\n", thread, totals[thread],
+                     busy[thread]);
+        /* Its most frequent groups, blocked ones too (where a busy thread
+         * waits), each with one chain. */
+        for (unsigned rank = 0; rank < 6; ++rank)
+        {
+            std::uint32_t best = slots;
+            for (std::uint32_t slot = 0; slot < slots; ++slot)
+                if (g_counts[slot].samples != 0 && g_counts[slot].thread == thread &&
+                    (best == slots || g_counts[slot].samples > g_counts[best].samples))
+                    best = slot;
+            if (best == slots)
+                break;
+            const std::uint64_t *const chain = g_ring[g_counts[best].example & (kRingSize - 1)];
+            char line[512];
+            int used = std::snprintf(line, sizeof(line), "sampler:   group thread=%u n=%u chain",
+                                     thread, g_counts[best].samples);
+            for (unsigned depth = 1; depth <= kFrames && used > 0 && used < 480; ++depth)
+                used += std::snprintf(line + used, sizeof(line) - used, " %llx",
+                                      static_cast<unsigned long long>(chain[depth]));
+            std::fprintf(stderr, "%s\n", line);
+            g_counts[best].samples = 0;
+        }
     }
     for (unsigned rank = 0; rank < kTop; ++rank)
     {
