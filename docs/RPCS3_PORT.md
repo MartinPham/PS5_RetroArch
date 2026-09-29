@@ -425,7 +425,7 @@ unloaded, so the next load finds its addresses free.
 handler it replaced (the title's crash reporter), and the title's handlers
 return when the core is unloaded.
 
-**Platform gaps closed in the SDK (a9fbb6a).** Each is aliased in
+**Platform gaps closed in the SDK (8160289).** Each is aliased in
 `tools/core-imports.py`.
 
 - No export at all: `accept4`, `getpagesizes`, `in6addr_any`.
@@ -437,6 +437,12 @@ return when the core is unloaded.
 - Answered differently on the console: `pthread_getaffinity_np` and
   `pthread_setaffinity_np` (the 64-bit mask), `sysconf` (13 CPUs, not 16),
   `pthread_exit` (a thread's `thread_local` destructors first).
+- Refused: `realpath` answers EPERM, even for `/app0`, so libc++'s
+  `std::filesystem::canonical` and `weakly_canonical` came back empty and the
+  package installer could not normalise its path. `ps5_realpath` makes the path
+  absolute, resolves `.` and `..` by name and checks each component with
+  `stat`; it keeps a symbolic link's name. The title links it too
+  (`--wrap=realpath`).
 - Memory: committed ranges (`ps5_vrange_commit`), exact reservations, zeroing
   of reused direct memory, and placement up to 1 TiB.
 

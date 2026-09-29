@@ -29,16 +29,20 @@ class CoreImports(unittest.TestCase):
         self.assertIn('asm("ps5_rewinddir")', generated)
         self.assertIn('asm("ps5_opendir")', generated)
 
-    def test_aligned_new_and_getcwd_bind_to_the_title(self):
+    def test_aligned_new_getcwd_and_realpath_bind_to_the_title(self):
         # Over-aligned operator new comes from direct memory, as plain new does,
-        # and getcwd from the platform layer (libc's faults for a title).
+        # and getcwd and realpath from the platform layer (libc's fault or are
+        # refused for a title).
         generated = imports.generate({'_ZnwmSt11align_val_t': ('FUNC', False),
                                       '_ZnamSt11align_val_t': ('FUNC', False),
                                       '_ZnwmSt11align_val_tRKSt9nothrow_t': ('FUNC', False),
-                                      'getcwd': ('FUNC', False)})
+                                      'getcwd': ('FUNC', False),
+                                      'realpath': ('FUNC', False)})
         self.assertIn('asm("ps5_core_new_aligned")', generated)
         self.assertIn('asm("ps5_core_new_aligned_nothrow")', generated)
         self.assertIn('asm("ps5_getcwd")', generated)
+        self.assertIn('asm("ps5_realpath")', generated)
+        self.assertNotIn('asm("realpath")', generated)
         self.assertNotIn('asm("_ZnwmSt11align_val_t")', generated)
 
     def test_weak_only_when_every_core_imports_weakly(self):

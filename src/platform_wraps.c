@@ -45,6 +45,13 @@ DIR *__wrap_fdopendir(int fd)
     return ps5_fdopendir(fd);
 }
 
+/* A title's realpath is refused (EPERM); libc++'s std::filesystem canonical
+ * paths are built on it. */
+char *__wrap_realpath(const char *path, char *resolved)
+{
+    return ps5_realpath(path, resolved);
+}
+
 DIR *__wrap_opendir(const char *path)
 {
     return ps5_opendir(path);

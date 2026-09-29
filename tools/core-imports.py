@@ -98,7 +98,9 @@ def generate(imports):
                # src/core_loader_ps5.cpp: the console's, plus dlopen(NULL), the
                # process handle LLVM's JIT asks for.
                'dlopen': 'ps5_cores_dlopen', 'dlsym': 'ps5_cores_dlsym',
-               'dlclose': 'ps5_cores_dlclose', 'dlerror': 'ps5_cores_dlerror'}
+               'dlclose': 'ps5_cores_dlclose', 'dlerror': 'ps5_cores_dlerror',
+               # Refused to a title (EPERM), even for /app0.
+               'realpath': 'ps5_realpath'}
     for index, (name, (kind, weak)) in enumerate(sorted(imports.items())):
         target = aliases.get(name, name)
         declaration = f'void core_import_{index}()' if kind == 'FUNC' else f'char core_import_{index}[]'
