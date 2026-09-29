@@ -128,9 +128,15 @@ void start_log_flusher()
  * title's own folder at three chunk sizes, the file removed after each),
  * "writes" (3 GiB written in one file, with O_DIRECT, buffered with an fsync
  * every 256 MiB and buffered alone, each timed per 256 MiB and stopped after
- * 240 s), "routes" (1 GiB written with write() and through a shared mapping,
- * in /app0 and in the same folder by its own path, each stopped after 30 s:
- * which route or path a title's writes are held back on) and "threads" (the
+ * 240 s), "routes" (3 GiB written in /app0 with write(), through a shared
+ * mapping and with write() again, stopped after 45, 45 and 15 s: whether the
+ * mapped route is held back after write() has spent its burst; the folder's
+ * own path, /data/homebrew/PPSA99169, is not in a title's sandbox),
+ * "offload" (3 GiB of a file of /app0 appended through an FTP server on the
+ * loopback, which is another process, and read back; "offload=<port>" names
+ * the server's port instead of scanning for it, and "server=<dir>" the folder
+ * as the server sees it when statfs() cannot) and
+ * "threads" (the
  * stacks the main thread, a thread created with no attributes and one asking
  * for 2 MiB run on). Every line goes to the trace as it is measured. */
 static void probe_line(void *, const char *line)
@@ -164,8 +170,18 @@ static bool run_platform_probe()
         failures += ps5_platform_probe_writes(probe_line, nullptr, "/app0", 3072, 240);
     if (std::strstr(words, "routes"))
     {
-        static const char *const directories[] = {"/app0", "/data/homebrew/PPSA99169"};
-        failures += ps5_platform_probe_write_routes(probe_line, nullptr, directories, 2, 1024, 30);
+        static const char *const directories[] = {"/app0"};
+        failures += ps5_platform_probe_write_routes(probe_line, nullptr, directories, 1, 3072, 45);
+    }
+    if (const char *offload = std::strstr(words, "offload"))
+    {
+        unsigned port = 0;
+        char server[256] = {};
+        std::sscanf(offload, "offload=%u", &port);
+        if (const char *named = std::strstr(words, "server="))
+            std::sscanf(named, "server=%255s", server);
+        failures += ps5_platform_probe_ftp_offload(probe_line, nullptr, "/app0",
+                                                   server[0] ? server : nullptr, port, 3072, 120);
     }
     if (std::strstr(words, "threads"))
         failures += ps5_platform_probe_threads(probe_line, nullptr);

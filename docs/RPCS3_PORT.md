@@ -595,10 +595,85 @@ through); RetroArch names the state after the
 content, so a game loaded as its folder (`dev_hdd0/game/GTA4`) has
 `GTA4.state`, where an `EBOOT.BIN` gives every game `EBOOT.state`.
 
-**A title's write budget.** A title writes at full speed for a burst of a few
-GiB and then at about 2 MiB/s, buffered or direct, while another process
-writes the same folder faster (the SDK's docs/PROBE.md, "Sustained writes").
-God of War HD's 6.3 GB package took 31.5 minutes to install. Installing a
-package's large files without copying them, read and decrypted from the
-package the way RPCS3 reads an ISO through a virtual device, would remove the
-wait and the second copy.
+**A title's write budget.** The console, not its NVMe drive, sets how fast a
+title writes: about 1.3 GiB at 242 MiB/s, then about 2 MiB/s, whether through
+`write()`, `O_DIRECT` or a shared mapping and with however many threads, and it
+refills while the title does not write. Its FTP server, another process, is
+held back less: about 7 MiB/s a connection and 22 MiB/s in all (the SDK's
+docs/PROBE.md, "Sustained writes" and "Writing through another process"). So
+RPCS3's files in the title's folder go through that server once the title's
+burst is spent (the fork's `Utilities/File.cpp`, on the SDK's
+`include/ps5platform/offload.h`): a file opened for writing in `/app0` times
+its writes, and once its first MiB is written and a MiB of the title's writes
+ran slower than 50 MiB/s, a write at the file's end starts a stream that
+carries the file's following writes through a loopback connection to the
+server; anything else done with the file (reading, seeking, its size,
+closing) first waits for the server to confirm the stream's bytes. The stream
+keeps what the server has not confirmed (16 MiB at most) and writes it itself
+if the server fails, so nothing is lost; with no server it never starts. The
+server is found by its greeting and the folder it sees `/app0` as by a marker
+file, and the answer is kept in `/app0/.ps5-offload`. GTA IV reinstalling
+1414 MiB of its install with the budget spent took 4 minutes, about 6 MiB/s,
+where its first install ran at 0.7 MiB/s once the budget was spent, and the
+nine files it wrote were byte for byte the ones it had written before
+(2026-09-29). Several files streamed at once would reach the server's 22 MiB/s;
+RPCS3 writes one at a time. Installing a package's large files without copying
+them, read and decrypted from the package the way RPCS3 reads an ISO through a
+virtual device, would remove the wait and the second copy.
+
+## GTA IV (BLES00229 1.00): the test game, toward 4K at 60 fps
+
+GTA IV is the RPCS3 core's test game from 2026-09-29; the target is 4K at a
+stable 60 fps, measured from a save state in its first playable scene (Roman's
+taxi at the docks, the first mission). What it took, all in the fork:
+
+- **A FIFO in local memory** (`RSX: a FIFO whose command buffer is in local
+  memory`). 1.00's libgcm allocates its context with system mode 0x210 and
+  writes its first commands at local-memory offset 0x1000 with no IO memory
+  mapped; RPCS3 read GET and PUT as IO offsets and stopped with "Dead FIFO
+  commands queue state" (RPCS3 issue #14194, where 1.00 never boots). Mode 0x200
+  now makes GET, PUT and the jump and call targets local-memory offsets.
+- **The ZCULL late fault** (`ZCULL: a late fault on a report page unlocks it`),
+  RPCS3 issue #19610: on 16K-page hosts the RSX thread's semaphore labels share
+  a page with the reports, and a declined late fault spun forever.
+- **Its folder** (`Disc games in dev_hdd0/game mount their folder whatever its
+  name`, and `A disc game in a dev_hdd0 folder resumes from a savestate in that
+  folder`): GTA IV is kept as `dev_hdd0/game/GTA4`, which the boot took as a
+  9-character title ID, and a savestate's boot path carries a doubled separator.
+- **Save states** (`vm: memory restored from a savestate takes its block's page
+  size`): loading a state over a game resumed from one stopped on "Memory
+  inconsistency found" at the stack block. A save costs about 20 s of the game,
+  and so does a load: RPCS3 resumes by booting the state.
+- **Its frame rate** (`libretro: GTA IV 1.00's frame-rate patch`): RPCS3's
+  patch database unlocks 1.08 only. 1.00's render thread holds frames to the
+  frame lock times 1/60 s, polling the timebase with 30 us sleeps (1.16 million
+  of them in 15 s of gameplay), and skips that when the frame lock is 0; the
+  fork's `bin/patches/BLES00229_patch.yml` sets it (0x0113b9f4) to 0, found in
+  the game's code (a dump of the running executable, the `ppu-dump.txt` test
+  hook). A higher vblank rate (120) left it at 30: it counts time, not vblanks.
+
+The game installs 3.3 GB of its disc to `dev_hdd0/game/BLES00229` on its first
+start; see "A title's write budget" above.
+
+Measured from the baseline state (70 s runs, `--appendconfig` test config,
+2026-09-29):
+
+| Build | Resolution | Frames a second (10 s windows) |
+|---|---|---|
+| no frame-rate patch | 300% (2160p) | 27.9-30.0: the game's own 30 |
+| no patch, Vblank Rate 120 | 300% | 27.8-30.0 |
+| frame-rate patch | 300% | 50.4-51.5, loading screens 59.8 |
+| frame-rate patch | 100% (720p) | 53.4-54.8 |
+
+The game keeps its speed (the audio windows are full), and the resolution
+costs little: the limit is the emulation, not the PS5's GPU. RPCS3's
+performance overlay puts the guest RSX at 98% busy, while its host CPU
+figures read nearly nothing on the console (5.5% PPU, 1.8% SPU: the thread
+times do not work there). The title's sampler, every thread sampled (its walk
+now bounded by each thread's stack), found one thread busy 85-89% of the time
+in recompiled code, most likely an SPU running GTA IV's SPURS work, and five
+more at 30-55% with `vm::writer_lock` their most frequent address, while the
+RSX thread ran about half the time. With RPCS3's accurate SPU reservations
+(the default, which stays), every SPU atomic write takes that lock, and a
+PS5's Zen 2 has no transactional memory to take it faster. That lock and the
+busiest SPU are where 60 fps is to be found next.

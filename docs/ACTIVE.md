@@ -35,21 +35,22 @@ one way), Saturn gameplay with a BIOS and a vector game at 4K in MAME. The
 forks are published on github.com/mihawk-99 at the pinned revisions, so a
 checkout without the sibling forks builds from there.
 
-**Now: RPCS3 as a libretro core** (docs/RPCS3_PORT.md). The goal is God of
-War HD (NPUA80490, a PSN package plus its RAP) booting from `content/PS3/`
-at a 300% scale on RADV, with the firmware from `system/RPCS3/`. Steps 1 to 5
-are done, and step 6 has reached gameplay (docs/PHASE_LOG.md, 2026-09-28): the
-package installs behind the core's loading screen (31.5 minutes for 6.3 GB,
-held to a title's ~2 MiB/s write budget), and the game boots to its first
-level at 100% and at 300%, every 10 s window after the boot at 100% speed.
-Getting there took the platform's `realpath`, a layout fix in the LLVM fork's
-`TrailingObjects` (the PS5 ABI ignores `alignas` on an empty base), a mutex
-held across a wait callback in RPCS3's atomic wait engine, the frontend's path
-and image callbacks, and the RetroPads' bindings. The ten-minute run at 300%
-(71 of 71 windows at 100%) and the Close Content + reload battery pass; the
-core now unloads at Close Content. Left for step 6: my acceptance of the 300%
-screenshot. Next: installing a package's large files without copying them,
-and RPCS3's overlay icons (`Icons/ui`), which the title does not stage yet.
+**Now: RPCS3 as a libretro core** (docs/RPCS3_PORT.md). The game under test
+is GTA IV (BLES00229 1.00, kept as `dev_hdd0/game/GTA4`) since 2026-09-29, and
+the goal is 4K at a stable, stutter-free 60 fps, measured from a save state in
+its first playable scene. It boots (a FIFO in local memory, the ZCULL late
+fault, its folder's name), installs 3.3 GB to `dev_hdd0` on its first start,
+saves and loads states, and with the fork's frame-rate patch for 1.00 runs at
+50-51 fps at 300% (54 at 100%) where it was held to 30; the guest RSX is 98%
+busy and the SPU threads meet on `vm::writer_lock`, which is next. Every game
+in RPCS3's patch database now starts with its frame-rate patch ("Frame-rate
+patches", on by default), and RPCS3's settings are core options by section. A
+title's writes are held to about 2 MiB/s once a 1.3 GiB burst is spent; RPCS3's
+files in `/app0` then go through the console's FTP server, another process
+(about 6 MiB/s for GTA IV's install, 8x faster, byte for byte the same). Earlier
+(2026-09-28): God of War HD (NPUA80490) reached gameplay at 100% and 300% and
+passed the ten-minute run and the Close Content + reload battery; my acceptance
+of its 300% screenshot is still open.
 
 **Dolphin transitions (paused 2026-09-28 for RPCS3):** Rogue Leader's dips are
 not shader compiles. The emulation thread spins in `sched_yield` inside a

@@ -4512,3 +4512,41 @@ verify. `make test-unit`: 83 tests OK (7 new in tests/test_notices.py).
 byte-identical to the one in every release (`e6ff45d1…`). The full build was not
 rerun (the build tree was in use); a `dist/` built before this change fails the
 integration gate until it is rebuilt.
+
+## 2026-09-29 — RPCS3: GTA IV 1.00 boots, saves and loads states, runs at 50 fps at 4K; fast installs; frame-rate patches
+
+GTA IV (BLES00229 1.00) replaced God of War HD as the RPCS3 core's test game,
+with 4K at a stable 60 fps as the goal (docs/RPCS3_PORT.md, "GTA IV").
+
+- It stopped at its first RSX commands ("Dead FIFO commands queue state",
+  RPCS3 issue #14194): its libgcm puts the FIFO in local memory (system mode
+  0x210). The fork now reads GET, PUT and jump targets as local offsets in that
+  mode, and takes the ZCULL late-fault fix of issue #19610 (16K pages).
+- Its first start installs 3.3 GB to `dev_hdd0/game/BLES00229`; held to the
+  title's write budget, that took two runs (25 minutes at 0.7 MiB/s, then the
+  rest). The budget is per process and on what reaches the storage (`write()`,
+  `O_DIRECT`, a shared mapping and 1-8 threads alike); the console's FTP
+  server, another process, writes about 7 MiB/s a connection and 22 MiB/s in
+  all (the SDK fork's docs/PROBE.md). RPCS3's files in `/app0` now go through
+  it once the budget is spent: deleting 1414 MiB of the install with the budget
+  spent, GTA IV put it back in 4 minutes (about 6 MiB/s), byte for byte.
+- Save states: made (134 MiB, 1.1 s) and resumed; resuming mounted the wrong
+  folder (a savestate's boot path is `dev_hdd0//game/...`), and loading over a
+  resumed game stopped on the stack block's page flags. Both fixed in the fork;
+  the baseline state is saved at the mission's start.
+- Frame rate: RPCS3's patch database (815 executables, 502 of them with a
+  frame-rate patch) is in the fork and the title, and every game starts with
+  its frame-rate patch (a core option, on by default). It has none for GTA IV
+  1.00; the render thread's limiter, found in a dump of the running game, reads
+  a frame lock (0x0113b9f4, 2) and skips itself at 0, which the fork's
+  `BLES00229_patch.yml` sets. From the baseline state at 300%: 50.4-51.5 fps
+  (30 before), 53.4-54.8 at 100%, loading screens 59.8, audio at full speed.
+- Where the rest goes: the guest RSX 98% busy (RPCS3's overlay); the title's
+  sampler with every thread (its frame walk now bounded by each thread's stack,
+  which had faulted) shows one SPU thread 85-89% busy in recompiled code and
+  five at 30-55% on `vm::writer_lock`, which RPCS3's accurate SPU reservations
+  take for every atomic write.
+
+Evidence: runs gta3-gta22 (klog, traces, RPCS3 logs and screenshots in my
+scratchpad; game data and the executable dump stay there and on the console).
+Probes: `routes` and `offload` in the platform probe (docs/PROBE.md tables).

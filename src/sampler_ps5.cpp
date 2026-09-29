@@ -31,6 +31,7 @@
 
 #include <poll.h>
 #include <pthread.h>
+#include <pthread_np.h>
 #include <sched.h>
 #include <semaphore.h>
 #include <signal.h>
@@ -75,7 +76,10 @@ std::atomic<std::uint32_t> g_head{0};
 std::uint64_t g_ring[kRingSize][kFrames + 1];
 
 /* The stack a walk may read: from rsp up to a bound no thread stack exceeds. */
-constexpr std::uint64_t kStackSpan = 16ull * 1024 * 1024;
+/* Each sampled thread's stack top, 0 when unknown: a walk or a scan past it
+ * faulted on a core thread near the top of its stack (2026-09-29, RPCS3 with
+ * every thread sampled). */
+std::uint64_t g_stack_top[kMaxThreads];
 
 void on_sample(int, siginfo_t *, void *context_pointer)
 {
@@ -91,6 +95,10 @@ void on_sample(int, siginfo_t *, void *context_pointer)
         if (pthread_equal(g_threads[index], self))
             thread = index;
     sample[0] = (g_stall.load(std::memory_order_relaxed) ? 1u : 0u) | (std::uint64_t{thread} << 8);
+    /* Only a stack top the interrupted rsp lies under is trusted; without one
+     * the sample keeps its leaf and [rsp] alone. */
+    const std::uint64_t known = g_stack_top[thread];
+    const std::uint64_t top = known > rsp && known - rsp < 8ull * 1024 * 1024 ? known : rsp;
     sample[1] = static_cast<std::uint64_t>(registers.mc_rip);
     sample[2] = (rsp & 7) == 0 && rsp != 0 ? *reinterpret_cast<const std::uint64_t *>(rsp) : 0;
     std::uint64_t frame = static_cast<std::uint64_t>(registers.mc_rbp);
@@ -105,7 +113,7 @@ void on_sample(int, siginfo_t *, void *context_pointer)
         const auto *const words = reinterpret_cast<const std::uint64_t *>(rsp);
         unsigned kept = 3;
         sample[3] = 1;
-        for (unsigned word = 0; word < 256 && kept < kFrames; ++word)
+        for (unsigned word = 0; word < 256 && kept < kFrames && rsp + (word + 1) * 8 <= top; ++word)
         {
             const std::uint64_t value = words[word];
             const bool title = value >= 0x400000ull && value < 0x10000000ull;
@@ -120,7 +128,7 @@ void on_sample(int, siginfo_t *, void *context_pointer)
     }
     for (unsigned depth = 3; depth <= kFrames; ++depth)
     {
-        if ((frame & 7) != 0 || frame < rsp || frame + 16 > rsp + kStackSpan)
+        if ((frame & 7) != 0 || frame < rsp || frame + 16 > top)
         {
             sample[depth] = 0;
             continue;
@@ -186,6 +194,48 @@ void report(std::uint32_t from, std::uint32_t to, std::uint32_t stall_samples)
         }
     }
     std::fprintf(stderr, "sampler: window samples=%u stall=%u\n", to - from, stall_samples);
+    /* Per thread: its samples, those outside libkernel and libc (busy, not
+     * blocked), and its most frequent busy group with one chain. A busy thread
+     * spreads over many addresses and never reaches the most frequent groups,
+     * which blocked threads fill (RPCS3's RSX thread, 2026-09-29). */
+    static std::uint32_t totals[kMaxThreads], busy[kMaxThreads];
+    std::memset(totals, 0, sizeof(totals));
+    std::memset(busy, 0, sizeof(busy));
+    for (std::uint32_t at = from; at != to; ++at)
+    {
+        const std::uint64_t *const sample = g_ring[at & (kRingSize - 1)];
+        if ((sample[0] & 1u) == 0)
+            continue;
+        const auto thread = static_cast<std::uint32_t>((sample[0] >> 8) & 0xff);
+        if (thread >= kMaxThreads)
+            continue;
+        ++totals[thread];
+        busy[thread] += system_address(sample[1]) ? 0u : 1u;
+    }
+    for (std::uint32_t thread = 0; thread < kMaxThreads; ++thread)
+    {
+        if (busy[thread] * 10u < totals[thread] || busy[thread] == 0)
+            continue;
+        std::uint32_t best = slots;
+        for (std::uint32_t slot = 0; slot < slots; ++slot)
+            if (g_counts[slot].samples != 0 && g_counts[slot].thread == thread &&
+                !system_address(g_counts[slot].leaf) &&
+                (best == slots || g_counts[slot].samples > g_counts[best].samples))
+                best = slot;
+        std::fprintf(stderr, "sampler: thread=%u samples=%u busy=%u top=0x%016llx n=%u\n", thread,
+                     totals[thread], busy[thread],
+                     best == slots ? 0ull : static_cast<unsigned long long>(g_counts[best].leaf),
+                     best == slots ? 0u : g_counts[best].samples);
+        if (best == slots)
+            continue;
+        const std::uint64_t *const chain = g_ring[g_counts[best].example & (kRingSize - 1)];
+        char line[512];
+        int used = std::snprintf(line, sizeof(line), "sampler:   chain");
+        for (unsigned depth = 1; depth <= kFrames && used > 0 && used < 480; ++depth)
+            used += std::snprintf(line + used, sizeof(line) - used, " %llx",
+                                  static_cast<unsigned long long>(chain[depth]));
+        std::fprintf(stderr, "%s\n", line);
+    }
     for (unsigned rank = 0; rank < kTop; ++rank)
     {
         std::uint32_t best = slots;
@@ -322,6 +372,22 @@ static void report_exports()
         std::fprintf(stderr, "sampler: export %s=%p\n", entry.name, entry.address);
 }
 
+/* The top of a thread's stack, or 0. */
+static std::uint64_t stack_top(pthread_t thread)
+{
+    pthread_attr_t attributes;
+    if (pthread_attr_init(&attributes) != 0)
+        return 0;
+    void *base = nullptr;
+    size_t size = 0;
+    std::uint64_t top = 0;
+    if (pthread_attr_get_np(thread, &attributes) == 0 &&
+        pthread_attr_getstack(&attributes, &base, &size) == 0 && base != nullptr)
+        top = reinterpret_cast<std::uint64_t>(base) + size;
+    pthread_attr_destroy(&attributes);
+    return top;
+}
+
 /* Starts the sampler on the calling thread when /app0/ps5-sampler.txt exists. */
 extern "C" void ps5_sampler_start()
 {
@@ -351,6 +417,7 @@ extern "C" void ps5_sampler_start()
     std::fclose(flag);
     report_exports();
     g_threads[0] = pthread_self();
+    g_stack_top[0] = stack_top(g_threads[0]);
     g_thread_count.store(1, std::memory_order_release);
     g_running.store(true, std::memory_order_release);
     struct sigaction action;
@@ -391,7 +458,9 @@ extern "C" void ps5_sampler_add_thread(pthread_t thread, const void *start)
     const unsigned index = g_thread_count.load(std::memory_order_relaxed);
     if (index >= kMaxThreads)
         return;
+    g_stack_top[index] = stack_top(thread);
     g_threads[index] = thread;
     g_thread_count.store(index + 1, std::memory_order_release);
-    std::fprintf(stderr, "sampler: thread %u added, start=%p\n", index, start);
+    std::fprintf(stderr, "sampler: thread %u added, start=%p stack top=0x%llx\n", index, start,
+                 static_cast<unsigned long long>(g_stack_top[index]));
 }

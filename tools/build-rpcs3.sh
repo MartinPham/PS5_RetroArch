@@ -28,7 +28,7 @@ core_stamp_skip rpcs3 \
     "$root/.deps/native/libiconv-ps5/.stamp"
 [[ $# == 0 ]] || { echo "usage: ${0##*/}" >&2; exit 2; }
 
-revision=6cb4773fa7ea545d0829e7927799bf2e35305c0d  # ../PS5_RPCS3 main
+revision=db8931c918c83c69dc1ba9d8a82a52029393b272  # ../PS5_RPCS3 main
 core_fork_setup
 core_fork_checkout PS5_RPCS3 "$revision"
 core_info="$root/tooling/rpcs3/rpcs3_libretro.info"
@@ -123,13 +123,14 @@ rm -rf -- "$icons"
 mkdir -p "$icons"
 cp -a -- "$source_dir/bin/Icons/ui" "$icons/ui"
 
-# RPCS3's game patch database (the fork's bin/patches: its source, date and
-# hash in SOURCE), where RPCS3 reads it: its config folder's patches/. The core
-# turns each game's frame-rate patch on when content loads (a core option).
+# RPCS3's game patch database and the fork's patches for games it lacks (the
+# fork's bin/patches: their sources in SOURCE), where RPCS3 reads them: its
+# config folder's patches/. The core turns each game's frame-rate patch on when
+# content loads (a core option).
 patches="$root/build/cores/stage/system/RPCS3/patches"
 rm -rf -- "$patches"
 mkdir -p "$patches"
-cp -- "$source_dir/bin/patches/patch.yml" "$patches/patch.yml"
+cp -- "$source_dir"/bin/patches/*.yml "$patches/"
 
 core_fork_stage "$built" "$core_info" "$revision" tools/build-rpcs3.sh \
     tooling/rpcs3/ps5-toolchain.cmake tooling/rpcs3/rpcs3_libretro.info
