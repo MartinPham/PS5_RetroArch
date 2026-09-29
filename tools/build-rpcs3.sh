@@ -23,12 +23,13 @@ core_stamp_skip rpcs3 \
     "$root/build/cores/stage/system/RPCS3/fonts" \
     "$root/build/cores/stage/system/RPCS3/Icons" \
     "$root/build/cores/stage/system/RPCS3/patches/patch.yml" \
+    "$root/build/cores/stage/system/RPCS3/game_configs/config_database.json" \
     -- "$root/tools/build-rpcs3.sh" "$root/tools/core-fork.sh" "$root/tooling/rpcs3" \
     "$root/.deps/native/llvm-ps5/.revision" "$root/.deps/native/ffmpeg-ps5/.stamp" \
     "$root/.deps/native/libiconv-ps5/.stamp"
 [[ $# == 0 ]] || { echo "usage: ${0##*/}" >&2; exit 2; }
 
-revision=db8931c918c83c69dc1ba9d8a82a52029393b272  # ../PS5_RPCS3 main
+revision=39e5957309953cd666e69a2d4dea77d90475be8d  # ../PS5_RPCS3 main
 core_fork_setup
 core_fork_checkout PS5_RPCS3 "$revision"
 core_info="$root/tooling/rpcs3/rpcs3_libretro.info"
@@ -131,6 +132,13 @@ patches="$root/build/cores/stage/system/RPCS3/patches"
 rm -rf -- "$patches"
 mkdir -p "$patches"
 cp -- "$source_dir"/bin/patches/*.yml "$patches/"
+
+# RPCS3's per-game configuration database (the fork's bin/game_configs: its
+# source in SOURCE), which the core answers RPCS3's boot with (a core option).
+game_configs="$root/build/cores/stage/system/RPCS3/game_configs"
+rm -rf -- "$game_configs"
+mkdir -p "$game_configs"
+cp -- "$source_dir/bin/game_configs/config_database.json" "$game_configs/"
 
 core_fork_stage "$built" "$core_info" "$revision" tools/build-rpcs3.sh \
     tooling/rpcs3/ps5-toolchain.cmake tooling/rpcs3/rpcs3_libretro.info
