@@ -277,6 +277,9 @@ directory_wrap_flags="--wrap=opendir --wrap=readdir --wrap=closedir --wrap=fdope
 # realpath is refused to a title, so std::filesystem::canonical and
 # weakly_canonical (RPCS3's package installer) came back empty.
 directory_wrap_flags+=" --wrap=realpath"
+# libc's getcwd resolves to nothing in a title (it calls __getcwd, which only
+# libkernel_sys exports); std::filesystem::current_path is built on it.
+directory_wrap_flags+=" --wrap=getcwd"
 # Folders the title or a core creates are 0777 and files at least 0666, so FTP,
 # which runs as another user, can reach them (src/permissions_ps5.cpp).
 directory_wrap_flags+=" --wrap=mkdir --wrap=open --wrap=fopen"

@@ -45,6 +45,16 @@ DIR *__wrap_fdopendir(int fd)
     return ps5_fdopendir(fd);
 }
 
+/* libc's getcwd calls __getcwd, which only libkernel_sys has, so a title's
+ * resolves to nothing: libc++'s std::filesystem::current_path, and with it
+ * absolute and canonical on a relative path, jumped to address 0 (RPCS3
+ * booting a game's folder). The cores' own are bound the same way
+ * (tools/core-imports.py). */
+char *__wrap_getcwd(char *buffer, size_t size)
+{
+    return ps5_getcwd(buffer, size);
+}
+
 /* A title's realpath is refused (EPERM); libc++'s std::filesystem canonical
  * paths are built on it. */
 char *__wrap_realpath(const char *path, char *resolved)

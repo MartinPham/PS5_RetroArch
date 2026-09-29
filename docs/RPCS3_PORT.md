@@ -501,6 +501,20 @@ match RPCS3's IPv4 `std::regex` on the console (it fell through to the Unix
 socket branch), which may mean `std::regex` misbehaves there; RPCS3 also parses
 patches and its game database with it, so it wants a probe.
 
+**What loads.** A PSN package (`.pkg`, installed once, then booted at
+once), a game's `EBOOT.BIN`, an ISO, or a folder (RetroArch's "Use this
+directory"): the folder's `USRDIR/EBOOT.BIN` (an installed game, such as
+`system/RPCS3/dev_hdd0/game/NPUA80490`) or `PS3_GAME/USRDIR/EBOOT.BIN` (a
+disc game) boots. RPCS3 itself treats a bare folder as "build the PPU cache of
+everything in it", which compiled and stopped. Loading a folder also first
+crashed the title: canonicalising a relative path asks libc++ for the working
+directory, and the title's own `getcwd` resolves to nothing on the console
+(libc's calls `__getcwd`, which only libkernel_sys has). The title links it to
+the platform's `ps5_getcwd` (`--wrap=getcwd`), as the cores already were, and
+`tooling/native/app-symbols.map` keeps every `__wrap_` symbol local, since lld
+exported `__wrap_getcwd` to interpose on libc's stubs and a title publishes
+no exports.
+
 **Core options.** The resolution scale is a libretro v2 option, 100% to 300%
 (2160p), 300% by default, written to `config.yml` when content loads, as
 RPCS3's settings dialog writes it, so a game's custom configuration still
