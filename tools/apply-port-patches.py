@@ -3184,6 +3184,122 @@ EDITS = [
         "#endif\n",
         "patches/series, 0097): the top of this",
     ),
+    (
+        # 0098: a state load first saves the running game to RAM, for Undo
+        # Load State. A core whose states are basic (its core info) can only
+        # make one by stopping its game: RPCS3 stops its emulator, writes the
+        # state and boots it again, seconds each time, and the load then
+        # replaces what that made. Such a core's loads skip the backup, as
+        # rewind and run-ahead skip its states, and an older backup is
+        # dropped, so Undo Load State never restores another game's state.
+        "tasks/task_save.c",
+        "   /* Backup the current state so we can undo this load */\n"
+        "   content_save_state(\"RAM\", false);\n",
+        "   /* Backup the current state so we can undo this load */\n"
+        "#ifdef __PROSPERO__\n"
+        "   /* Added by this port (patches/series, 0098): only when the core's\n"
+        "    * states are serialized or better; a basic core's state stops its\n"
+        "    * game, which this load replaces anyway. */\n"
+        "   if (!core_info_current_supports_rewind())\n"
+        "   {\n"
+        "      free(undo_load_buf.data);\n"
+        "      undo_load_buf.data = NULL;\n"
+        "      undo_load_buf.size = 0;\n"
+        "   }\n"
+        "   else\n"
+        "#endif\n"
+        "   content_save_state(\"RAM\", false);\n",
+        "patches/series, 0098): only when the core's",
+    ),
+    (
+        # 0098 too: the load command checks that the core can make a state by
+        # asking its size, which for such a core is making one.
+        "command.c",
+        "      info_size          = core_serialize_size();\n"
+        "      savestates_enabled = (info_size > 0);\n"
+        "   }\n"
+        "\n"
+        "  /* TODO: Load state should act in one of three ways:\n",
+        "#ifdef __PROSPERO__\n"
+        "      /* Added by this port (patches/series, 0098): a load asks a core\n"
+        "       * whose states are basic nothing; its size is a state made. */\n"
+        "      if (     (cmd == CMD_EVENT_LOAD_STATE || cmd == CMD_EVENT_LOAD_STATE_FROM_RAM)\n"
+        "            && !core_info_current_supports_rewind())\n"
+        "         info_size       = 1;\n"
+        "      else\n"
+        "#endif\n"
+        "      info_size          = core_serialize_size();\n"
+        "      savestates_enabled = (info_size > 0);\n"
+        "   }\n"
+        "\n"
+        "  /* TODO: Load state should act in one of three ways:\n",
+        "patches/series, 0098): a load asks a core",
+    ),
+    (
+        # 0099: RetroArch counts a repeated frame (a core's NULL frame) as a frame,
+        # so its FPS (the yellow status line, and Frame Rate in Display Statistics)
+        # read the display's rate while the core's own frames came slower (RPCS3's
+        # GTA IV read 60 at 35 new frames a second). Both count the frames the core
+        # made, over the same interval as before.
+        "gfx/video_driver.c",
+        "   static float last_fps, frame_time;\n",
+        "   static float last_fps, frame_time;\n"
+        "#ifdef __PROSPERO__\n"
+        "   /* Added by this port (patches/series, 0099): the frames the core made\n"
+        "    * since the rate was last computed, repeats left out, and whether a rate\n"
+        "    * was computed yet. */\n"
+        "   static unsigned new_frames;\n"
+        "   static bool fps_measured;\n"
+        "#endif\n",
+        "patches/series, 0099): the frames the core made",
+    ),
+    (
+        # 0099 too: a frame with data is one the core made.
+        "gfx/video_driver.c",
+        "   last_frame_duped = !data;\n",
+        "   last_frame_duped = !data;\n"
+        "#ifdef __PROSPERO__\n"
+        "   /* Added by this port (patches/series, 0099): a new frame. */\n"
+        "   if (data)\n"
+        "      new_frames++;\n"
+        "#endif\n",
+        "patches/series, 0099): a new frame.",
+    ),
+    (
+        # 0099 too: the rate both counters show is the new frames'.
+        "gfx/video_driver.c",
+        "         last_fps = TIME_TO_FPS(curr_time, new_time,\n"
+        "               fps_update_interval);\n",
+        "#ifdef __PROSPERO__\n"
+        "         /* Added by this port (patches/series, 0099): the rate of the frames\n"
+        "          * the core made, which the FPS line and Frame Rate show. */\n"
+        "         last_fps     = TIME_TO_FPS(curr_time, new_time, new_frames);\n"
+        "         new_frames   = 0;\n"
+        "         fps_measured = true;\n"
+        "#else\n"
+        "         last_fps = TIME_TO_FPS(curr_time, new_time,\n"
+        "               fps_update_interval);\n"
+        "#endif\n",
+        "patches/series, 0099): the rate of the frames",
+    ),
+    (
+        # 0099 too: RetroArch shows the display's rate while the rate is 0,
+        # which with repeats left out is a core making no frames.
+        "gfx/video_driver.c",
+        "   /* Take target refresh rate as initial FPS value instead of 0.00 */\n"
+        "   if (!last_fps)\n"
+        "      last_fps = video_info.refresh_rate;\n",
+        "   /* Take target refresh rate as initial FPS value instead of 0.00 */\n"
+        "#ifdef __PROSPERO__\n"
+        "   /* Added by this port (patches/series, 0099): before the first rate only;\n"
+        "    * a core that made no frame since reads 0, not the display's rate. */\n"
+        "   if (!fps_measured)\n"
+        "#else\n"
+        "   if (!last_fps)\n"
+        "#endif\n"
+        "      last_fps = video_info.refresh_rate;\n",
+        "patches/series, 0099): before the first rate only",
+    ),
 ]
 
 # Changes that are withdrawn rather than deleted, by marker.

@@ -201,3 +201,15 @@
 #       menu/menu_displaylist.c, menu/cbs/menu_cbs_get_value.c,
 #       menu/cbs/menu_cbs_ok.c
 0097-content-roots
+
+# 0098  a state load neither asks a core whose states are basic (RPCS3) for
+#       its state's size nor saves the running game for Undo Load State: such a
+#       core stops its game to make a state, which the load then replaces
+#       command.c, tasks/task_save.c
+0098-undo-load-backup
+
+# 0099  the FPS status line and Display Statistics' Frame Rate count the frames
+#       the core made, not the repeats it hands back (RetroArch's own count read
+#       the display's rate whatever the game's)
+#       gfx/video_driver.c
+0099-new-frame-rate
