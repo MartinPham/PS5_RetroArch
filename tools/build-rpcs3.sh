@@ -21,12 +21,13 @@ core_stamp_skip rpcs3 \
     "$root/build/cores/stage/cores/rpcs3_libretro.so" \
     "$root/build/cores/stage/info/rpcs3_libretro.info" \
     "$root/build/cores/stage/system/RPCS3/fonts" \
+    "$root/build/cores/stage/system/RPCS3/Icons" \
     -- "$root/tools/build-rpcs3.sh" "$root/tools/core-fork.sh" "$root/tooling/rpcs3" \
     "$root/.deps/native/llvm-ps5/.revision" "$root/.deps/native/ffmpeg-ps5/.stamp" \
     "$root/.deps/native/libiconv-ps5/.stamp"
 [[ $# == 0 ]] || { echo "usage: ${0##*/}" >&2; exit 2; }
 
-revision=4560e6b2ab2c44d1ea61be03505756c39c127dc4  # ../PS5_RPCS3 main
+revision=ba4b17382173af445ca786442e952466f2acb01f  # ../PS5_RPCS3 main
 core_fork_setup
 core_fork_checkout PS5_RPCS3 "$revision"
 core_info="$root/tooling/rpcs3/rpcs3_libretro.info"
@@ -113,6 +114,13 @@ rm -rf -- "$fonts"
 mkdir -p "$fonts"
 unzip -q -j -o "$inter" extras/ttf/Inter-Regular.ttf extras/ttf/Inter-SemiBold.ttf LICENSE.txt -d "$fonts"
 mv -- "$fonts/LICENSE.txt" "$fonts/Inter-LICENSE.txt"
+
+# RPCS3's own overlay images (bin/Icons/ui: the pad glyphs, the save and
+# loading icons its native dialogs draw), where it looks for them: its folder.
+icons="$root/build/cores/stage/system/RPCS3/Icons"
+rm -rf -- "$icons"
+mkdir -p "$icons"
+cp -a -- "$source_dir/bin/Icons/ui" "$icons/ui"
 
 core_fork_stage "$built" "$core_info" "$revision" tools/build-rpcs3.sh \
     tooling/rpcs3/ps5-toolchain.cmake tooling/rpcs3/rpcs3_libretro.info

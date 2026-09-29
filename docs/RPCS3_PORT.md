@@ -492,6 +492,15 @@ an `EBOOT.BIN` behind, and the record goes when an install starts. Closing
 content during an install stops it, inside a large file too (the fork's
 `unpkg.cpp`); a partial firmware is installed again next time.
 
+**RPCS3's folder, as staged.** Besides the loading screen's fonts, the title
+stages RPCS3's own overlay images (`bin/Icons/ui` into `system/RPCS3/Icons/ui`),
+which its native dialogs draw. The configuration the core writes at load also
+turns RPCS3's GDB server off: no debugger connects to a core, and it would only
+open a socket on the console. Open question: the server's address did not
+match RPCS3's IPv4 `std::regex` on the console (it fell through to the Unix
+socket branch), which may mean `std::regex` misbehaves there; RPCS3 also parses
+patches and its game database with it, so it wants a probe.
+
 **Core options.** The resolution scale is a libretro v2 option, 100% to 300%
 (2160p), 300% by default, written to `config.yml` when content loads, as
 RPCS3's settings dialog writes it, so a game's custom configuration still
