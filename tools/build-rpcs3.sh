@@ -20,12 +20,13 @@ bash "$root/tools/build-libiconv.sh"
 core_stamp_skip rpcs3 \
     "$root/build/cores/stage/cores/rpcs3_libretro.so" \
     "$root/build/cores/stage/info/rpcs3_libretro.info" \
+    "$root/build/cores/stage/system/RPCS3/fonts" \
     -- "$root/tools/build-rpcs3.sh" "$root/tools/core-fork.sh" "$root/tooling/rpcs3" \
     "$root/.deps/native/llvm-ps5/.revision" "$root/.deps/native/ffmpeg-ps5/.stamp" \
     "$root/.deps/native/libiconv-ps5/.stamp"
 [[ $# == 0 ]] || { echo "usage: ${0##*/}" >&2; exit 2; }
 
-revision=8e6eb155f225760d5d7ce94cc0ab173a44b71304  # ../PS5_RPCS3 main
+revision=78dfa8f28fac3138df6274f3ec8576eb5e18a1f3  # ../PS5_RPCS3 main
 core_fork_setup
 core_fork_checkout PS5_RPCS3 "$revision"
 core_info="$root/tooling/rpcs3/rpcs3_libretro.info"
@@ -99,5 +100,19 @@ cmake -S "$source_dir" -B "$build" -G Ninja \
 cmake --build "$build" --target rpcs3_libretro --parallel "${JOBS:-16}"
 built=$(find "$build" -name rpcs3_libretro.so -print -quit)
 [[ -n $built ]] || { echo "error: no rpcs3_libretro.so was produced" >&2; exit 2; }
+# The typeface of the core's loading screen (rpcs3/libretro/libretro_loader.cpp),
+# Inter 4.1 under the SIL Open Font License, with its licence, in
+# <system>/RPCS3/fonts. The firmware's own fonts are its fallback.
+inter="$root/.deps/downloads/Inter-4.1.zip"
+[[ -f $inter ]] || curl --fail --location --retry 3 \
+    https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip -o "$inter"
+printf '%s  %s\n' 9883fdd4a49d4fb66bd8177ba6625ef9a64aa45899767dde3d36aa425756b11e "$inter" |
+    sha256sum --check --status || { echo "error: Inter archive digest mismatch" >&2; exit 1; }
+fonts="$root/build/cores/stage/system/RPCS3/fonts"
+rm -rf -- "$fonts"
+mkdir -p "$fonts"
+unzip -q -j -o "$inter" extras/ttf/Inter-Regular.ttf extras/ttf/Inter-SemiBold.ttf LICENSE.txt -d "$fonts"
+mv -- "$fonts/LICENSE.txt" "$fonts/Inter-LICENSE.txt"
+
 core_fork_stage "$built" "$core_info" "$revision" tools/build-rpcs3.sh \
     tooling/rpcs3/ps5-toolchain.cmake tooling/rpcs3/rpcs3_libretro.info

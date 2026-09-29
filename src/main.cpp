@@ -125,10 +125,12 @@ void start_log_flusher()
  * (the largest direct allocation mapped and written), "jit" (the
  * shared-memory JIT interface, last, since a refused import would stop the
  * process), "files" (the file probe: 256 MiB written and read back in the
- * title's own folder at three chunk sizes, the file removed after each) and
- * "threads" (the stacks the main thread, a thread created with no attributes
- * and one asking for 2 MiB run on). Every line goes to the trace as it is
- * measured. */
+ * title's own folder at three chunk sizes, the file removed after each),
+ * "writes" (3 GiB written in one file, with O_DIRECT, buffered with an fsync
+ * every 256 MiB and buffered alone, each timed per 256 MiB and stopped after
+ * 240 s) and "threads" (the stacks the main thread, a thread created with no
+ * attributes and one asking for 2 MiB run on). Every line goes to the trace as
+ * it is measured. */
 static void probe_line(void *, const char *line)
 {
     ps5::debug::mark(line);
@@ -156,6 +158,8 @@ static bool run_platform_probe()
     int failures = ps5_platform_probe(probe_line, nullptr, flags);
     if (std::strstr(words, "files"))
         failures += ps5_platform_probe_files(probe_line, nullptr, "/app0");
+    if (std::strstr(words, "writes"))
+        failures += ps5_platform_probe_writes(probe_line, nullptr, "/app0", 3072, 240);
     if (std::strstr(words, "threads"))
         failures += ps5_platform_probe_threads(probe_line, nullptr);
     ps5::debug::mark_value("platform probe: failures", failures);

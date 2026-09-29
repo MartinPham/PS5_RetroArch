@@ -336,6 +336,15 @@ if [[ -d $root/build/cores/stage/system/dolphin-emu ]]; then
         "$(find "$dist/system/dolphin-emu" -type f | wc -l)" "$dist"
 fi
 
+# RPCS3's folder is <system>/RPCS3, which also holds what RPCS3 writes there on
+# the console (the firmware, dev_hdd0, its configuration): only the core's own
+# files are staged, the loading screen's fonts.
+if [[ -d $root/build/cores/stage/system/RPCS3/fonts ]]; then
+    mkdir -p "$dist/system/RPCS3"
+    rm -rf -- "$dist/system/RPCS3/fonts"
+    cp -a -- "$root/build/cores/stage/system/RPCS3/fonts" "$dist/system/RPCS3/fonts"
+fi
+
 # ps5vk's shared object, beside a ps5vk title, when it exists.
 #
 # Both drivers are linked into eboot.bin (above), and nothing loads this file: a

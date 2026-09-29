@@ -188,7 +188,8 @@ it without Qt:
   asynchronous with the shader interpreter (`async_with_interpreter`, already
   upstream's default), so no game waits for a shader compile or relies on a
   warm cache. PPU and SPU decoders LLVM (upstream's defaults). Options are the
-  libretro v2 kind, set from `g_cfg` before boot and on change.
+  libretro v2 kind, written to RPCS3's configuration when content loads
+  (Phase 2 below).
 - **Core info.** libretro-core-info has no RPCS3 file, so
   `tooling/rpcs3/rpcs3_libretro.info` is in this repository (name, extensions
   `pkg|iso|bin|elf|self|sfo`, firmware entry, GPLv2, `needs_fullpath`).
@@ -453,3 +454,40 @@ The title's core loader answers a core's `dlopen(NULL)` with the process handle
 (2026-09-28): RSX's start order, VMA's entry points under volk, the kqueue
 trigger RSX audio's timer uses, releasing LLVM's memory-manager ranges, the
 log listeners' lifetime, and quitting through `Emulator::Quit`.
+
+**Content loading and the loading screen** (`rpcs3/libretro/libretro_loader.*`
+in the fork). `retro_load_game` returns at once: the firmware and a PSN package
+install on a worker thread while `retro_run` shows a loading screen, and the
+game boots when they are done. The screen is drawn on the CPU (the stb
+libraries RPCS3 already has) and handed to RetroArch as a Vulkan image, one
+per RetroArch frame index, with the copy submitted through
+`set_command_buffers`:
+
+- a violet night behind the game's own art (its PIC1, blurred and tinted),
+  its ICON0 on a glass card, the title in Inter, and a violet-to-orchid bar
+  with a sweeping highlight;
+- "Installing firmware" with its packages, "Installing" with the bytes, the
+  speed, the time left and the percentage, then "Starting" with RPCS3's
+  compile progress, until RPCS3's first frame replaces it;
+- what failed, in rose, when something does.
+
+Inter 4.1 (SIL Open Font License, its licence beside it) is fetched by
+`tools/build-rpcs3.sh`, pinned by digest, and staged in `system/RPCS3/fonts`;
+the firmware's Rodin is the fallback. A finished package install is recorded
+in `system/RPCS3/libretro/installed/<title ID>`, since an interrupted one leaves
+an `EBOOT.BIN` behind, and the record goes when an install starts. Closing
+content during an install stops it, inside a large file too (the fork's
+`unpkg.cpp`); a partial firmware is installed again next time.
+
+**Core options.** The resolution scale is a libretro v2 option, 100% to 300%
+(2160p), 300% by default, written to `config.yml` when content loads, as
+RPCS3's settings dialog writes it, so a game's custom configuration still
+overrides it.
+
+**A title's write budget.** A title writes at full speed for a burst of a few
+GiB and then at about 2 MiB/s, buffered or direct, while another process
+writes the same folder faster (the SDK's docs/PROBE.md, "Sustained writes").
+God of War HD's 6.3 GB package took 31.5 minutes to install. Installing a
+package's large files without copying them, read and decrypted from the
+package the way RPCS3 reads an ISO through a virtual device, would remove the
+wait and the second copy.
