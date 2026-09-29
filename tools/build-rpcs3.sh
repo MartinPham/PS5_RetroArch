@@ -22,12 +22,13 @@ core_stamp_skip rpcs3 \
     "$root/build/cores/stage/info/rpcs3_libretro.info" \
     "$root/build/cores/stage/system/RPCS3/fonts" \
     "$root/build/cores/stage/system/RPCS3/Icons" \
+    "$root/build/cores/stage/system/RPCS3/patches/patch.yml" \
     -- "$root/tools/build-rpcs3.sh" "$root/tools/core-fork.sh" "$root/tooling/rpcs3" \
     "$root/.deps/native/llvm-ps5/.revision" "$root/.deps/native/ffmpeg-ps5/.stamp" \
     "$root/.deps/native/libiconv-ps5/.stamp"
 [[ $# == 0 ]] || { echo "usage: ${0##*/}" >&2; exit 2; }
 
-revision=33600f8959ea167eda0d019f4c6ab456bb215206  # ../PS5_RPCS3 main
+revision=6cb4773fa7ea545d0829e7927799bf2e35305c0d  # ../PS5_RPCS3 main
 core_fork_setup
 core_fork_checkout PS5_RPCS3 "$revision"
 core_info="$root/tooling/rpcs3/rpcs3_libretro.info"
@@ -121,6 +122,14 @@ icons="$root/build/cores/stage/system/RPCS3/Icons"
 rm -rf -- "$icons"
 mkdir -p "$icons"
 cp -a -- "$source_dir/bin/Icons/ui" "$icons/ui"
+
+# RPCS3's game patch database (the fork's bin/patches: its source, date and
+# hash in SOURCE), where RPCS3 reads it: its config folder's patches/. The core
+# turns each game's frame-rate patch on when content loads (a core option).
+patches="$root/build/cores/stage/system/RPCS3/patches"
+rm -rf -- "$patches"
+mkdir -p "$patches"
+cp -- "$source_dir/bin/patches/patch.yml" "$patches/patch.yml"
 
 core_fork_stage "$built" "$core_info" "$revision" tools/build-rpcs3.sh \
     tooling/rpcs3/ps5-toolchain.cmake tooling/rpcs3/rpcs3_libretro.info

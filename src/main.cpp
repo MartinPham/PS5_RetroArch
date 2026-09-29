@@ -128,9 +128,11 @@ void start_log_flusher()
  * title's own folder at three chunk sizes, the file removed after each),
  * "writes" (3 GiB written in one file, with O_DIRECT, buffered with an fsync
  * every 256 MiB and buffered alone, each timed per 256 MiB and stopped after
- * 240 s) and "threads" (the stacks the main thread, a thread created with no
- * attributes and one asking for 2 MiB run on). Every line goes to the trace as
- * it is measured. */
+ * 240 s), "routes" (1 GiB written with write() and through a shared mapping,
+ * in /app0 and in the same folder by its own path, each stopped after 30 s:
+ * which route or path a title's writes are held back on) and "threads" (the
+ * stacks the main thread, a thread created with no attributes and one asking
+ * for 2 MiB run on). Every line goes to the trace as it is measured. */
 static void probe_line(void *, const char *line)
 {
     ps5::debug::mark(line);
@@ -160,6 +162,11 @@ static bool run_platform_probe()
         failures += ps5_platform_probe_files(probe_line, nullptr, "/app0");
     if (std::strstr(words, "writes"))
         failures += ps5_platform_probe_writes(probe_line, nullptr, "/app0", 3072, 240);
+    if (std::strstr(words, "routes"))
+    {
+        static const char *const directories[] = {"/app0", "/data/homebrew/PPSA99169"};
+        failures += ps5_platform_probe_write_routes(probe_line, nullptr, directories, 2, 1024, 30);
+    }
     if (std::strstr(words, "threads"))
         failures += ps5_platform_probe_threads(probe_line, nullptr);
     ps5::debug::mark_value("platform probe: failures", failures);

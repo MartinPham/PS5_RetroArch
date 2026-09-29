@@ -534,6 +534,21 @@ VSync (RetroArch paces frames) and RPCS3's savestate folder limits. Paths and
 free-text settings have no set of values to offer. The resolution scale keeps
 100% to 300% (the frame is 720p at the scale, 2160p at most), 300% by default.
 
+**Game patches** (`rpcs3/libretro/libretro_patches.*`). RPCS3 has no
+frame-rate unlock of its own: a game runs faster than it was made to only
+through the patches in RPCS3's game patch database. The fork keeps that
+database as RPCS3's patch manager downloads it (`bin/patches/patch.yml`, its
+source, date and hash in `bin/patches/SOURCE`; 815 executables, 502 of them
+with a frame-rate patch on 2026-09-29), and the title stages it where RPCS3
+reads it (`system/RPCS3/patches/`). The "Frame-rate patches" core option, on by
+default, turns each game's frame-rate patch on when content loads: "60 FPS"
+where the database has one, else "Unlock FPS", which RPCS3's frame limit holds
+at the display's rate; one per executable, serial and version, and another
+rate (30, 50, 120), a fallback variant or a "No User Input" one stays off.
+RPCS3's `patch_config.yml` is written only when that changes, and keeps the
+state of every other patch. A patch for a game the database lacks goes in
+`patches/<serial>_patch.yml`, which RPCS3 reads for that game.
+
 **Save states** (`rpcs3/libretro/libretro_state.*`). RetroArch's save states
 are RPCS3 savestates. RPCS3 writes one to a file system in memory, a virtual
 device like its ISO one (`Emulator::savestate_path_override` points the

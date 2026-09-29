@@ -341,8 +341,9 @@ fi
 
 # RPCS3's folder is <system>/RPCS3, which also holds what RPCS3 writes there on
 # the console (the firmware, dev_hdd0, its configuration): only the core's own
-# files are staged, the loading screen's fonts and RPCS3's overlay images.
-for part in fonts Icons; do
+# files are staged, the loading screen's fonts, RPCS3's overlay images and its
+# game patch database.
+for part in fonts Icons patches; do
     if [[ -d $root/build/cores/stage/system/RPCS3/$part ]]; then
         mkdir -p "$dist/system/RPCS3"
         rm -rf -- "${dist:?}/system/RPCS3/$part"

@@ -19,7 +19,8 @@
  * A run without a person at the pad can script it: /app0/pad-script.txt, when
  * present, holds one press a line, `<seconds> <BUTTON>[+<BUTTON>...] [<held
  * seconds>]`, timed from the first poll, with RetroPad names (B Y SELECT START
- * UP DOWN LEFT RIGHT A X L R L2 R2 L3 R3) and `#` comments. The pressed buttons
+ * UP DOWN LEFT RIGHT A X L R L2 R2 L3 R3, and LS_ or RS_ with UP DOWN LEFT or RIGHT
+ * for a stick pushed all the way) and `#` comments. The pressed buttons
  * are added to the pad's own, and the pad counts as connected while a script is
  * loaded, so RetroArch binds it. One trace line a press. One line is an action
  * rather than a press, for the reload stress (Profile 9): `<seconds> RELOAD`
@@ -188,12 +189,17 @@ int screenshot_count = 0;
 bool script_started = false;
 std::chrono::steady_clock::time_point script_start;
 
+/* A script's stick directions follow the 16 RetroPad buttons in its masks, two
+ * a stick axis (left X, left Y, right X, right Y), the negative one first. */
+constexpr unsigned script_stick_shift = 16;
+
 std::uint32_t retropad_button(const char *name) noexcept
 {
-    static const char *const names[16] = {"B",    "Y",     "SELECT", "START", "UP", "DOWN",
-                                          "LEFT", "RIGHT", "A",      "X",     "L",  "R",
-                                          "L2",   "R2",    "L3",     "R3"};
-    for (unsigned i = 0; i < 16; ++i)
+    static const char *const names[24] = {
+        "B",       "Y",        "SELECT", "START",   "UP",      "DOWN",     "LEFT",  "RIGHT",
+        "A",       "X",        "L",      "R",       "L2",      "R2",       "L3",    "R3",
+        "LS_LEFT", "LS_RIGHT", "LS_UP",  "LS_DOWN", "RS_LEFT", "RS_RIGHT", "RS_UP", "RS_DOWN"};
+    for (unsigned i = 0; i < 24; ++i)
         if (std::strcmp(name, names[i]) == 0)
             return UINT32_C(1) << i;
     return 0;
@@ -338,6 +344,15 @@ std::uint32_t pad_buttons_to_retropad(std::uint32_t pad) noexcept
     if (pad & pad_button_touch_pad)
         mask |= UINT32_C(1) << RETRO_DEVICE_ID_JOYPAD_SELECT;
     return mask;
+}
+
+/* A scripted stick direction's full deflection on a stick axis (0 to 3), or 0. */
+int script_axis(unsigned index) noexcept
+{
+    if (index > 3)
+        return 0;
+    const std::uint32_t held = script_buttons() >> (script_stick_shift + index * 2);
+    return (held & 2) ? 32767 : (held & 1) ? -32768 : 0;
 }
 
 /* A stick byte as a signed 16-bit axis. */
@@ -608,7 +623,7 @@ std::uint32_t joypad_buttons(unsigned port) noexcept
 {
     if (port != 0 || !active_pad)
         return 0;
-    const std::uint32_t scripted = script_buttons();
+    const std::uint32_t scripted = script_buttons() & 0xffff;
     const PadSample *sample = newest_sample(*active_pad);
     if (!sample)
         return scripted;
@@ -635,35 +650,38 @@ std::int16_t joypad_axis(unsigned port, std::uint32_t axis) noexcept
 {
     if (port != 0 || !active_pad || axis == AXIS_NONE)
         return 0;
-    const PadSample *sample = newest_sample(*active_pad);
-    if (!sample)
-        return 0;
     bool negative = AXIS_NEG_GET(axis) < 6;
     unsigned index = negative ? AXIS_NEG_GET(axis) : AXIS_POS_GET(axis);
-    int value;
-    switch (index)
-    {
-    case 0:
-        value = stick_axis(sample->left_x);
-        break;
-    case 1:
-        value = stick_axis(sample->left_y);
-        break;
-    case 2:
-        value = stick_axis(sample->right_x);
-        break;
-    case 3:
-        value = stick_axis(sample->right_y);
-        break;
-    case 4:
-        value = sample->left_trigger * 32767 / 255;
-        break;
-    case 5:
-        value = sample->right_trigger * 32767 / 255;
-        break;
-    default:
+    int value = script_axis(index);
+    const PadSample *sample = newest_sample(*active_pad);
+    if (value != 0)
+        ;
+    else if (!sample)
         return 0;
-    }
+    else
+        switch (index)
+        {
+        case 0:
+            value = stick_axis(sample->left_x);
+            break;
+        case 1:
+            value = stick_axis(sample->left_y);
+            break;
+        case 2:
+            value = stick_axis(sample->right_x);
+            break;
+        case 3:
+            value = stick_axis(sample->right_y);
+            break;
+        case 4:
+            value = sample->left_trigger * 32767 / 255;
+            break;
+        case 5:
+            value = sample->right_trigger * 32767 / 255;
+            break;
+        default:
+            return 0;
+        }
     return negative ? (value < 0 ? value : 0) : (value > 0 ? value : 0);
 }
 
