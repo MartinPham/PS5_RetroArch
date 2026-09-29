@@ -30,8 +30,12 @@
  * its own frame (2026-09-25), which is why there is no CLOSE action. And
  * `<seconds> STOP` ends the run as --max-frames does, with its screenshot:
  * RetroArch forgets --max-frames when a core closes, so a run that reloads
- * content otherwise never ends or takes its screenshot. Testing only: the file
- * is never shipped.
+ * content otherwise never ends or takes its screenshot. `<seconds> SAVE_STATE`
+ * and `<seconds> LOAD_STATE` save and load the current slot, as the menu's
+ * items do, for a run that starts from a known scene. `<seconds> SCREENSHOT`
+ * saves the frame shown then as /app0/pad-shot-<n>.png (n counts from 1), so a
+ * run that walks through a game's screens shows each of them. Testing only: the
+ * file is never shipped.
  *
  * Reference: docs/REFERENCE.md, "Input".
  */
@@ -48,6 +52,9 @@
 
 #include <input/input_driver.h>
 #include "content.h"
+#ifdef HAVE_MENU
+#include "command.h"
+#endif
 #include "gfx/video_driver.h"
 #include "retroarch_types.h"
 #include "runloop.h"
@@ -158,17 +165,26 @@ constexpr int script_capacity = 128;
 constexpr double script_default_hold = 0.15;
 ScriptPress script[script_capacity];
 int script_count = 0;
-/* The script's RELOAD and STOP actions (the top of this file), run once each
- * from the poll on the main thread. */
+/* The script's actions (the top of this file), run once each from the poll on
+ * the main thread. */
+enum class ScriptActionKind
+{
+    reload,
+    stop,
+    save_state,
+    load_state,
+    screenshot,
+};
 struct ScriptAction
 {
     double at;
     bool done;
-    bool stop;
+    ScriptActionKind kind;
 };
 constexpr int action_capacity = 32;
 ScriptAction actions[action_capacity];
 int action_count = 0;
+int screenshot_count = 0;
 bool script_started = false;
 std::chrono::steady_clock::time_point script_start;
 
@@ -200,12 +216,24 @@ void load_script() noexcept
         const int fields = std::sscanf(line, "%lf %95s %lf", &at, buttons, &held);
         if (fields < 2)
             continue;
-        if ((std::strcmp(buttons, "RELOAD") == 0 || std::strcmp(buttons, "STOP") == 0) &&
-            action_count < action_capacity)
+        static const struct
         {
-            actions[action_count++] = ScriptAction{at, false, std::strcmp(buttons, "STOP") == 0};
+            const char *name;
+            ScriptActionKind kind;
+        } action_names[] = {{"RELOAD", ScriptActionKind::reload},
+                            {"STOP", ScriptActionKind::stop},
+                            {"SAVE_STATE", ScriptActionKind::save_state},
+                            {"LOAD_STATE", ScriptActionKind::load_state},
+                            {"SCREENSHOT", ScriptActionKind::screenshot}};
+        bool is_action = false;
+        for (const auto &named : action_names)
+            if (std::strcmp(buttons, named.name) == 0 && action_count < action_capacity)
+            {
+                actions[action_count++] = ScriptAction{at, false, named.kind};
+                is_action = true;
+            }
+        if (is_action)
             continue;
-        }
         std::uint32_t mask = 0;
         for (char *name = std::strtok(buttons, "+"); name != nullptr;
              name = std::strtok(nullptr, "+"))
@@ -463,7 +491,7 @@ bool args_paths(char *core, std::size_t core_size, char *content, std::size_t co
     return core[0] != '\0' && content[0] != '\0';
 }
 
-/* Runs the script's RELOAD and STOP actions whose time has come. */
+/* Runs the script's actions whose time has come. */
 void run_script_actions() noexcept
 {
     if (action_count == 0)
@@ -481,7 +509,43 @@ void run_script_actions() noexcept
         if (action.done || seconds < action.at)
             continue;
         action.done = true;
-        if (action.stop)
+        if (action.kind == ScriptActionKind::save_state ||
+            action.kind == ScriptActionKind::load_state)
+        {
+            const bool save = action.kind == ScriptActionKind::save_state;
+#ifdef HAVE_MENU
+            const bool ok =
+                command_event(save ? CMD_EVENT_SAVE_STATE : CMD_EVENT_LOAD_STATE, nullptr);
+#else
+            const bool ok = false;
+#endif
+            char note[96];
+            std::snprintf(note, sizeof(note), "input: pad script %s at %.2f s: %d",
+                          save ? "SAVE_STATE" : "LOAD_STATE", seconds, ok ? 1 : 0);
+            ps5_input_trace(note);
+            continue;
+        }
+        if (action.kind == ScriptActionKind::screenshot)
+        {
+            char path[64];
+            std::snprintf(path, sizeof(path), "/app0/pad-shot-%d.png", ++screenshot_count);
+#ifdef HAVE_SCREENSHOTS
+            const video_driver_state_t *video_st = video_state_get_ptr();
+            const bool ok =
+                take_screenshot(nullptr, path, false,
+                                video_st->frame_cache_data &&
+                                    video_st->frame_cache_data == RETRO_HW_FRAME_BUFFER_VALID,
+                                true, false);
+#else
+            const bool ok = false;
+#endif
+            char note[128];
+            std::snprintf(note, sizeof(note), "input: pad script SCREENSHOT at %.2f s: %s %d",
+                          seconds, path, ok ? 1 : 0);
+            ps5_input_trace(note);
+            continue;
+        }
+        if (action.kind == ScriptActionKind::stop)
         {
             // The next frame is the last, as when --max-frames is reached.
             runloop_state_get_ptr()->max_frames =

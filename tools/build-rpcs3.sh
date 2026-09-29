@@ -27,7 +27,7 @@ core_stamp_skip rpcs3 \
     "$root/.deps/native/libiconv-ps5/.stamp"
 [[ $# == 0 ]] || { echo "usage: ${0##*/}" >&2; exit 2; }
 
-revision=3a43c85effda644e4cf8a0956c108bd78c1426eb  # ../PS5_RPCS3 main
+revision=33600f8959ea167eda0d019f4c6ab456bb215206  # ../PS5_RPCS3 main
 core_fork_setup
 core_fork_checkout PS5_RPCS3 "$revision"
 core_info="$root/tooling/rpcs3/rpcs3_libretro.info"

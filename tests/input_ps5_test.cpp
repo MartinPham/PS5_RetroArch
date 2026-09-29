@@ -240,7 +240,7 @@ int main()
 
     // STOP ends the run on the next frame, as --max-frames does, and only once.
     test_video.frame_count = 1234;
-    actions[0] = ScriptAction{0.0, false, true};
+    actions[0] = ScriptAction{0.0, false, ScriptActionKind::stop};
     action_count = 1;
     run_script_actions();
     assert(test_runloop.max_frames == 1235 && actions[0].done);

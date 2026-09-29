@@ -515,10 +515,46 @@ the platform's `ps5_getcwd` (`--wrap=getcwd`), as the cores already were, and
 exported `__wrap_getcwd` to interpose on libc's stubs and a title publishes
 no exports.
 
-**Core options.** The resolution scale is a libretro v2 option, 100% to 300%
-(2160p), 300% by default, written to `config.yml` when content loads, as
-RPCS3's settings dialog writes it, so a game's custom configuration still
-overrides it.
+**Core options** (`rpcs3/libretro/libretro_options.*` in the fork). Every RPCS3
+setting with a set of values is a libretro v2 core option, one category per
+section of RPCS3's configuration: CPU (Core), Virtual File System, GPU
+(Video, with its Vulkan, performance overlay and shader loading dialog
+subsections), Audio, Input, System, Network, Save States and Miscellaneous.
+They are built from the configuration tree itself, so their names, values
+(an enum's names; a number's range as a list: all of a small range, else the
+1-2-5 series, even steps, the bounds and the default), defaults and whether
+RPCS3 takes a change while a game runs are RPCS3's own. A change RPCS3 takes
+live applies at once; the rest are written to `config.yml` when content loads,
+as RPCS3's settings dialog writes them, so a game's custom configuration still
+overrides them. Left out: what the core fixes itself (the Vulkan renderer,
+RetroArch's audio backend, the RetroPads in place of keyboards, mice, cameras
+and Move), the Qt application's window behaviour (auto-start and auto-exit,
+fullscreen, focus pause, native UI, GameMode), settings for other hosts (Metal),
+VSync (RetroArch paces frames) and RPCS3's savestate folder limits. Paths and
+free-text settings have no set of values to offer. The resolution scale keeps
+100% to 300% (the frame is 720p at the scale, 2160p at most), 300% by default.
+
+**Save states** (`rpcs3/libretro/libretro_state.*`). RetroArch's save states
+are RPCS3 savestates. RPCS3 writes one to a file system in memory, a virtual
+device like its ISO one (`Emulator::savestate_path_override` points the
+savestate there), and the game boots again from it, as RPCS3's own "save state
+and continue" does; loading a state stops the game and boots the state in its
+place. Nothing goes through the console's storage but RetroArch's own state
+file. RetroArch asks for a state's size right before it serializes one, and
+before it loads one (to back up what runs for "Undo Load State"), so the core
+makes the state at the size query and keeps it until the next frame: one
+request costs one savestate. RPCS3 refuses a savestate while an SPU cannot be
+stopped (its "Compatible Savestate Mode" option), a video decoder context
+exists (LLE libvdec avoids it) or the game is saving; the game then runs on
+and RetroArch reports the failure. The core declares its states variable in
+size and platform-dependent, and its `.info` offers basic save states only (no
+rewind or run-ahead, which RPCS3 savestates cannot serve). The pad script's
+`SAVE_STATE` and `LOAD_STATE` actions save and load the current slot, so a
+test run can start from a known scene (and `SCREENSHOT` keeps the frame shown
+then as `/app0/pad-shot-<n>.png`, so one run shows each screen it walks
+through); RetroArch names the state after the
+content, so a game loaded as its folder (`dev_hdd0/game/GTA4`) has
+`GTA4.state`, where an `EBOOT.BIN` gives every game `EBOOT.state`.
 
 **A title's write budget.** A title writes at full speed for a burst of a few
 GiB and then at about 2 MiB/s, buffered or direct, while another process
