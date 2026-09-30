@@ -138,7 +138,9 @@ void start_log_flusher()
  * as the server sees it when statfs() cannot) and
  * "threads" (the
  * stacks the main thread, a thread created with no attributes and one asking
- * for 2 MiB run on). Every line goes to the trace as it is measured. */
+ * for 2 MiB run on) and "topology" (the round trip of a cache line between
+ * every pair of the title's CPUs, which shows their cores and clusters). Every
+ * line goes to the trace as it is measured. */
 static void probe_line(void *, const char *line)
 {
     ps5::debug::mark(line);
@@ -185,6 +187,8 @@ static bool run_platform_probe()
     }
     if (std::strstr(words, "threads"))
         failures += ps5_platform_probe_threads(probe_line, nullptr);
+    if (std::strstr(words, "topology"))
+        failures += ps5_platform_probe_topology(probe_line, nullptr);
     ps5::debug::mark_value("platform probe: failures", failures);
     std::fflush(stderr);
     return true;
