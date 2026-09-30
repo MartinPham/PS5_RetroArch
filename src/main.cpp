@@ -431,6 +431,15 @@ int main()
     std::remove("/app0/state-copy.txt");
     if (run_platform_probe())
         return 0;
+    /* Testing: /app0/radv-threaded.txt turns on RADV's threaded recording
+     * (the Vulkan driver's worker records the frontend's and cores' commands),
+     * set before RetroArch makes its Vulkan instance. */
+    if (std::FILE *threaded = std::fopen("/app0/radv-threaded.txt", "rb"))
+    {
+        std::fclose(threaded);
+        setenv("RADV_THREADED_RECORDING", "1", 1);
+        ps5::debug::mark("radv: threaded recording on");
+    }
     if (std::FILE *profile = std::fopen("/app0/ps5vk-profile.txt", "rb"))
     {
         std::fclose(profile);
