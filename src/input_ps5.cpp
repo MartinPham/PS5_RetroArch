@@ -184,11 +184,14 @@ enum class ScriptActionKind
     screenshot,
     mark,
 };
-// The core's new frames (gfx/video_driver.c, patches/series 0101) and the
-// longest time between two of them since the last MARK, which a MARK line
-// prints: a run's frame rate and worst frame over exact script times.
+// The core's new frames (gfx/video_driver.c, patches/series 0101), the
+// longest time between two of them since the last MARK and how many came more
+// than 40 ms after the one before (a 30 fps frame that missed its slot on a
+// 60 Hz display), which a MARK line prints: a run's frame rate, worst frame
+// and stutters over exact script times.
 std::atomic<std::uint64_t> new_frames{0};
 std::atomic<std::uint64_t> new_frame_worst_ns{0};
+std::atomic<std::uint64_t> new_frames_slow{0};
 std::uint64_t new_frame_last_ns = 0;
 
 struct ScriptAction
@@ -593,10 +596,11 @@ void run_script_actions() noexcept
         {
             const std::uint64_t worst_ns = new_frame_worst_ns.exchange(0, std::memory_order_relaxed);
             char note[128];
-            std::snprintf(note, sizeof(note), "input: pad script MARK at %.3f s: frames=%llu worst_ms=%.1f",
+            std::snprintf(note, sizeof(note), "input: pad script MARK at %.3f s: frames=%llu worst_ms=%.1f over_40ms=%llu",
                           seconds,
                           static_cast<unsigned long long>(new_frames.load(std::memory_order_relaxed)),
-                          static_cast<double>(worst_ns) / 1e6);
+                          static_cast<double>(worst_ns) / 1e6,
+                          static_cast<unsigned long long>(new_frames_slow.load(std::memory_order_relaxed)));
             ps5_input_trace(note);
             continue;
         }
@@ -875,6 +879,8 @@ extern "C" void ps5_input_note_new_frame(void)
             .count());
     if (new_frame_last_ns != 0 && now - new_frame_last_ns > new_frame_worst_ns.load(std::memory_order_relaxed))
         new_frame_worst_ns.store(now - new_frame_last_ns, std::memory_order_relaxed);
+    if (new_frame_last_ns != 0 && now - new_frame_last_ns > 40'000'000)
+        new_frames_slow.fetch_add(1, std::memory_order_relaxed);
     new_frame_last_ns = now;
     new_frames.fetch_add(1, std::memory_order_relaxed);
 }
