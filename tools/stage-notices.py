@@ -166,12 +166,20 @@ def copy_text(entry, tokens, root, target):
     raise NoticeError(f"licence text not found: {' or '.join(choices)}")
 
 
+def legal_notice():
+    """The title's legal notice: no piracy, RPCS3 only built from source."""
+    return (Path(__file__).resolve().parent.parent / "config" / "LEGAL.txt").read_text(encoding="utf-8")
+
+
 def readme(components, tag):
     lines = [
         "PS5 RetroArch - licences, notices and sources",
         "=" * 45,
         "",
         f"Release: {tag or 'a development build (no release tag given)'}",
+        "",
+        # The legal notice first (config/LEGAL.txt, also LEGAL.txt beside eboot.bin)
+        *legal_notice().splitlines()[3:],
         "",
         "This folder lists every part of this title, the licence each is under, the",
         "licence texts those licences require to travel with it, and the exact source",

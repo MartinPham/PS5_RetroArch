@@ -321,6 +321,9 @@ dist="$root/dist/$title_id"
 # title, because naming a driver whose library is missing makes RetroArch fail to
 # initialise and the title exit 1 saying nothing. See config/retroarch.cfg.
 cp -a -- "$root/config/retroarch.cfg" "$dist/retroarch.cfg"
+# The legal notice (no piracy; RPCS3 only built from source) at the top of the
+# title folder, where a person unpacking a release sees it first.
+cp -a -- "$root/config/LEGAL.txt" "$dist/LEGAL.txt"
 mkdir -p "$dist/cores" "$dist/info"
 for core_name in "${core_names[@]}"; do
     cp -- "$root/build/cores/stage/cores/${core_name}_libretro.so" "$dist/cores/"
