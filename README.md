@@ -9,16 +9,35 @@ Maintained by [Mihawk](https://github.com/mihawk-99). Based on
 application foundation derived from
 [ProsperoLight](https://github.com/blackbearreloaded/ProsperoLight).
 
-The current build launches as a homebrew title, presents XMB through RetroArch's
-Vulkan video driver, and runs eight native libretro cores, three of them (PSP,
-GameCube/Wii and PlayStation 2) rendering on the PS5's GPU. Input, stereo audio,
-configuration persistence and content browsing have been verified on a console.
-This is an active development project; the tested paths below do not imply
-complete core compatibility or Vulkan conformance.
+> [!IMPORTANT]
+> **Piracy is not condoned.** This project ships no games, no BIOS files, no
+> console firmware and no decryption keys, and never will. Use only **legally
+> obtained backups of games you own**, made yourself from your own discs,
+> cartridges or digital purchases, and BIOS or firmware files dumped from
+> **hardware you own**. Requests for, or links to, games, BIOS files, firmware
+> or keys are not welcome in this project's issues or discussions.
+>
+> **PlayStation 3 (RPCS3) is not in any release.** RPCS3 is licensed
+> GPL-2.0-only and this port is GPL-3.0-or-later: the two cannot be distributed
+> together as one program. Its source is public, and **you must compile it
+> yourself from source** for your own console (see
+> [PlayStation 3 (RPCS3): build it yourself](#playstation-3-rpcs3-build-it-yourself)).
+> Do not share or redistribute the binaries you build.
 
-**Latest release: v0.5.0-alpha.5** — see the [release notes](docs/releases/v0.5.0-alpha.5.md).
-It is the first release on RADV; [v0.4.0-alpha.4](docs/releases/v0.4.0-alpha.4.md)
-was the last on ps5vk, the project's first driver.
+The title launches as a homebrew title, presents XMB through RetroArch's Vulkan
+video driver, and runs fifteen native libretro cores in its releases, six of
+them (PSP, GameCube/Wii, PlayStation 2, PlayStation, Nintendo 64 and Nintendo
+3DS) rendering on the PS5's GPU. A sixteenth, RPCS3 (PlayStation 3), is
+available only as source that you build yourself. Input, stereo audio,
+configuration persistence and content browsing have been verified on a
+console. This is an active development project; the tested paths below do not
+imply complete core compatibility or Vulkan conformance.
+
+**Latest release: v0.5.6-alpha.5** — see its
+[release notes](https://github.com/mihawk-99/PS5_RetroArch/releases/tag/v0.5.6-alpha.5)
+and [every release](https://github.com/mihawk-99/PS5_RetroArch/releases).
+v0.5.0-alpha.5 was the first release on RADV; v0.4.0-alpha.4 was the last on
+ps5vk, the project's first driver.
 
 ## Table of contents
 
@@ -51,15 +70,14 @@ was the last on ps5vk, the project's first driver.
 | Shader cache | ✅ RADV keeps compiled pipelines in `radv-shader-cache/`: a game's next start reads them back instead of compiling |
 | Save states and fast-forward | ✅ Save/load states (including `--entryslot`) and fast-forward, tested with PPSSPP and mGBA |
 | 120 Hz output | ✅ 120 Hz by default where the display offers it; the refresh is measured, and a display that stays at 60 Hz gets 60 Hz |
-| Stability | ✅ On RADV: every core with a game through boot, the menu, Close Content and a reload, with and without Threaded Video, and a 10-minute PPSSPP soak with 25 menu toggles: no crash ([release checks](docs/PHASE_LOG.md)) |
+| Stability | ✅ On RADV (v0.5.6-alpha.5): every core in the release with its game through boot, the menu opened and closed twice, Close Content and a reload, at full speed before and after, with no crash; earlier releases also passed a 10-minute PPSSPP soak with 25 menu toggles |
 | CPU video fallback | ✅ `video_ps5` remains registered and selectable |
 | Development diagnostics | ✅ `retroarch.log`, startup/GPU trace, kernel captures and optional buffered frame timing |
 
-The Alpha 5 checks recorded no crash and no kernel fatal signal, and full-speed
-audio windows once each game had booted. These results apply to the captured
-tests, not every possible workload. See
-[active state](docs/ACTIVE.md) and [committed evidence](evidence/) for exact builds,
-test coverage and known exceptions.
+The v0.5.6-alpha.5 checks recorded no crash and no kernel fatal signal, and
+full-speed audio once each game had booted. These results apply to the tested
+games, not every possible workload; the release notes list them, and
+[committed evidence](evidence/) holds earlier captures.
 
 ## Available cores
 
@@ -84,13 +102,17 @@ lower one is the most that keeps full speed (DeSmuME).
 | [Dolphin](https://github.com/libretro/dolphin) 2609 | GameCube, Wii | ✅ Wind Waker (an hour), Resident Evil 4 (30 minutes), Super Smash Bros. Melee, Mario Kart Wii and Rogue Leader, with the JIT and fast memory, save states and closing and reopening games. Rogue Leader's attract sequence still dips to 72–85% (see the release notes). |
 | [LRPS2](https://github.com/libretro/LRPS2) (PCSX2) | PlayStation 2 | ✅ The God of War II and Final Fantasy X demos and GTA San Andreas at 6× internal resolution on the Vulkan hardware renderer, full speed, with multi-threaded VU1 and save states. Needs your own BIOS in `system/pcsx2/bios/`. |
 | [Beetle PSX HW](https://github.com/libretro/beetle-psx-libretro) | PlayStation | ✅ Crash Bandicoot at 16× internal resolution on the Vulkan renderer, 32-bit colour, PGXP (no wobbling polygons), full speed, and closing and reopening the game. The disc image is read into memory at load. It runs with its built-in OpenBIOS; your own BIOS (`scph5501.bin` and the others its metadata lists) in `system/` is used when present. |
-| [Mupen64Plus-Next](https://github.com/libretro/mupen64plus-libretro-nx) | Nintendo 64 | ✅ Mario Kart 64 with ParaLLEl-RDP at 8× upscaling and ParaLLEl-RSP, both JITs on, full speed after boot, and closing and reopening the game. |
+| [Mupen64Plus-Next](https://github.com/libretro/mupen64plus-libretro-nx) | Nintendo 64 | ✅ Mario Kart 64 in a race with ParaLLEl-RDP at 4× upscaling (the default since v0.5.6-alpha.5; 8× stays an option) and ParaLLEl-RSP, both JITs on, 59.9 fps with clean audio, and closing and reopening the game. A change of the upscaling factor applies at the next frame; it no longer waits for a restart. |
 | [Beetle Saturn](https://github.com/libretro/beetle-saturn-libretro) | Sega Saturn | ⚠️ Loads, then needs your own BIOS in `system/`: `mpr-17933.bin` (US/EU) or `sega_101.bin` (JP). Without it the game refuses to load and the menu stays usable. Gameplay not yet tested. |
 | [VICE](https://github.com/libretro/vice-libretro) x64sc | Commodore 64 | ✅ A `.d64` disk game at full speed, and closing and reopening it. |
 | [MAME](https://github.com/libretro/mame) 0.289 | Arcade | ✅ Metal Slug 3 from a 0.289 non-merged set, BIOS in the same folder: full speed, and closing and reopening it. Raster games render at their native size and are scaled on the GPU. Vector games are drawn at 4K by MAME's alternate renderer (not yet tested on the console). Sets must match 0.289. |
 | [DeSmuME](https://github.com/libretro/desmume) | Nintendo DS | ✅ Pokémon Diamond at 5× (1280×960) with the JIT and eight rasterizer threads, full speed, and closing and reopening it. 6× measured 93–95%. |
 | [Azahar](https://github.com/azahar-emu/azahar) | Nintendo 3DS | ✅ Mario & Luigi: Superstar Saga + Bowser's Minions at 18× internal resolution (the most Azahar offers) on Vulkan, with asynchronous shader compilation and the JIT, full speed after boot, and closing and reopening it. Decrypted games only. |
-| [RPCS3](https://github.com/mihawk-99/PS5_RPCS3) (my fork) | PlayStation 3 | ⚠️ **A console build only, in no release** (its licence, see [License and third-party terms](#license-and-third-party-terms)): it builds with this repository. God of War HD at 4K and 60 fps in gameplay. GTA IV at 4K held at 30 fps: a game with only an "Unlock FPS" patch runs it with RPCS3's frame limit at 30 by default (the "Frame-rate patches" option), steady where the emulation keeps up; its busiest city drives still dip to 24–27 fps. Needs your own PS3 firmware (`PS3UPDAT.PUP` in `system/RPCS3/`) and games; a PSN package installs with its `.rap`. |
+| [RPCS3](https://github.com/mihawk-99/PS5_RPCS3) (my fork) | PlayStation 3 | ⚠️ **Not in any release: build it yourself from source** ([how](#playstation-3-rpcs3-build-it-yourself); its licence, see [License and third-party terms](#license-and-third-party-terms)). On my console build: God of War HD at 4K and 60 fps in gameplay; GTA IV at 4K held at 30 fps (a game with only an "Unlock FPS" patch runs it with RPCS3's frame limit at 30 by default, the "Frame-rate patches" option), steady where the emulation keeps up, with its busiest city drives still at 24–27 fps. Needs your own PS3 system software (`PS3UPDAT.PUP` in `system/RPCS3/`) and your own games; a PSN purchase installs with its `.rap` licence file. |
+
+The games named in this table are the ones I tested with; none is provided.
+**Use only legally obtained backups of games you own**, and BIOS files dumped
+from your own hardware: piracy is not condoned.
 
 Use **FBNeo for Sega System 16/32 arcade sets**, rather than Genesis Plus GX.
 FBNeo needs compatible arcade sets and receives its ZIP/7z archives intact.
@@ -138,8 +160,7 @@ max-quality filtering, hardware transform, software skinning, no frameskip, no
 speed hacks); an existing `PPSSPP.opt` is set aside once as
 `PPSSPP.opt.before-ps5-profile`. The native loader has explicit limits, including
 no TLS or general exception-unwind registration, and it waits for a core's
-threads to finish before unmapping the core. See the
-[runtime contract](docs/REFERENCE.md#native-in-process-core-loader).
+threads to finish before unmapping the core.
 
 ## Roadmap
 
@@ -181,7 +202,7 @@ in this port, even if upstream RetroArch already offers the feature.**
 | ❌ | PicoDrive — add Sega 32X coverage; candidate |
 | ✅ | MAME 0.289 — arcade; tested games only |
 | ✅ | Beetle PSX HW — PlayStation, Vulkan renderer at 16× |
-| ✅ | Mupen64Plus-Next — Nintendo 64, ParaLLEl-RDP at 8× |
+| ✅ | Mupen64Plus-Next — Nintendo 64, ParaLLEl-RDP at 4× (8× selectable), factor changes applied live |
 | 🚧 | Beetle Saturn — Sega Saturn; needs a gameplay test with a BIOS |
 | ✅ | VICE x64sc — Commodore 64 |
 | ✅ | DeSmuME — Nintendo DS at 5× |
@@ -192,7 +213,7 @@ in this port, even if upstream RetroArch already offers the feature.**
 | ✅ | Dolphin — GameCube and Wii, Vulkan rendering and JIT; tested games, long play and the enhancement profiles |
 | ✅ | LRPS2 — PlayStation 2, Vulkan hardware renderer at 4K; tested games only |
 | 🚧 | LRPS2 — upstream PCSX2's newer renderer fixes, 8× internal resolution and texture replacement |
-| 🚧 | RPCS3 — PlayStation 3 at 4K; a console build only (not in releases); GTA IV's busiest drives below 30 |
+| 🚧 | RPCS3 — PlayStation 3 at 4K; source only, never in a release (build it yourself); GTA IV's busiest drives below 30 |
 
 Future entries are development targets, not a promised release order. Hardware
 rendering introduces new Vulkan requirements beyond presenting software frames;
@@ -267,6 +288,36 @@ import table and build identity depend on the shipped core binaries. Source
 patches live in `patches/`; fetched and generated trees stay in ignored
 `vendor/`, `.deps/`, `build/` and `dist/` directories.
 
+### PlayStation 3 (RPCS3): build it yourself
+
+No release of this title carries RPCS3, and none will while its licence stands
+as it does: RPCS3 is **GPL-2.0-only**, and the title it runs in is
+**GPL-3.0-or-later** (this port's runtime is linked into the core, and the core
+runs against the title's GPL-3.0 platform code), so the two cannot be handed
+out together as one program. What is public is the source: my fork
+[PS5_RPCS3](https://github.com/mihawk-99/PS5_RPCS3) and this repository's build
+scripts. **If you want RPCS3, you must compile it yourself**, for your own
+console:
+
+```bash
+bash tools/build-title.sh     # a development build: the frontend and every core, RPCS3 included
+```
+
+Leave `PS5_RELEASE_TAG` unset: a release build (`PS5_RELEASE_TAG=...`) leaves
+RPCS3 out, and `tools/check-notices.py --release` refuses a title with any
+RPCS3 file in it. Build the whole title, not the core alone: the title's native
+import table is made from the cores it is built with, so a release title cannot
+load an RPCS3 core built on its own. `tools/build-rpcs3.sh` builds only the
+core (from PS5_RPCS3, with LLVM from my fork PS5_LLVM, at their pinned
+revisions), for work on it.
+
+Keep what you build for your own console: **do not share, upload or
+redistribute the binaries you build.** RPCS3 needs your own copy of the PS3
+system software (`PS3UPDAT.PUP`, from Sony's official PS3 system software
+update page) in `system/RPCS3/`, where it installs on the first start, and
+your own games: a disc you own, dumped yourself, or a PSN purchase with its
+`.rap` licence file. Piracy is not condoned.
+
 ## Install and file locations
 
 The verified deployment is a **homebrew title folder**, not a retail package.
@@ -284,6 +335,7 @@ title folder instead:
 | Games | `content/` | `/app0/content/` |
 | BIOS/system data | `system/` | `/app0/system/` |
 | PS2 BIOS (your own dump) | `system/pcsx2/bios/` | `/app0/system/pcsx2/bios/` |
+| PS3 system software, RPCS3's drives (your own build only) | `system/RPCS3/` | `/app0/system/RPCS3/` |
 | Live configuration | `config/retroarch.cfg` | `/app0/config/retroarch.cfg` |
 | Save RAM | `savefiles/` | `/app0/savefiles/` |
 | Save states | `savestates/` | `/app0/savestates/` |
@@ -294,6 +346,10 @@ deleting it only makes the next start compile again. `ps5vk-shader-cache/` and
 `sce_module/libvulkan.so.1`, left by releases up to v0.4.0-alpha.4, are not used
 since v0.5.0-alpha.5 and can be deleted.
 
+Everything you put in `content/` and `system/` must be **your own legally
+obtained backups**: games you own, and BIOS or firmware dumped from hardware you
+own. Piracy is not condoned.
+
 For FBNeo, use `system/fbneo/` for its system files. Genesis Plus GX's Sega CD BIOS
 filenames belong in the configured `system/` root, as listed by its metadata.
 
@@ -303,8 +359,9 @@ content and saved settings. Existing settings can therefore keep RGUI selected
 even though XMB is the packaged default. Back up user files before any clean
 removal; `--clean` removes the entire title folder.
 
-See [deployment](docs/DEPLOYMENT.md) for FTP setup, verified readback and test runs.
-Console details belong in the ignored `.env`, based on `.env.example`.
+`tools/deploy-title.py` publishes a built `dist/PPSA99169/` over FTP and reads
+every file back; console details belong in the ignored `.env`, based on
+`.env.example`.
 
 ## Testing and troubleshooting
 
@@ -313,9 +370,10 @@ includes native loading, gameplay, colour checks, audio/input, Quick Menu →
 Close Content, and loading another game. I record my own visual confirmation on
 the console alongside the logs; a camera can miss refresh-synchronous flicker.
 
-The v0.5.0-alpha.5 release passed all five host gates with 74 Python tests;
-52 recorded captures replay successfully. Exact results and limitations are in
-[ACTIVE](docs/ACTIVE.md), rather than implied by a core's upstream feature list.
+Before each release every core in it runs its game on the console: boot, the
+menu opened and closed twice, Close Content and a reload, with its frame rate,
+audio and a screenshot checked before and after. The release notes give the
+results; they are the tested games, not a core's upstream feature list.
 
 For reports, include the core, game-file format, relevant settings, reproduction
 steps and whether the application was closed manually. Preserve `retroarch.log`
@@ -329,18 +387,12 @@ assets and can be removed. Keep the normal development logs when reporting bugs.
 
 ## Documentation
 
-| Document | Purpose |
-| --- | --- |
-| [Active state](docs/ACTIVE.md) | Current verified build, known errors and acceptance limits |
-| [Reference](docs/REFERENCE.md) | Native loader, core contracts, source pins and platform details |
-| [Testing](docs/TESTING.md) | Host gates and console acceptance procedures |
-| [Deployment](docs/DEPLOYMENT.md) | Build staging, FTP locations, updates and capture workflow |
-| [Troubleshooting](docs/TROUBLESHOOTING.md) | Recorded symptoms, causes and fixes |
-| [Findings](docs/FINDINGS.md) | Technical observations and evidence behind decisions |
-| [Phase log](docs/PHASE_LOG.md) | Dated development and console-test history |
-| [Releasing](docs/RELEASING.md) | What a release carries (licences, component manifest, source archives) and the order that keeps tag, ZIP and source in step; [what each past release was built from](docs/releases/SOURCE_CORRESPONDENCE.md) |
-| [Evidence](evidence/) | Machine-readable captures and expected results |
-| [Contributor/agent instructions](AGENTS.md) | Scope, verification, attribution and commit rules |
+Each release's notes on the
+[Releases page](https://github.com/mihawk-99/PS5_RetroArch/releases) are the
+public record of what changed, what was tested and what is known not to work.
+The committed [evidence](evidence/) holds machine-readable captures and their
+expected results. My design notes, logs and procedures are kept locally and are
+not published.
 
 ## Authors and acknowledgements
 
@@ -385,15 +437,21 @@ This repository's own code is **GPL-3.0-or-later** ([LICENSE](LICENSE)). Most so
 files carry a copyright and SPDX notice; the ones that do not (for example
 `src/memory_ps5.cpp` and the build scripts in `tools/`) are under the same licence.
 Code inherited from BlackBearReloaded's ps5-native-app-boilerplate and ProsperoLight
-is Copyright (C) 2026 BlackBearReloaded, GPL-3.0-or-later. The generated
-`sce_module/libc.prx` is described in [runtime/README.md](runtime/README.md).
+is Copyright (C) 2026 BlackBearReloaded, GPL-3.0-or-later. The title's
+`sce_module/libc.prx` is generated by this repository (`runtime/`).
 
-Every built title folder carries `licenses/`: the licence texts each part requires,
-and `components.json`, which ties every executable file to the source revision it
-was built from ([tooling/notices/components.json](tooling/notices/components.json),
-[docs/RELEASING.md](docs/RELEASING.md)). Releases up to v0.5.0-alpha.5 were
-published without it; [docs/releases/SOURCE_CORRESPONDENCE.md](docs/releases/SOURCE_CORRESPONDENCE.md)
-records what each was built from.
+Every built title folder carries `LEGAL.txt` (the legal notice above) and
+`licenses/`: the licence texts each part requires, and `components.json`, which
+ties every executable file to the source revision it was built from
+([tooling/notices/components.json](tooling/notices/components.json)). Each
+release also carries the source archives of everything in it. Releases up to
+v0.5.0-alpha.5 were published without `licenses/`.
+
+**RPCS3 is licensed GPL-2.0-only, which is incompatible with this port's
+GPL-3.0-or-later.** For that reason no release of this title contains RPCS3 or
+any of its files, and you must compile it yourself from source if you want it
+(see [PlayStation 3 (RPCS3): build it yourself](#playstation-3-rpcs3-build-it-yourself));
+the binaries you build are for your own console only.
 
 The cores keep their own licences, and they differ:
 
@@ -401,12 +459,18 @@ The cores keep their own licences, and they differ:
 | --- | --- |
 | GPL-2.0-or-later | FCEUmm, PPSSPP, Dolphin, Beetle PSX HW, Beetle Saturn, Mupen64Plus-Next (with MIT and LGPL parts), VICE, DeSmuME, Azahar (Dynarmic is 0BSD), MAME (as a whole; many files BSD-3-Clause) |
 | GPL-3.0-or-later | LRPS2 (PCSX2) |
-| GPL-2.0-only | RPCS3: a console build only. Its source is public and it builds with this repository, but no release carries it until the question of combining it with this port's GPL-3.0 code is settled |
+| GPL-2.0-only | RPCS3: **not in any release; compile it yourself from source.** Its source is public and it builds with this repository, but it cannot be distributed together with this port's GPL-3.0 code |
 | MPL-2.0 | mGBA |
 | Non-commercial licences | Snes9x, FinalBurn Neo, Genesis Plus GX: they may not be sold or used commercially, and FBNeo's forbids asking for donations for a project that uses its code |
 
 Assets and fonts keep their licences too: the XMB theme is CC-BY-4.0 with the M+
 font licence, PPSSPP's fonts are OFL-1.1, and Dolphin's `Sys` files carry theirs.
+The launcher backgrounds (`sce_sys/pic0.dds`, `pic1.dds`) are drawn by
+`tools/make-title-art.py`, under this repository's licence.
+
+**No games, BIOS files, firmware or keys are included, and piracy is not
+condoned.** Use only legally obtained backups of games you own and system files
+dumped from hardware you own.
 
 This is an independent homebrew project, not affiliated with or endorsed by Sony
 Interactive Entertainment, the Khronos Group or the libretro project. PlayStation
