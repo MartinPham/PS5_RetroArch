@@ -11,7 +11,8 @@ What it establishes, and nothing more:
   - every listed licence text is present and not empty, and a text marked verbatim
     (FBNeo's, Snes9x's, Genesis Plus GX's) is byte for byte the one staged;
   - a part under non-commercial terms is marked as such;
-  - with --release, every part's source is at a committed revision and has an
+  - with --release, no RPCS3 core is in the title (a console build only, see
+    docs/RELEASING.md), and every part's source is at a committed revision and has an
     address, which is what a published build needs.
 It does not decide whether a licence permits a combination; the audit does that.
 """
@@ -69,6 +70,11 @@ def check(title, release=False):
         name = path.relative_to(title).as_posix()
         if name.startswith("licenses/"):
             continue
+        # RPCS3 (GPL-2.0-only) is combined with this port's GPL-3.0 code; until
+        # I decide its licence question (docs/RELEASING.md) it is a console
+        # build only and never in a release.
+        if release and path.name.startswith("rpcs3_libretro"):
+            problems.append(f"{name}: RPCS3 is a console build only, not for a release")
         if any(fnmatch.fnmatchcase(name, pattern) for pattern in COVERED) and name not in owned:
             problems.append(f"{name} belongs to no listed part")
         if (any(fnmatch.fnmatchcase(path.name, p) for p in EXECUTABLE)

@@ -62,6 +62,17 @@ echo "==> [title] step 1/3: the frontend"
 "$root/tools/build-retroarch.sh"
 core_names=(fceumm mgba snes9x fbneo genesis_plus_gx ppsspp dolphin pcsx2
     mednafen_psx_hw mupen64plus_next mednafen_saturn vice_x64sc desmume azahar mame rpcs3)
+# RPCS3 (GPL-2.0-only, combined with this port's GPL-3.0 code) is a console build
+# only until I decide its licence question (docs/RELEASING.md): a release build
+# (PS5_RELEASE_TAG) leaves it out.
+if [[ -n ${PS5_RELEASE_TAG:-} ]]; then
+    kept=()
+    for core_name in "${core_names[@]}"; do
+        [[ $core_name == rpcs3 ]] || kept+=("$core_name")
+    done
+    core_names=("${kept[@]}")
+    echo "==> [title] release $PS5_RELEASE_TAG: RPCS3 left out (a console build only)"
+fi
 core_files=()
 for core_name in "${core_names[@]}"; do
     # Each library keeps its libretro name; the build script is the port's.
@@ -344,7 +355,8 @@ fi
 # files are staged, the loading screen's fonts, RPCS3's overlay images, its
 # game patch database and its per-game configuration database.
 for part in fonts Icons patches game_configs; do
-    if [[ -d $root/build/cores/stage/system/RPCS3/$part ]]; then
+    # A release leaves RPCS3 out, its files too
+    if [[ -z ${PS5_RELEASE_TAG:-} && -d $root/build/cores/stage/system/RPCS3/$part ]]; then
         mkdir -p "$dist/system/RPCS3"
         rm -rf -- "${dist:?}/system/RPCS3/$part"
         cp -a -- "$root/build/cores/stage/system/RPCS3/$part" "$dist/system/RPCS3/$part"
