@@ -373,7 +373,10 @@ std::uint32_t pad_buttons_to_retropad(std::uint32_t pad) noexcept
 int script_axis(unsigned index) noexcept
 {
     if (index == 4 || index == 5)
-        return script_buttons() & (UINT32_C(1) << (index == 4 ? RETRO_DEVICE_ID_JOYPAD_L2 : RETRO_DEVICE_ID_JOYPAD_R2)) ? 32767 : 0;
+        return script_buttons() & (UINT32_C(1) << (index == 4 ? RETRO_DEVICE_ID_JOYPAD_L2
+                                                              : RETRO_DEVICE_ID_JOYPAD_R2))
+                   ? 32767
+                   : 0;
     if (index > 3)
         return 0;
     const std::uint32_t held = script_buttons() >> (script_stick_shift + index * 2);
@@ -594,13 +597,16 @@ void run_script_actions() noexcept
         }
         if (action.kind == ScriptActionKind::mark)
         {
-            const std::uint64_t worst_ns = new_frame_worst_ns.exchange(0, std::memory_order_relaxed);
+            const std::uint64_t worst_ns =
+                new_frame_worst_ns.exchange(0, std::memory_order_relaxed);
             char note[128];
-            std::snprintf(note, sizeof(note), "input: pad script MARK at %.3f s: frames=%llu worst_ms=%.1f over_40ms=%llu",
-                          seconds,
-                          static_cast<unsigned long long>(new_frames.load(std::memory_order_relaxed)),
-                          static_cast<double>(worst_ns) / 1e6,
-                          static_cast<unsigned long long>(new_frames_slow.load(std::memory_order_relaxed)));
+            std::snprintf(
+                note, sizeof(note),
+                "input: pad script MARK at %.3f s: frames=%llu worst_ms=%.1f over_40ms=%llu",
+                seconds,
+                static_cast<unsigned long long>(new_frames.load(std::memory_order_relaxed)),
+                static_cast<double>(worst_ns) / 1e6,
+                static_cast<unsigned long long>(new_frames_slow.load(std::memory_order_relaxed)));
             ps5_input_trace(note);
             continue;
         }
@@ -874,10 +880,12 @@ extern "C" const char ps5_controller_profile[] = "input_device = \"PS5 Controlle
 // 0101), on the thread that runs frames.
 extern "C" void ps5_input_note_new_frame(void)
 {
-    const std::uint64_t now = static_cast<std::uint64_t>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch())
-            .count());
-    if (new_frame_last_ns != 0 && now - new_frame_last_ns > new_frame_worst_ns.load(std::memory_order_relaxed))
+    const std::uint64_t now =
+        static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                       std::chrono::steady_clock::now().time_since_epoch())
+                                       .count());
+    if (new_frame_last_ns != 0 &&
+        now - new_frame_last_ns > new_frame_worst_ns.load(std::memory_order_relaxed))
         new_frame_worst_ns.store(now - new_frame_last_ns, std::memory_order_relaxed);
     if (new_frame_last_ns != 0 && now - new_frame_last_ns > 40'000'000)
         new_frames_slow.fetch_add(1, std::memory_order_relaxed);
