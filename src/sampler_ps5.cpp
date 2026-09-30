@@ -71,7 +71,7 @@ unsigned g_start_count = 0;
  * for a core whose threads start from code it generates (RPCS3's trampolines
  * move from run to run) and that tolerates the interruptions. */
 bool g_all_threads = false;
-/* The flag file's "leaves" line: for each thread busy over half its samples,
+/* The flag file's "leaves" line: for each thread busy in 100 samples or more,
  * the window's most frequent busy instruction addresses (16-byte buckets),
  * a flat profile the tools fold into functions; "leaves N" prints up to N of
  * them (60 by default), for a thread whose time spreads over many functions. */
@@ -275,7 +275,7 @@ void report(std::uint32_t from, std::uint32_t to, std::uint32_t stall_samples)
         return;
     for (std::uint32_t thread = 0; thread < kMaxThreads; ++thread)
     {
-        if (busy[thread] * 2u < totals[thread] || busy[thread] < 100)
+        if (busy[thread] < 100)
             continue;
         std::memset(g_counts, 0, sizeof(g_counts));
         for (std::uint32_t at = from; at != to; ++at)
