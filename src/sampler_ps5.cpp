@@ -281,7 +281,8 @@ void report(std::uint32_t from, std::uint32_t to, std::uint32_t stall_samples)
         for (std::uint32_t at = from; at != to; ++at)
         {
             const std::uint64_t *const sample = g_ring[at & (kRingSize - 1)];
-            if ((sample[0] & 1u) == 0 || ((sample[0] >> 8) & 0xff) != thread || system_address(sample[1]))
+            if ((sample[0] & 1u) == 0 || ((sample[0] >> 8) & 0xff) != thread ||
+                system_address(sample[1]))
                 continue;
             const std::uint64_t bucket = sample[1] >> 4;
             std::uint32_t slot = static_cast<std::uint32_t>(bucket * 2654435761u) % slots;
@@ -305,7 +306,8 @@ void report(std::uint32_t from, std::uint32_t to, std::uint32_t stall_samples)
             if (best == slots)
                 break;
             std::fprintf(stderr, "sampler: leaf thread=%u rip=0x%llx n=%u\n", thread,
-                         static_cast<unsigned long long>(g_counts[best].rip << 4), g_counts[best].samples);
+                         static_cast<unsigned long long>(g_counts[best].rip << 4),
+                         g_counts[best].samples);
             g_counts[best].samples = 0;
         }
     }
