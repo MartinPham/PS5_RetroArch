@@ -71,6 +71,12 @@ unsigned g_start_count = 0;
  * for a core whose threads start from code it generates (RPCS3's trampolines
  * move from run to run) and that tolerates the interruptions. */
 bool g_all_threads = false;
+/* The flag file's "leaves" line: for each thread busy over half its samples,
+ * the window's most frequent busy instruction addresses (16-byte buckets),
+ * a flat profile the tools fold into functions; "leaves N" prints up to N of
+ * them (60 by default), for a thread whose time spreads over many functions. */
+bool g_leaves = false;
+unsigned g_leaf_top = 60;
 std::atomic<bool> g_stall{false};
 std::atomic<std::uint32_t> g_head{0};
 std::uint64_t g_ring[kRingSize][kFrames + 1];
@@ -265,6 +271,44 @@ void report(std::uint32_t from, std::uint32_t to, std::uint32_t stall_samples)
         }
         g_counts[best].samples = 0;
     }
+    if (!g_leaves)
+        return;
+    for (std::uint32_t thread = 0; thread < kMaxThreads; ++thread)
+    {
+        if (busy[thread] * 2u < totals[thread] || busy[thread] < 100)
+            continue;
+        std::memset(g_counts, 0, sizeof(g_counts));
+        for (std::uint32_t at = from; at != to; ++at)
+        {
+            const std::uint64_t *const sample = g_ring[at & (kRingSize - 1)];
+            if ((sample[0] & 1u) == 0 || ((sample[0] >> 8) & 0xff) != thread || system_address(sample[1]))
+                continue;
+            const std::uint64_t bucket = sample[1] >> 4;
+            std::uint32_t slot = static_cast<std::uint32_t>(bucket * 2654435761u) % slots;
+            for (std::uint32_t probe = 0; probe < slots; ++probe, slot = (slot + 1) % slots)
+            {
+                if (g_counts[slot].samples == 0 || g_counts[slot].rip == bucket)
+                {
+                    g_counts[slot].rip = bucket;
+                    ++g_counts[slot].samples;
+                    break;
+                }
+            }
+        }
+        for (unsigned rank = 0; rank < g_leaf_top; ++rank)
+        {
+            std::uint32_t best = slots;
+            for (std::uint32_t slot = 0; slot < slots; ++slot)
+                if (g_counts[slot].samples != 0 &&
+                    (best == slots || g_counts[slot].samples > g_counts[best].samples))
+                    best = slot;
+            if (best == slots)
+                break;
+            std::fprintf(stderr, "sampler: leaf thread=%u rip=0x%llx n=%u\n", thread,
+                         static_cast<unsigned long long>(g_counts[best].rip << 4), g_counts[best].samples);
+            g_counts[best].samples = 0;
+        }
+    }
 }
 
 void *sampler(void *)
@@ -404,6 +448,14 @@ extern "C" void ps5_sampler_start()
         if (std::strncmp(line, "all-threads", 11) == 0)
         {
             g_all_threads = true;
+            continue;
+        }
+        if (std::strncmp(line, "leaves", 6) == 0)
+        {
+            g_leaves = true;
+            const unsigned long top = std::strtoul(line + 6, nullptr, 10);
+            if (top != 0)
+                g_leaf_top = top < 4096 ? static_cast<unsigned>(top) : 4096u;
             continue;
         }
         if (std::strncmp(line, "stall-ms", 8) == 0)
