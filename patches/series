@@ -213,3 +213,13 @@
 #       the display's rate whatever the game's)
 #       gfx/video_driver.c
 0099-new-frame-rate
+
+# 0100  a screenshot's PNG is encoded at zlib's fastest level (a 4K frame at
+#       level 9 took about 20 s on the console)
+#       libretro-common/formats/png/rpng_encode.c
+0100-png-fast-level
+
+# 0101  each new frame is told to the pad script, whose MARK lines count the
+#       frames and the longest gap between them over exact script times
+#       gfx/video_driver.c
+0101-pad-script-frame-marks

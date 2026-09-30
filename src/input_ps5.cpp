@@ -33,14 +33,20 @@
  * RetroArch forgets --max-frames when a core closes, so a run that reloads
  * content otherwise never ends or takes its screenshot. `<seconds> SAVE_STATE`
  * and `<seconds> LOAD_STATE` save and load the current slot, as the menu's
- * items do, for a run that starts from a known scene. `<seconds> SCREENSHOT`
+ * items do, for a run that starts from a known scene; a number after either
+ * names another slot for that action only. `<seconds> SCREENSHOT`
  * saves the frame shown then as /app0/pad-shot-<n>.png (n counts from 1), so a
- * run that walks through a game's screens shows each of them. Testing only: the
- * file is never shipped.
+ * run that walks through a game's screens shows each of them; it is encoded on
+ * RetroArch's task thread, so the game runs on (a 4K PNG held the frontend's own
+ * thread about 20 s). `<seconds> MARK`
+ * prints how many new frames the core has made and the longest gap between
+ * two since the last MARK, so a run's frame rate is read over exact script
+ * times. Testing only: the file is never shipped.
  *
  * Reference: docs/REFERENCE.md, "Input".
  */
 
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -55,6 +61,7 @@
 #include "content.h"
 #ifdef HAVE_MENU
 #include "command.h"
+#include "configuration.h"
 #endif
 #include "gfx/video_driver.h"
 #include "retroarch_types.h"
@@ -175,12 +182,21 @@ enum class ScriptActionKind
     save_state,
     load_state,
     screenshot,
+    mark,
 };
+// The core's new frames (gfx/video_driver.c, patches/series 0101) and the
+// longest time between two of them since the last MARK, which a MARK line
+// prints: a run's frame rate and worst frame over exact script times.
+std::atomic<std::uint64_t> new_frames{0};
+std::atomic<std::uint64_t> new_frame_worst_ns{0};
+std::uint64_t new_frame_last_ns = 0;
+
 struct ScriptAction
 {
     double at;
     bool done;
     ScriptActionKind kind;
+    int slot; // SAVE_STATE and LOAD_STATE: the slot given, or -1 for the current one
 };
 constexpr int action_capacity = 32;
 ScriptAction actions[action_capacity];
@@ -230,12 +246,14 @@ void load_script() noexcept
                             {"STOP", ScriptActionKind::stop},
                             {"SAVE_STATE", ScriptActionKind::save_state},
                             {"LOAD_STATE", ScriptActionKind::load_state},
-                            {"SCREENSHOT", ScriptActionKind::screenshot}};
+                            {"SCREENSHOT", ScriptActionKind::screenshot},
+                            {"MARK", ScriptActionKind::mark}};
         bool is_action = false;
         for (const auto &named : action_names)
             if (std::strcmp(buttons, named.name) == 0 && action_count < action_capacity)
             {
-                actions[action_count++] = ScriptAction{at, false, named.kind};
+                actions[action_count++] =
+                    ScriptAction{at, false, named.kind, fields >= 3 ? static_cast<int>(held) : -1};
                 is_action = true;
             }
         if (is_action)
@@ -346,9 +364,13 @@ std::uint32_t pad_buttons_to_retropad(std::uint32_t pad) noexcept
     return mask;
 }
 
-/* A scripted stick direction's full deflection on a stick axis (0 to 3), or 0. */
+/* A scripted stick direction's full deflection on a stick axis (0 to 3), or 0;
+ * on the trigger axes (4 and 5, which the profile binds L2 and R2 to), a
+ * scripted L2 or R2 pulls the trigger fully. */
 int script_axis(unsigned index) noexcept
 {
+    if (index == 4 || index == 5)
+        return script_buttons() & (UINT32_C(1) << (index == 4 ? RETRO_DEVICE_ID_JOYPAD_L2 : RETRO_DEVICE_ID_JOYPAD_R2)) ? 32767 : 0;
     if (index > 3)
         return 0;
     const std::uint32_t held = script_buttons() >> (script_stick_shift + index * 2);
@@ -529,14 +551,21 @@ void run_script_actions() noexcept
         {
             const bool save = action.kind == ScriptActionKind::save_state;
 #ifdef HAVE_MENU
+            // A slot given names the file for this action only (the path is
+            // made from the slot when the command runs)
+            settings_t *settings = config_get_ptr();
+            const int slot = settings->ints.state_slot;
+            if (action.slot >= 0)
+                settings->ints.state_slot = action.slot;
             const bool ok =
                 command_event(save ? CMD_EVENT_SAVE_STATE : CMD_EVENT_LOAD_STATE, nullptr);
+            settings->ints.state_slot = slot;
 #else
             const bool ok = false;
 #endif
             char note[96];
-            std::snprintf(note, sizeof(note), "input: pad script %s at %.2f s: %d",
-                          save ? "SAVE_STATE" : "LOAD_STATE", seconds, ok ? 1 : 0);
+            std::snprintf(note, sizeof(note), "input: pad script %s %d at %.2f s: %d",
+                          save ? "SAVE_STATE" : "LOAD_STATE", action.slot, seconds, ok ? 1 : 0);
             ps5_input_trace(note);
             continue;
         }
@@ -550,13 +579,24 @@ void run_script_actions() noexcept
                 take_screenshot(nullptr, path, false,
                                 video_st->frame_cache_data &&
                                     video_st->frame_cache_data == RETRO_HW_FRAME_BUFFER_VALID,
-                                true, false);
+                                true, true);
 #else
             const bool ok = false;
 #endif
             char note[128];
             std::snprintf(note, sizeof(note), "input: pad script SCREENSHOT at %.2f s: %s %d",
                           seconds, path, ok ? 1 : 0);
+            ps5_input_trace(note);
+            continue;
+        }
+        if (action.kind == ScriptActionKind::mark)
+        {
+            const std::uint64_t worst_ns = new_frame_worst_ns.exchange(0, std::memory_order_relaxed);
+            char note[128];
+            std::snprintf(note, sizeof(note), "input: pad script MARK at %.3f s: frames=%llu worst_ms=%.1f",
+                          seconds,
+                          static_cast<unsigned long long>(new_frames.load(std::memory_order_relaxed)),
+                          static_cast<double>(worst_ns) / 1e6);
             ps5_input_trace(note);
             continue;
         }
@@ -825,3 +865,16 @@ extern "C" const char ps5_controller_profile[] = "input_device = \"PS5 Controlle
                                                  "input_r_y_minus_axis = \"-3\"\n"
                                                  "input_l2_axis = \"+4\"\n"
                                                  "input_r2_axis = \"+5\"\n";
+
+// Called by RetroArch's video driver for each frame the core made (patches/series,
+// 0101), on the thread that runs frames.
+extern "C" void ps5_input_note_new_frame(void)
+{
+    const std::uint64_t now = static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch())
+            .count());
+    if (new_frame_last_ns != 0 && now - new_frame_last_ns > new_frame_worst_ns.load(std::memory_order_relaxed))
+        new_frame_worst_ns.store(now - new_frame_last_ns, std::memory_order_relaxed);
+    new_frame_last_ns = now;
+    new_frames.fetch_add(1, std::memory_order_relaxed);
+}

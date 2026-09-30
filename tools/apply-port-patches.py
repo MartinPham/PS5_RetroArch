@@ -3300,6 +3300,48 @@ EDITS = [
         "      last_fps = video_info.refresh_rate;\n",
         "patches/series, 0099): before the first rate only",
     ),
+    (
+        # 0100: RetroArch encodes a screenshot's PNG at zlib level 9, which on
+        # this console held the encoding thread about 20 s for a 4K frame (the
+        # frontend's own thread, and so the game, unless the screenshot is
+        # threaded). Level 1 is several times faster for a somewhat larger file.
+        "libretro-common/formats/png/rpng_encode.c",
+        "   stream = stream_backend->stream_new();\n"
+        "\n"
+        "   if (!stream)\n"
+        "      GOTO_END_ERROR();\n",
+        "   stream = stream_backend->stream_new();\n"
+        "\n"
+        "   if (!stream)\n"
+        "      GOTO_END_ERROR();\n"
+        "\n"
+        "#ifdef __PROSPERO__\n"
+        "   /* Added by this port (patches/series, 0100): zlib's fastest level; at\n"
+        "    * 9, a 4K screenshot held the thread that encodes it about 20 s. */\n"
+        "   stream_backend->define(stream, \"level\", 1);\n"
+        "#endif\n",
+        "patches/series, 0100): zlib's fastest level",
+    ),
+    (
+        # 0101: each new frame (0099's count) is also told to the pad script
+        # (src/input_ps5.cpp), whose MARK lines give a test run's frame count
+        # and longest gap between new frames over exact script times, where the
+        # core's ten-second windows fall wherever its boot left them.
+        "gfx/video_driver.c",
+        "   if (data)\n"
+        "      new_frames++;\n"
+        "#endif\n",
+        "   if (data)\n"
+        "   {\n"
+        "      /* Added by this port (patches/series, 0101): the pad script's\n"
+        "       * frame marks count it too. */\n"
+        "      extern void ps5_input_note_new_frame(void);\n"
+        "      new_frames++;\n"
+        "      ps5_input_note_new_frame();\n"
+        "   }\n"
+        "#endif\n",
+        "patches/series, 0101): the pad script's",
+    ),
 ]
 
 # Changes that are withdrawn rather than deleted, by marker.
