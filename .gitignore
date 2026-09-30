@@ -43,6 +43,8 @@ __pycache__/
 # copied it here, and a generated file must never be able to dirty the tree.
 config.h
 
-# Markdown (the docs, the README, plans and notes) stays on this machine: it is
-# not committed or published. The files are kept and updated locally.
+# Markdown (the docs, plans and notes) stays on this machine: it is not
+# committed or published. The files are kept and updated locally. The README
+# is the one that is committed.
 *.md
+!/README.md
