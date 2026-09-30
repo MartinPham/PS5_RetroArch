@@ -90,6 +90,7 @@ lower one is the most that keeps full speed (DeSmuME).
 | [MAME](https://github.com/libretro/mame) 0.289 | Arcade | ✅ Metal Slug 3 from a 0.289 non-merged set, BIOS in the same folder: full speed, and closing and reopening it. Raster games render at their native size and are scaled on the GPU. Vector games are drawn at 4K by MAME's alternate renderer (not yet tested on the console). Sets must match 0.289. |
 | [DeSmuME](https://github.com/libretro/desmume) | Nintendo DS | ✅ Pokémon Diamond at 5× (1280×960) with the JIT and eight rasterizer threads, full speed, and closing and reopening it. 6× measured 93–95%. |
 | [Azahar](https://github.com/azahar-emu/azahar) | Nintendo 3DS | ✅ Mario & Luigi: Superstar Saga + Bowser's Minions at 18× internal resolution (the most Azahar offers) on Vulkan, with asynchronous shader compilation and the JIT, full speed after boot, and closing and reopening it. Decrypted games only. |
+| [RPCS3](https://github.com/mihawk-99/PS5_RPCS3) (my fork) | PlayStation 3 | ⚠️ **A console build only, in no release** (its licence, see [License and third-party terms](#license-and-third-party-terms)): it builds with this repository. God of War HD at 4K and 60 fps in gameplay. GTA IV at 4K held at 30 fps: a game with only an "Unlock FPS" patch runs it with RPCS3's frame limit at 30 by default (the "Frame-rate patches" option), steady where the emulation keeps up; its busiest city drives still dip to 24–27 fps. Needs your own PS3 firmware (`PS3UPDAT.PUP` in `system/RPCS3/`) and games; a PSN package installs with its `.rap`. |
 
 Use **FBNeo for Sega System 16/32 arcade sets**, rather than Genesis Plus GX.
 FBNeo needs compatible arcade sets and receives its ZIP/7z archives intact.
@@ -191,6 +192,7 @@ in this port, even if upstream RetroArch already offers the feature.**
 | ✅ | Dolphin — GameCube and Wii, Vulkan rendering and JIT; tested games, long play and the enhancement profiles |
 | ✅ | LRPS2 — PlayStation 2, Vulkan hardware renderer at 4K; tested games only |
 | 🚧 | LRPS2 — upstream PCSX2's newer renderer fixes, 8× internal resolution and texture replacement |
+| 🚧 | RPCS3 — PlayStation 3 at 4K; a console build only (not in releases); GTA IV's busiest drives below 30 |
 
 Future entries are development targets, not a promised release order. Hardware
 rendering introduces new Vulkan requirements beyond presenting software frames;
@@ -243,7 +245,8 @@ bash tools/verify.sh
 
 The five gates are **format → unit → build → integration → evidence**. The build
 pins RetroArch 1.22.2, fetches core sources/metadata with checked hashes, builds the
-frontend and all fifteen cores, and stages the native title in `dist/PPSA99169/`.
+frontend and all sixteen cores, and stages the native title in `dist/PPSA99169/` (a
+release build, `PS5_RELEASE_TAG` set, leaves RPCS3 out).
 The initial dependency/source fetch requires network access.
 
 For an already configured checkout:
@@ -373,6 +376,7 @@ lists and original notices.
 | [PPSSPP](https://github.com/hrydgard/ppsspp) | Henrik Rydgård and contributors |
 | [Dolphin](https://github.com/dolphin-emu/dolphin), [libretro/dolphin](https://github.com/libretro/dolphin) | Dolphin Emulator Project and contributors; libretro core maintainers |
 | [PCSX2](https://github.com/PCSX2/pcsx2), [LRPS2](https://github.com/libretro/LRPS2) | PCSX2 Dev Team and contributors; libretro LRPS2 maintainers |
+| [RPCS3](https://github.com/RPCS3/rpcs3) | RPCS3 Team and contributors |
 | [libretro core-info](https://github.com/libretro/libretro-core-info) | Metadata maintainers and contributors |
 
 ## License and third-party terms
@@ -397,7 +401,7 @@ The cores keep their own licences, and they differ:
 | --- | --- |
 | GPL-2.0-or-later | FCEUmm, PPSSPP, Dolphin, Beetle PSX HW, Beetle Saturn, Mupen64Plus-Next (with MIT and LGPL parts), VICE, DeSmuME, Azahar (Dynarmic is 0BSD), MAME (as a whole; many files BSD-3-Clause) |
 | GPL-3.0-or-later | LRPS2 (PCSX2) |
-| GPL-2.0-only | RPCS3, in development here and in no release |
+| GPL-2.0-only | RPCS3: a console build only. Its source is public and it builds with this repository, but no release carries it until the question of combining it with this port's GPL-3.0 code is settled |
 | MPL-2.0 | mGBA |
 | Non-commercial licences | Snes9x, FinalBurn Neo, Genesis Plus GX: they may not be sold or used commercially, and FBNeo's forbids asking for donations for a project that uses its code |
 
