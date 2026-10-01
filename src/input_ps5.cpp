@@ -62,6 +62,7 @@
 #ifdef HAVE_MENU
 #include "command.h"
 #include "configuration.h"
+#include "core_option_manager.h"
 #endif
 #include "gfx/video_driver.h"
 #include "retroarch_types.h"
@@ -183,6 +184,7 @@ enum class ScriptActionKind
     load_state,
     screenshot,
     mark,
+    option,
 };
 // The core's new frames (gfx/video_driver.c, patches/series 0101), the
 // longest time between two of them since the last MARK and how many came more
@@ -199,7 +201,9 @@ struct ScriptAction
     double at;
     bool done;
     ScriptActionKind kind;
-    int slot; // SAVE_STATE and LOAD_STATE: the slot given, or -1 for the current one
+    int slot;       // SAVE_STATE and LOAD_STATE: the slot given, or -1 for the current one
+    char key[64];   // OPTION: the core option's key
+    char value[32]; // OPTION: the value to set, as the core lists it
 };
 constexpr int action_capacity = 32;
 ScriptAction actions[action_capacity];
@@ -251,12 +255,21 @@ void load_script() noexcept
                             {"LOAD_STATE", ScriptActionKind::load_state},
                             {"SCREENSHOT", ScriptActionKind::screenshot},
                             {"MARK", ScriptActionKind::mark}};
+        // OPTION key value: set a core option as the Quick Menu does (the core
+        // sees it as an update at its next frame)
+        if (std::strcmp(buttons, "OPTION") == 0 && action_count < action_capacity)
+        {
+            ScriptAction option{at, false, ScriptActionKind::option, -1, {0}, {0}};
+            if (std::sscanf(line, "%lf %*s %63s %31s", &at, option.key, option.value) == 3)
+                actions[action_count++] = option;
+            continue;
+        }
         bool is_action = false;
         for (const auto &named : action_names)
             if (std::strcmp(buttons, named.name) == 0 && action_count < action_capacity)
             {
-                actions[action_count++] =
-                    ScriptAction{at, false, named.kind, fields >= 3 ? static_cast<int>(held) : -1};
+                actions[action_count++] = ScriptAction{
+                    at, false, named.kind, fields >= 3 ? static_cast<int>(held) : -1, {0}, {0}};
                 is_action = true;
             }
         if (is_action)
@@ -592,6 +605,23 @@ void run_script_actions() noexcept
             char note[128];
             std::snprintf(note, sizeof(note), "input: pad script SCREENSHOT at %.2f s: %s %d",
                           seconds, path, ok ? 1 : 0);
+            ps5_input_trace(note);
+            continue;
+        }
+        if (action.kind == ScriptActionKind::option)
+        {
+            runloop_state_t *runloop = runloop_state_get_ptr();
+            size_t idx = 0;
+            size_t val_idx = 0;
+            const bool ok =
+                runloop->core_options &&
+                core_option_manager_get_idx(runloop->core_options, action.key, &idx) &&
+                core_option_manager_get_val_idx(runloop->core_options, idx, action.value, &val_idx);
+            if (ok)
+                core_option_manager_set_val(runloop->core_options, idx, val_idx, false);
+            char note[160];
+            std::snprintf(note, sizeof(note), "input: pad script OPTION %s=%s at %.2f s: %d",
+                          action.key, action.value, seconds, ok ? 1 : 0);
             ps5_input_trace(note);
             continue;
         }
