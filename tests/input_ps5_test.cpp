@@ -1,6 +1,7 @@
 /* Exercise the real raw joypad callbacks used by the binding screen. */
 #include <cassert>
 #include <cmath>
+#include <cstring>
 #include <vector>
 #include "../src/input_ps5.cpp"
 #include "input_state_wrap.inc"
@@ -85,6 +86,30 @@ extern "C"
         assert(port == 0);
         ++disconnects;
         return true;
+    }
+    // The core options the script's OPTION action sets: one option, index 7,
+    // whose value "8x" is its fourth (index 3)
+    size_t option_set_idx = 99, option_set_val = 99;
+    bool core_option_manager_get_idx(core_option_manager_t *opt, const char *key, size_t *idx)
+    {
+        assert(opt);
+        if (std::strcmp(key, "mupen64plus-parallel-rdp-upscaling") != 0)
+            return false;
+        *idx = 7;
+        return true;
+    }
+    bool core_option_manager_get_val_idx(core_option_manager_t *, size_t idx, const char *val,
+                                         size_t *val_idx)
+    {
+        if (idx != 7 || std::strcmp(val, "8x") != 0)
+            return false;
+        *val_idx = 3;
+        return true;
+    }
+    void core_option_manager_set_val(core_option_manager_t *, size_t idx, size_t val_idx, bool)
+    {
+        option_set_idx = idx;
+        option_set_val = val_idx;
     }
 }
 // The runloop and video state the script's STOP action arms.
@@ -240,14 +265,33 @@ int main()
 
     // STOP ends the run on the next frame, as --max-frames does, and only once.
     test_video.frame_count = 1234;
-    actions[0] = ScriptAction{0.0, false, ScriptActionKind::stop};
+    actions[0] = ScriptAction{0.0, false, ScriptActionKind::stop, -1, {}, {}};
     action_count = 1;
     run_script_actions();
     assert(test_runloop.max_frames == 1235 && actions[0].done);
     test_video.frame_count = 2000;
     run_script_actions();
     assert(test_runloop.max_frames == 1235);
+
+    // OPTION sets a core option by key and value, as the Quick Menu does, and
+    // leaves the options alone when the core has no such option or value.
+    core_option_manager_t *options = reinterpret_cast<core_option_manager_t *>(&test_video);
+    test_runloop.core_options = options;
+    actions[0] = ScriptAction{
+        0.0, false, ScriptActionKind::option, -1, "mupen64plus-parallel-rdp-upscaling", "8x"};
+    actions[1] = ScriptAction{
+        0.0, false, ScriptActionKind::option, -1, "mupen64plus-parallel-rdp-upscaling", "16x"};
+    actions[2] = ScriptAction{0.0, false, ScriptActionKind::option, -1, "no-such-option", "8x"};
+    action_count = 1;
+    run_script_actions();
+    assert(actions[0].done && option_set_idx == 7 && option_set_val == 3);
+    option_set_idx = option_set_val = 99;
+    action_count = 3;
+    actions[0] = actions[2];
+    run_script_actions();
+    assert(option_set_idx == 99 && option_set_val == 99);
+    test_runloop.core_options = nullptr;
     action_count = 0;
     std::puts("PS5 joypad: raw binding capture, axes, user mappings, poll retention, lifecycle and "
-              "the script's STOP PASS");
+              "the script's STOP and OPTION PASS");
 }
