@@ -70,7 +70,7 @@ ps5vk, the project's first driver.
 | Shader cache | ✅ RADV keeps compiled pipelines in `radv-shader-cache/`: a game's next start reads them back instead of compiling |
 | Save states and fast-forward | ✅ Save/load states (including `--entryslot`) and fast-forward, tested with PPSSPP and mGBA |
 | 120 Hz output | ✅ 120 Hz by default where the display offers it; the refresh is measured, and a display that stays at 60 Hz gets 60 Hz |
-| Stability | ✅ On RADV (v0.5.6-alpha.5): every core in the release with its game through boot, the menu opened and closed twice, Close Content and a reload, at full speed before and after, with no crash; earlier releases also passed a 10-minute PPSSPP soak with 25 menu toggles |
+| Stability | ✅ On RADV (v0.5.6-alpha.5): every core in the release with its game through boot, the menu opened and closed twice, Close Content and a reload, at full speed before and after, with no crash (Beetle Saturn without a BIOS, so up to its BIOS check); earlier releases also passed a 10-minute PPSSPP soak with 25 menu toggles |
 | CPU video fallback | ✅ `video_ps5` remains registered and selectable |
 | Development diagnostics | ✅ `retroarch.log`, startup/GPU trace, kernel captures and optional buffered frame timing |
 
@@ -102,7 +102,7 @@ lower one is the most that keeps full speed (DeSmuME).
 | [Dolphin](https://github.com/libretro/dolphin) 2609 | GameCube, Wii | ✅ Wind Waker (an hour), Resident Evil 4 (30 minutes), Super Smash Bros. Melee, Mario Kart Wii and Rogue Leader, with the JIT and fast memory, save states and closing and reopening games. Rogue Leader's attract sequence still dips to 72–85% (see the release notes). |
 | [LRPS2](https://github.com/libretro/LRPS2) (PCSX2) | PlayStation 2 | ✅ The God of War II and Final Fantasy X demos and GTA San Andreas at 6× internal resolution on the Vulkan hardware renderer, full speed, with multi-threaded VU1 and save states. Needs your own BIOS in `system/pcsx2/bios/`. |
 | [Beetle PSX HW](https://github.com/libretro/beetle-psx-libretro) | PlayStation | ✅ Crash Bandicoot at 16× internal resolution on the Vulkan renderer, 32-bit colour, PGXP (no wobbling polygons), full speed, and closing and reopening the game. The disc image is read into memory at load. It runs with its built-in OpenBIOS; your own BIOS (`scph5501.bin` and the others its metadata lists) in `system/` is used when present. |
-| [Mupen64Plus-Next](https://github.com/libretro/mupen64plus-libretro-nx) | Nintendo 64 | ✅ Mario Kart 64 in a race with ParaLLEl-RDP at 4× upscaling (the default since v0.5.6-alpha.5; 8× stays an option) and ParaLLEl-RSP, both JITs on, 59.9 fps with clean audio, and closing and reopening the game. A change of the upscaling factor applies at the next frame; it no longer waits for a restart. |
+| [Mupen64Plus-Next](https://github.com/libretro/mupen64plus-libretro-nx) | Nintendo 64 | ✅ Mario Kart 64 in a race with ParaLLEl-RDP at 4× upscaling (the default since v0.5.6-alpha.5; 8× stays an option) and ParaLLEl-RSP, both JITs on, 59.9 fps with clean audio, and closing and reopening the game. A new upscaling factor takes effect when the game is started again (Close Content, then load it). |
 | [Beetle Saturn](https://github.com/libretro/beetle-saturn-libretro) | Sega Saturn | ⚠️ Loads, then needs your own BIOS in `system/`: `mpr-17933.bin` (US/EU) or `sega_101.bin` (JP). Without it the game refuses to load and the menu stays usable. Gameplay not yet tested. |
 | [VICE](https://github.com/libretro/vice-libretro) x64sc | Commodore 64 | ✅ A `.d64` disk game at full speed, and closing and reopening it. |
 | [MAME](https://github.com/libretro/mame) 0.289 | Arcade | ✅ Metal Slug 3 from a 0.289 non-merged set, BIOS in the same folder: full speed, and closing and reopening it. Raster games render at their native size and are scaled on the GPU. Vector games are drawn at 4K by MAME's alternate renderer (not yet tested on the console). Sets must match 0.289. |
@@ -202,7 +202,7 @@ in this port, even if upstream RetroArch already offers the feature.**
 | ❌ | PicoDrive — add Sega 32X coverage; candidate |
 | ✅ | MAME 0.289 — arcade; tested games only |
 | ✅ | Beetle PSX HW — PlayStation, Vulkan renderer at 16× |
-| ✅ | Mupen64Plus-Next — Nintendo 64, ParaLLEl-RDP at 4× (8× selectable), factor changes applied live |
+| ✅ | Mupen64Plus-Next — Nintendo 64, ParaLLEl-RDP at 4× (8× selectable) |
 | 🚧 | Beetle Saturn — Sega Saturn; needs a gameplay test with a BIOS |
 | ✅ | VICE x64sc — Commodore 64 |
 | ✅ | DeSmuME — Nintendo DS at 5× |
