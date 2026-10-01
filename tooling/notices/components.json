@@ -183,7 +183,7 @@
       "copyright": ["pic0.dds, pic1.dds: Copyright (C) 2026 Mihawk, GPL-3.0-or-later (drawn by tools/make-title-art.py)", "snd0.at9: Copyright (C) 2026 BlackBearReloaded, GPL-3.0-or-later according to ps5-native-app-boilerplate's NOTICE.md"],
       "texts": [],
       "source": {"kind": "git", "path": ".", "remote": "https://github.com/mihawk-99/PS5_RetroArch"},
-      "modifications": "icon0.png is the RetroArch logo (libretro's branding); pic0.dds and pic1.dds are a gradient background drawn from nothing but arithmetic by tools/make-title-art.py in this repository (they replaced, in v0.5.6-alpha.5, a background whose origin was not recorded); snd0.at9 is ps5-native-app-boilerplate's default selection track."
+      "modifications": "icon0.png is the RetroArch logo (libretro's branding); pic0.dds and pic1.dds are a starry sky over a perspective grid, drawn from arithmetic and a fixed random seed by tools/make-title-art.py in this repository (they replaced, in v0.5.6-alpha.5, a background whose origin was not recorded); snd0.at9 is ps5-native-app-boilerplate's default selection track."
     },
     {
       "id": "fceumm",
