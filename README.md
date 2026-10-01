@@ -33,8 +33,9 @@ configuration persistence and content browsing have been verified on a
 console. This is an active development project; the tested paths below do not
 imply complete core compatibility or Vulkan conformance.
 
-**Latest release: v0.5.6-alpha.5** — see its
-[release notes](https://github.com/mihawk-99/PS5_RetroArch/releases/tag/v0.5.6-alpha.5)
+**Latest release: v0.5.7-alpha.5** (a new 4K launcher background; otherwise
+v0.5.6-alpha.5) — see its
+[release notes](https://github.com/mihawk-99/PS5_RetroArch/releases/tag/v0.5.7-alpha.5)
 and [every release](https://github.com/mihawk-99/PS5_RetroArch/releases).
 v0.5.0-alpha.5 was the first release on RADV; v0.4.0-alpha.4 was the last on
 ps5vk, the project's first driver.
