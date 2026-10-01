@@ -99,7 +99,7 @@ lower one is the most that keeps full speed (DeSmuME).
 | [FinalBurn Neo](https://github.com/libretro/FBNeo) | Supported arcade boards, including Neo Geo and Sega System 16/32 | ✅ Tested arcade games using both native 32-bit and converted 16-bit output; not every board or ROM set. [Evidence](evidence/fbneo-native/) |
 | [Genesis Plus GX](https://github.com/libretro/Genesis-Plus-GX) | Mega Drive / Genesis, Master System, Game Gear, SG-1000, Sega CD | ✅ Genesis gameplay and clean transitions, which I confirmed on the console. Other Sega systems and disc/BIOS paths still need separate acceptance. [Evidence](evidence/genesis-plus-gx-native/) |
 | [PPSSPP](https://github.com/hrydgard/ppsspp) v1.20.4 | PlayStation Portable | ✅ God of War: Ghost of Sparta and Yu-Gi-Oh! GX Tag Force at 10× internal resolution (4800×2720), 16× anisotropy: correct picture, full speed at 120 Hz, save states, fast-forward, and closing and reopening games. MSAA renders on RADV (it needs render pass 2, which ps5vk lacked). |
-| [Dolphin](https://github.com/libretro/dolphin) 2609 | GameCube, Wii | ✅ Wind Waker (an hour), Resident Evil 4 (30 minutes), Super Smash Bros. Melee, Mario Kart Wii and Rogue Leader, with the JIT and fast memory, save states and closing and reopening games. Rogue Leader's attract sequence still dips to 72–85% (see the release notes). |
+| [Dolphin](https://github.com/libretro/dolphin) 2609 | GameCube, Wii | ✅ Wind Waker (an hour), Resident Evil 4 (30 minutes), Super Smash Bros. Melee, Mario Kart Wii and Rogue Leader, with the JIT and fast memory, save states and closing and reopening games. Rogue Leader still slows to about 76–85% at some transitions (see the release notes). |
 | [LRPS2](https://github.com/libretro/LRPS2) (PCSX2) | PlayStation 2 | ✅ The God of War II and Final Fantasy X demos and GTA San Andreas at 6× internal resolution on the Vulkan hardware renderer, full speed, with multi-threaded VU1 and save states. Needs your own BIOS in `system/pcsx2/bios/`. |
 | [Beetle PSX HW](https://github.com/libretro/beetle-psx-libretro) | PlayStation | ✅ Crash Bandicoot at 16× internal resolution on the Vulkan renderer, 32-bit colour, PGXP (no wobbling polygons), full speed, and closing and reopening the game. The disc image is read into memory at load. It runs with its built-in OpenBIOS; your own BIOS (`scph5501.bin` and the others its metadata lists) in `system/` is used when present. |
 | [Mupen64Plus-Next](https://github.com/libretro/mupen64plus-libretro-nx) | Nintendo 64 | ✅ Mario Kart 64 in a race with ParaLLEl-RDP at 4× upscaling (the default since v0.5.6-alpha.5; 8× stays an option) and ParaLLEl-RSP, both JITs on, 59.9 fps with clean audio, and closing and reopening the game. A new upscaling factor takes effect when the game is started again (Close Content, then load it). |
@@ -128,16 +128,18 @@ compatible. No games or BIOS files are bundled.
 Software core → video callback → RetroArch Vulkan video driver
                                 → RADV, linked into the title → PS5 display
 XMB / RGUI ──────────────────────┘
-PPSSPP, Dolphin, LRPS2 (hardware cores) → Vulkan through RetroArch's HW context → RADV
+Hardware cores (PPSSPP, Dolphin, LRPS2, Beetle PSX HW,
+Mupen64Plus-Next, Azahar) → Vulkan through RetroArch's HW context → RADV
 ```
 
 [PS5_Vulkan](https://github.com/mihawk-99/PS5_Vulkan), which I also maintain,
 is the separate GPU-driver project used here. Since v0.5.0-alpha.5 the title
 links its port of RADV: Mesa's Vulkan driver and ACO compiler, unchanged but
 where the console differs, over a PS5 winsys, built from my Mesa fork
-[PS5_Mesa](https://github.com/mihawk-99/PS5_Mesa). It reports Vulkan 1.4, and
-its conformance is that project's milestone: the full Khronos CTS runs on the
-console. Up to v0.4.0-alpha.4 the title linked ps5vk, the project's first
+[PS5_Mesa](https://github.com/mihawk-99/PS5_Mesa); v0.5.6-alpha.5 links its
+revision `0b2d6d1`. It reports Vulkan 1.4, and its conformance is that
+project's milestone: the full Khronos CTS runs on the console, and its second
+full run ended with no failure. Up to v0.4.0-alpha.4 the title linked ps5vk, the project's first
 driver, which `PS5_VULKAN_DRIVER=ps5vk` still builds.
 
 The driver is **linked into the title**. Updating a driver checkout does not
@@ -217,7 +219,7 @@ in this port, even if upstream RetroArch already offers the feature.**
 
 Future entries are development targets, not a promised release order. Hardware
 rendering introduces new Vulkan requirements beyond presenting software frames;
-PPSSPP is the first core that exercises them.
+PPSSPP was the first core to exercise them, and six cores do now.
 
 ## Build from source
 
@@ -239,8 +241,17 @@ workspace/
 ```
 
 The cores that needed changes for the console build from my forks of them
-(PS5_LRPS2, PS5_BeetlePSX, PS5_Mupen64Plus, PS5_BeetleSaturn, PS5_VICE,
-PS5_MAME, PS5_DeSmuME, PS5_Azahar with PS5_Dynarmic), each pinned by revision in
+([PS5_LRPS2](https://github.com/mihawk-99/PS5_LRPS2),
+[PS5_BeetlePSX](https://github.com/mihawk-99/PS5_BeetlePSX),
+[PS5_Mupen64Plus](https://github.com/mihawk-99/PS5_Mupen64Plus),
+[PS5_BeetleSaturn](https://github.com/mihawk-99/PS5_BeetleSaturn),
+[PS5_VICE](https://github.com/mihawk-99/PS5_VICE),
+[PS5_MAME](https://github.com/mihawk-99/PS5_MAME),
+[PS5_DeSmuME](https://github.com/mihawk-99/PS5_DeSmuME),
+[PS5_Azahar](https://github.com/mihawk-99/PS5_Azahar) with
+[PS5_Dynarmic](https://github.com/mihawk-99/PS5_Dynarmic), and, for builds you
+make yourself, [PS5_RPCS3](https://github.com/mihawk-99/PS5_RPCS3) with
+[PS5_LLVM](https://github.com/mihawk-99/PS5_LLVM)), each pinned by revision in
 its build script. The script uses the sibling checkout when there is one, and
 `github.com/mihawk-99/<fork>` otherwise.
 
@@ -280,7 +291,8 @@ bash tools/build-ppsspp.sh   # The larger cores have scripts of their own:
                              # build-ppsspp.sh, build-dolphin.sh, build-lrps2.sh,
                              # build-beetle-psx.sh, build-mupen64plus.sh,
                              # build-beetle-saturn.sh, build-vice.sh,
-                             # build-mame.sh, build-desmume.sh, build-azahar.sh
+                             # build-mame.sh, build-desmume.sh, build-azahar.sh,
+                             # build-rpcs3.sh (your own builds only)
 ```
 
 When adding or updating a core, rebuild the title too: the frontend's native
@@ -404,7 +416,7 @@ lists and original notices.
 
 | Project / author | Contribution |
 | --- | --- |
-| [Mihawk](https://github.com/mihawk-99) — [PS5_RetroArch](https://github.com/mihawk-99/PS5_RetroArch), [PS5_Vulkan](https://github.com/mihawk-99/PS5_Vulkan), [PS5_Mesa](https://github.com/mihawk-99/PS5_Mesa), [PS5_PayloadSDK](https://github.com/mihawk-99/PS5_PayloadSDK) | This native RetroArch port and core integration; the PS5 Vulkan drivers (the RADV port and ps5vk); the Mesa fork with the PS5 winsys; the payload SDK fork and its platform layer |
+| [Mihawk](https://github.com/mihawk-99) — [PS5_RetroArch](https://github.com/mihawk-99/PS5_RetroArch), [PS5_Vulkan](https://github.com/mihawk-99/PS5_Vulkan), [PS5_Mesa](https://github.com/mihawk-99/PS5_Mesa), [PS5_PayloadSDK](https://github.com/mihawk-99/PS5_PayloadSDK) | This native RetroArch port and core integration; the PS5 Vulkan drivers (the RADV port and ps5vk); the Mesa fork with the PS5 winsys; the payload SDK fork and its platform layer; the PS5 forks of the cores below |
 | [RetroArch / libretro contributors](https://github.com/libretro/RetroArch) | Frontend, libretro API, menus, video pipeline and shared libraries |
 | [BlackBearReloaded — ProsperoLight](https://github.com/blackbearreloaded/ProsperoLight) | Project starting point and reference for native PS5 input and audio integration |
 | [BlackBearReloaded — PS5 Native App Boilerplate](https://github.com/blackbearreloaded/ps5-native-app-boilerplate) | Underlying native title tooling, ELF/FSELF conversion and runtime-shim foundation |
@@ -428,6 +440,12 @@ lists and original notices.
 | [PPSSPP](https://github.com/hrydgard/ppsspp) | Henrik Rydgård and contributors |
 | [Dolphin](https://github.com/dolphin-emu/dolphin), [libretro/dolphin](https://github.com/libretro/dolphin) | Dolphin Emulator Project and contributors; libretro core maintainers |
 | [PCSX2](https://github.com/PCSX2/pcsx2), [LRPS2](https://github.com/libretro/LRPS2) | PCSX2 Dev Team and contributors; libretro LRPS2 maintainers |
+| [Beetle PSX HW](https://github.com/libretro/beetle-psx-libretro), [Beetle Saturn](https://github.com/libretro/beetle-saturn-libretro) | The Mednafen authors and contributors; libretro Beetle maintainers |
+| [Mupen64Plus-Next](https://github.com/libretro/mupen64plus-libretro-nx) | Mupen64Plus team and contributors; libretro core maintainers; ParaLLEl-RDP and ParaLLEl-RSP by Hans-Kristian Arntzen (Themaister) and contributors |
+| [VICE](https://github.com/libretro/vice-libretro) | The VICE Team and contributors; libretro core maintainers |
+| [MAME](https://github.com/libretro/mame) | MAMEdev and contributors |
+| [DeSmuME](https://github.com/libretro/desmume) | DeSmuME team and contributors |
+| [Azahar](https://github.com/azahar-emu/azahar), [Dynarmic](https://github.com/azahar-emu/dynarmic) | Azahar contributors, building on Citra; Dynarmic by merryhime and contributors |
 | [RPCS3](https://github.com/RPCS3/rpcs3) | RPCS3 Team and contributors |
 | [libretro core-info](https://github.com/libretro/libretro-core-info) | Metadata maintainers and contributors |
 
