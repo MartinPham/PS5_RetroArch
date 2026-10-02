@@ -38,9 +38,9 @@ void set_directory(default_dirs slot, const char *path)
 
 void initialize(void *)
 {
-    const char *directories[] = {"/app0/config",   "/app0/cores",     "/app0/content",
-                                 "/app0/system",   "/app0/savefiles", "/app0/savestates",
-                                 "/app0/playlists"};
+    const char *directories[] = {"/app0/config",    "/app0/cores",          "/app0/content",
+                                 "/app0/system",    "/app0/savefiles",      "/app0/savestates",
+                                 "/app0/playlists", "/app0/content/Saturn", "/app0/system/Saturn"};
     for (const char *path : directories)
     {
         if (mkdir(path, 0777) != 0 && errno != EEXIST)
@@ -133,6 +133,14 @@ int drives(void *data, bool content)
 
 extern "C"
 {
+    const char *ps5_core_system_directory(const char *core, const char *directory)
+    {
+        if (core && directory && std::strcmp(core, "Beetle Saturn") == 0 &&
+            std::strcmp(directory, "/app0/system") == 0)
+            return "/app0/system/Saturn";
+        return directory;
+    }
+
     frontend_ctx_driver_t frontend_ctx_ps5 = []
     {
         frontend_ctx_driver_t driver{};

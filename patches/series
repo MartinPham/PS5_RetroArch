@@ -242,3 +242,7 @@
 #       for the WebUI; no HTTP access to live emulator state
 #       runloop.c
 0105-webui-core-metadata
+
+# 0106  route the default Saturn BIOS directory to system/Saturn
+#       runloop.c, core_info.c; explicit user paths remain unchanged
+0106-saturn-system-directory

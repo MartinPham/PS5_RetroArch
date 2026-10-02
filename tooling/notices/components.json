@@ -314,7 +314,7 @@
       "copyright": ["Copyright Mednafen Team and the beetle-saturn-libretro contributors"],
       "texts": [{"from": ".deps/beetle-saturn-src/COPYING", "to": "COPYING"}],
       "source": {"kind": "core", "build": "beetle-saturn", "tree": ".deps/beetle-saturn-src", "remote": "https://github.com/mihawk-99/PS5_BeetleSaturn"},
-      "modifications": "The fork's commits over libretro/beetle-saturn-libretro."
+      "modifications": "The fork's commits over libretro/beetle-saturn-libretro, plus patches/beetle-saturn/ps5-executable-memory.patch for SDK executable memory and core-owned cropped video frames."
     },
     {
       "id": "vice",
