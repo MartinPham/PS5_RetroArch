@@ -34,6 +34,61 @@ from pathlib import Path
 
 # (file, anchor, inserted-before-anchor, already-present-marker)
 EDITS = [
+    (
+        # 0102: choose frontend defaults before saved options are read. All v1,
+        # v2 and translated definitions converge here; legacy variables use
+        # the same helper. Never modify a core's (potentially const) definitions.
+        "core_option_manager.c",
+        "/* Parses a single legacy core options interface",
+        """/* patches/series, 0102: balanced defaults for a 4K output. Internal
+ * resolution leaves headroom for demanding games; saved options still win. */
+static void ps5_core_option_default(struct core_option *option)
+{
+   static const struct { const char *key; const char *value; } defaults[] = {
+      { "ppsspp_internal_resolution", "2880x1632" },
+      { "ppsspp_mulitsample_level", "Disabled" },
+      { "dolphin_efb_scale", "4" },
+      { "pcsx2_upscale_multiplier", "4x Native (~1440p/2K)" },
+      { "beetle_psx_hw_internal_resolution", "8x" },
+      { "beetle_psx_hw_msaa", "1x" },
+      { "citra_resolution_factor", "6" },
+      { "desmume_internal_resolution", "1024x768" },
+   };
+   size_t i, j;
+   for (i = 0; i < sizeof(defaults) / sizeof(defaults[0]); i++)
+      if (string_is_equal(option->key, defaults[i].key))
+      {
+         for (j = 0; j < option->vals->size; j++)
+            if (string_is_equal(option->vals->elems[j].data, defaults[i].value))
+            {
+               option->default_index = j;
+               option->index = j;
+               return;
+            }
+         /* A different core version may not offer this value. Keep its default. */
+         return;
+      }
+}
+
+/* Parses a single legacy core options interface""",
+        "patches/series, 0102: balanced defaults",
+    ),
+    (
+        "core_option_manager.c",
+        "   option->index         = 0;\n\n   if (config_src)",
+        "   option->index         = 0;\n\n"
+        "   /* patches/series, 0102: legacy defaults before saved values. */\n"
+        "   ps5_core_option_default(option);\n\n   if (config_src)",
+        "patches/series, 0102: legacy defaults",
+    ),
+    (
+        "core_option_manager.c",
+        "   }\n\n   if (config_src)\n      entry",
+        "   }\n\n"
+        "   /* patches/series, 0102: v1/v2 defaults before saved values. */\n"
+        "   ps5_core_option_default(option);\n\n   if (config_src)\n      entry",
+        "patches/series, 0102: v1/v2 defaults",
+    ),
     ('libretro-common/file/archive_file_7z.c', '#include <stdlib.h>', '/* patches/series, 0076: archive error diagnostics */\n#include <stdlib.h>\n#include <stdio.h>\n#include <errno.h>', 'patches/series, 0076: archive error diagnostics'),
     ('libretro-common/file/archive_file_7z.c', '   return malloc(len);', '/* patches/series, 0076: checked main allocation */\n   {\n      void *result = malloc(len);\n      if (!result)\n         fprintf(stderr, "archive 7z: allocation failed bytes=%zu errno=%d\\n", len, errno);\n      return result;\n   }', 'patches/series, 0076: checked main allocation'),
     ('libretro-common/file/archive_file_7z.c', 'static void *sevenzip_stream_alloc_tmp_impl(ISzAllocPtr p, size_t len)\n{\n   if (len == 0)\n      return 0;\n   return malloc(len);\n}', '/* patches/series, 0076: checked temporary allocation */\nstatic void *sevenzip_stream_alloc_tmp_impl(ISzAllocPtr p, size_t len)\n{\n   return sevenzip_stream_alloc_impl(p, len);\n}', 'patches/series, 0076: checked temporary allocation'),

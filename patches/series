@@ -223,3 +223,9 @@
 #       frames and the longest gap between them over exact script times
 #       gfx/video_driver.c
 0101-pad-script-frame-marks
+
+# 0102  balanced internal resolutions for 4K presentation, without forced MSAA;
+#       apply before saved values, so user overrides and Reset to Default work
+#       across legacy, v1, v2 and translated core options
+#       core_option_manager.c
+0102-balanced-core-defaults
