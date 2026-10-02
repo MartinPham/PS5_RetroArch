@@ -8,6 +8,7 @@
 #include "../src/input_ps5.cpp"
 #include "input_state_wrap.inc"
 
+static bool request_update_exit = false;
 namespace
 {
 std::vector<PadSample> pending;
@@ -444,6 +445,23 @@ int main()
     assert(option_set_idx == 99 && option_set_val == 99);
     test_runloop.core_options = nullptr;
     action_count = 0;
+    request_update_exit = true;
+    test_video.frame_count = 50;
+    ps5_input_init(nullptr);
+    ps5_input_poll(nullptr);
+    assert(test_runloop.max_frames == 51);
+    test_video.frame_count = 51;
+    ps5_input_poll(nullptr);
+    assert(test_runloop.max_frames == 51); // repeated polls cannot postpone exit
+    request_update_exit = false;
     std::puts("PS5 joypad: raw binding capture, axes, user mappings, rumble, poll retention, "
               "lifecycle and the script's STOP and OPTION PASS");
 }
+
+namespace ps5_update
+{
+bool exit_requested()
+{
+    return request_update_exit;
+}
+} // namespace ps5_update

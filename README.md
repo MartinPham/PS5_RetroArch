@@ -59,10 +59,26 @@ core options and per-core RetroArch overrides are separate. Existing game or
 folder overrides can take precedence. Unsaved edits survive switching categories
 or Guided/Advanced mode. WebUI light/dark appearance changes immediately.
 
-The interface, fonts and artwork are served locally; only release checking needs
-internet access. Updates are announced, not installed automatically. Uploads are
+The interface, fonts and artwork are served locally. Release checks and update
+downloads need internet access. Uploads are
 limited to the content folder and 64 GiB per file. Available storage is not
 reported because the console API does not provide a measured value.
+
+**New in source builds after Alpha 6:** **Update RetroArch** downloads the newest
+published release, including alphas, directly to your console. It checks the ZIP
+checksum and every packaged file before enabling **Install and close RetroArch**.
+Save your progress, install, wait for the application to close, then reopen it.
+Content, saves, settings and existing custom BIOS/effect files are preserved.
+Keep enough free space for both the downloaded ZIP and its extracted files.
+Failed installs attempt to restore the previous files; a power loss that prevents
+the application from launching can still require reinstalling the release manually.
+
+The new **Alerts** panel lists missing required BIOS/system files by installed
+core and shows the configured location. Choose **Recheck** after adding files.
+It checks presence, not BIOS authenticity; regional requirements may not apply to
+your content. `/app0` means the RetroArch installation folder. Optional firmware
+and RPCS3 are excluded from these checks. These controls are not in the published
+Alpha 6 package; install an updated source build once to enable future WebUI updates.
 
 > The WebUI is a local HTTP service without a login. Use a trusted network and
 > do not forward port **6769** to the internet.

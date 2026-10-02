@@ -62,6 +62,7 @@
 
 #include <input/input_driver.h>
 #include "content.h"
+#include "webui_update.h"
 #include "memory_status.h"
 #ifdef HAVE_MENU
 #include "command.h"
@@ -1155,13 +1156,23 @@ bool joypad_set_rumble(unsigned joypad, enum retro_rumble_effect effect,
     return result;
 }
 
+bool update_exit_armed = false;
 void *ps5_input_init(const char *) noexcept
 {
+    update_exit_armed = false;
     static int cookie;
     return &cookie;
 }
 void ps5_input_poll(void *) noexcept
 {
+    if (ps5_update::exit_requested() && !update_exit_armed)
+    {
+        // End at the next frontend frame boundary. Input polling can run inside
+        // retro_run(), where saving state or tearing down the core is unsafe.
+        runloop_state_get_ptr()->max_frames =
+            static_cast<unsigned>(video_state_get_ptr()->frame_count + 1);
+        update_exit_armed = true;
+    }
 }
 void ps5_input_free(void *) noexcept
 {

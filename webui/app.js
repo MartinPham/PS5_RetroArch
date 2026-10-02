@@ -47,17 +47,20 @@ function setConnection(ok) {
     $('#' + id).disabled = !ok || (['settings-fields', 'save-settings'].includes(id) && !editorRevision) || (['quick-volume', 'quick-rumble', 'settings-fields', 'save-settings'].includes(id) && !Object.keys(settingsValues).length);
   }
   $('#folder-form button').disabled = !ok;
+  updateButton();
+  $('#install-update').disabled = !ok;
 }
 async function reconnect() {
   if (sessionRequest) return sessionRequest;
   sessionRequest = (async () => {
     try {
       const state = await api('/api/status');
+      if (token && token !== state.token && updateState === 'installing') { location.reload(); return false; }
       const recovered = !connected || token !== state.token;
       token = state.token; freeBytes = state.freeBytes; uploadLimit = state.uploadLimit;
       setConnection(true);
       $('#storage-info').textContent = freeBytes === null ? 'Games and files stored on your PS5' : `${bytes(freeBytes)} free on the console`;
-      if (recovered) await Promise.all([loadLibrary(), loadSettings(), loadContent(currentPath)]);
+      if (recovered) await Promise.all([loadLibrary(), loadSettings(), loadContent(currentPath), loadAlerts(), loadUpdate()]);
       return true;
     } catch (error) { setConnection(false); return false; }
     finally { sessionRequest = null; }
@@ -454,12 +457,77 @@ function compareVersions(left, right) {
   }
   return 0;
 }
-let installed = null;
+let installed = null, latestUpdate = null, updateState = 'idle', updatePolling = false;
+function updateButton() {
+  const busy = ['downloading', 'verifying', 'ready', 'installing'].includes(updateState);
+  $('#download-update').disabled = !connected || !latestUpdate || busy;
+  $('#download-update').textContent = busy ? 'Update in progress' : installed && !installed.release ? 'Install latest release' : 'Update RetroArch';
+}
+function renderUpdate(data) {
+  updateState = data.state;
+  $('#update-panel').hidden = data.state === 'idle' && $('#update-error').hidden;
+  $('#update-tag').textContent = data.tag || '';
+  $('#update-development-note').hidden = !installed || Boolean(installed.release);
+  const downloading = data.state === 'downloading';
+  $('#update-message').textContent = data.message + (downloading && data.received ? ` ${bytes(data.received)} received.` : '');
+  $('#update-progress').hidden = !['downloading', 'verifying'].includes(data.state);
+  $('#install-update').hidden = data.state !== 'ready';
+  $('#install-update').disabled = !connected;
+  updateButton();
+}
+async function loadUpdate() {
+  if (updatePolling) return;
+  updatePolling = true;
+  try { renderUpdate(await api('/api/update')); }
+  catch (error) {
+    if (updateState === 'installing') {
+      $('#update-message').textContent = 'RetroArch has disconnected for installation. Reopen it from your launcher when installation finishes, then check the version above.';
+    } else if (updateState !== 'idle') {
+      $('#update-message').textContent = 'Update status is unavailable. Reconnect to check its progress before retrying.';
+    }
+  } finally { updatePolling = false; }
+}
+async function loadAlerts() {
+  const button = $('#refresh-alerts'); button.disabled = true;
+  try {
+    const data = await api('/api/alerts'), list = $('#alerts-list'); list.replaceChildren();
+    const groups = new Map();
+    for (const alert of data.alerts) {
+      if (!groups.has(alert.core)) { const group = element('section', undefined, 'alert-group'); group.append(element('h3', alert.core)); groups.set(alert.core, group); list.append(group); }
+      const row = element('div', undefined, 'alert-item');
+      row.append(element('strong', alert.title));
+      if (alert.path) row.append(element('code', alert.path));
+      else row.append(element('p', alert.message));
+      groups.get(alert.core).append(row);
+    }
+    const count = data.alerts.length;
+    $('#alerts-count').textContent = count; $('#alerts-count').hidden = !count;
+    $('#alerts-summary').textContent = count ? `${count} ${count === 1 ? 'item needs' : 'items need'} attention across your installed cores.` : 'No missing required BIOS or system files found.';
+    $('#alerts-details').hidden = !count;
+    $('.alerts-panel').dataset.state = count ? 'warning' : 'clear';
+  } catch (error) { $('#alerts-summary').textContent = 'Couldn’t check required files. Reconnect and try again.'; $('#alerts-details').hidden = true; $('#alerts-count').hidden = true; }
+  finally { button.disabled = false; }
+}
+$('#refresh-alerts').addEventListener('click', loadAlerts);
+$('#download-update').addEventListener('click', async () => {
+  if (!latestUpdate) return;
+  $('#download-update').disabled = true; $('#update-error').hidden = true;
+  try { renderUpdate(await api(`/api/update/download?tag=${encodeURIComponent(latestUpdate)}`, { method: 'POST' })); }
+  catch (error) { $('#update-panel').hidden = false; $('#update-error').textContent = error.message; $('#update-error').hidden = false; updateButton(); }
+});
+$('#install-update').addEventListener('click', async () => {
+  $('#install-update').disabled = true; $('#update-error').hidden = true;
+  renderUpdate({ state: 'installing', tag: $('#update-tag').textContent, message: 'Requesting installation…' });
+  try { renderUpdate(await api('/api/update/install', { method: 'POST' })); }
+  catch (error) { $('#update-error').textContent = error.message + ' Rechecking installation status…'; $('#update-error').hidden = false; await loadUpdate(); }
+});
+setInterval(() => { if (!document.hidden && connected) loadUpdate(); }, 2000);
 async function checkRelease() {
   const button = $('#check-release'), bar = $('.release-bar'); button.disabled = true;
+  latestUpdate = null; updateButton();
   $('#release-summary').textContent = 'Checking releases…'; bar.dataset.state = 'checking';
   try {
-    if (!installed) { const response = await fetch('/version.json', { cache: 'no-store', signal: AbortSignal.timeout(10000) }); if (!response.ok) throw new Error(); installed = await response.json(); }
+    { const response = await fetch('/version.json', { cache: 'no-store', signal: AbortSignal.timeout(10000) }); if (!response.ok) throw new Error(); installed = await response.json(); }
     $('#release-title').textContent = installed.release || 'Development build';
     const response = await fetch(`https://api.github.com/repos/${repo}/releases?per_page=30`, { headers: { Accept: 'application/vnd.github+json' }, signal: AbortSignal.timeout(12000) });
     if (!response.ok) throw new Error();
@@ -469,6 +537,9 @@ async function checkRelease() {
     const latest = published[0];
     if (!latest) { $('#release-summary').textContent = 'No published releases yet'; $('#show-notes').hidden = true; bar.dataset.state = 'unknown'; return; }
     const comparison = installed.release ? compareVersions(installed.release, latest.tag_name) : null;
+    const assetNames = new Set((latest.assets || []).map(asset => asset.name));
+    const archive = `PS5_RetroArch-${latest.tag_name}.zip`;
+    if ((comparison === null || comparison < 0) && assetNames.has(archive) && assetNames.has(archive + '.sha256')) latestUpdate = latest.tag_name;
     bar.dataset.state = comparison === null ? 'development' : comparison < 0 ? 'update' : 'current';
     $('#release-summary').textContent = comparison === null ? `Latest release: ${latest.tag_name}` : comparison < 0 ? `Update available · ${latest.tag_name}` : 'You’re up to date';
     $('.release-icon').innerHTML = comparison !== null && comparison >= 0 ? '<circle cx="12" cy="12" r="10"/><path d="m7 12 3 3 7-7"/>' : '<circle cx="12" cy="12" r="10"/><path d="M12 11v6 M12 7v.1"/>';
@@ -478,7 +549,7 @@ async function checkRelease() {
     $('#release-link').href = `https://github.com/${repo}/releases/tag/${encodeURIComponent(latest.tag_name)}`;
     $('#show-notes').hidden = false;
   } catch { bar.dataset.state = 'unknown'; $('#release-summary').textContent = 'Couldn’t check updates. Try again.'; }
-  finally { button.disabled = false; }
+  finally { button.disabled = false; updateButton(); }
 }
 function showNotes(show) { $('#release-details').hidden = !show; $('#show-notes').setAttribute('aria-expanded', String(show)); if (show) $('#release-details').scrollIntoView({ behavior: 'smooth', block: 'start' }); }
 $('#show-notes').addEventListener('click', () => showNotes($('#release-details').hidden));

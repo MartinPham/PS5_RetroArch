@@ -3,6 +3,7 @@
  * partial bodies, timeouts and connections. Routes are restricted to RetroArch.
  */
 #include "webui_ps5.h"
+#include "webui_update.h"
 #include "../vendor/retroarch/libretro-common/include/libretro.h"
 #include <microhttpd.h>
 #include <algorithm>
@@ -363,6 +364,105 @@ Config global_values()
     overlay(values, read_config(root_path + "/config/webui.cfg"));
     return values;
 }
+std::string update_status()
+{
+    const auto u = ps5_update::status();
+    return "{\"state\":" + quote(u.state) + ",\"message\":" + quote(u.message) +
+           ",\"tag\":" + quote(u.tag) + ",\"received\":" + std::to_string(u.received) + '}';
+}
+std::string bios_alerts()
+{
+    std::string out = "{\"alerts\":[";
+    auto add = [&](const std::string &core, const std::string &description, const std::string &path,
+                   const std::string &message)
+    {
+        if (out.back() != '[')
+            out += ',';
+        out += "{\"core\":" + quote(core) + ",\"title\":" + quote(description) +
+               ",\"path\":" + quote(path) + ",\"message\":" + quote(message) + '}';
+    };
+    const auto global = global_values();
+    for (const auto &entry : read_config(root_path + "/webui/core-metadata/index.cfg"))
+    {
+        if (!valid_path(entry.first) || entry.first.find('/') != std::string::npos ||
+            entry.first == "rpcs3_libretro.so")
+            continue;
+        struct stat st{};
+        if (content_stat((root_path + "/cores/" + entry.first).c_str(), &st))
+            continue;
+        auto values = global;
+        overlay(values,
+                read_config(root_path + "/config/" + entry.second + '/' + entry.second + ".cfg"));
+        overlay(values, read_config(root_path + "/config/webui-cores/" + entry.second + ".cfg"));
+        std::string directory = values["system_directory"];
+        if (directory.empty() || directory == "default")
+            directory = root_path + "/system";
+        else if (directory.rfind(":/", 0) == 0)
+            directory = root_path + directory.substr(1);
+        else if (directory.rfind("/app0/", 0) == 0)
+            directory = root_path + directory.substr(5);
+        if (entry.second == "Beetle Saturn" && directory == root_path + "/system")
+            directory += "/Saturn";
+        if (directory.front() != '/')
+        {
+            add(entry.second, "System folder needs attention", directory,
+                "Choose an absolute System/BIOS folder in this core's settings.");
+            continue;
+        }
+        const auto info = read_config(root_path + "/info/" +
+                                      entry.first.substr(0, entry.first.size() - 3) + ".info");
+        for (const auto &firmware : info)
+        {
+            if (firmware.first.rfind("firmware", 0) || firmware.first.size() < 6 ||
+                firmware.first.substr(firmware.first.size() - 5) != "_path")
+                continue;
+            const auto prefix = firmware.first.substr(0, firmware.first.size() - 5);
+            auto optional = info.find(prefix + "_opt");
+            if (optional == info.end() || optional->second != "false" ||
+                !valid_path(firmware.second))
+                continue;
+            const std::string path = directory + '/' + firmware.second;
+            bool present = !content_stat(path.c_str(), &st) &&
+                           ((S_ISREG(st.st_mode) && st.st_size > 0) || S_ISDIR(st.st_mode));
+            // A required BIOS directory exists after installation even when it is empty.
+            if (present && S_ISDIR(st.st_mode))
+            {
+                present = false;
+                DIR *folder = opendir(path.c_str());
+                if (folder)
+                {
+                    while (auto *e = readdir(folder))
+                    {
+                        std::string name = e->d_name;
+                        if (name.size() > 4 &&
+                            (name.substr(name.size() - 4) == ".bin" ||
+                             name.substr(name.size() - 4) == ".BIN") &&
+                            !content_stat((path + '/' + name).c_str(), &st) &&
+                            S_ISREG(st.st_mode) && st.st_size > 0)
+                        {
+                            present = true;
+                            break;
+                        }
+                    }
+                    closedir(folder);
+                }
+            }
+            if (!present)
+            {
+                auto desc = info.find(prefix + "_desc");
+                add(entry.second, desc == info.end() ? firmware.second : desc->second, path,
+                    "Required firmware was not found here. Add your own BIOS/system files for the "
+                    "regions and content you use. Presence only is checked; file authenticity is "
+                    "not verified.");
+            }
+        }
+    }
+    auto update = ps5_update::status();
+    if (update.state == "error")
+        add("RetroArch update", "Update needs attention", "", update.message);
+    return out + "],\"scope\":\"Installed cores and configured system folders\"}";
+}
+
 std::string revision(const Config &values)
 {
     uint64_t hash = UINT64_C(14695981039346656037);
@@ -752,6 +852,19 @@ MHD_Result route(MHD_Connection *c, const std::string &url, const std::string &m
                 ",\"freeBytes\":" +
                 (space_known ? std::to_string(uint64_t(fs.f_bavail) * fs.f_frsize) : "null") + '}');
     }
+    if (method == "GET" && url == "/api/alerts")
+        return respond(c, 200, bios_alerts());
+    if (method == "GET" && url == "/api/update")
+        return respond(c, 200, update_status());
+    if (method == "POST" && url == "/api/update/download")
+        return ps5_update::download(arg(c, "tag"))
+                   ? respond(c, 202, update_status())
+                   : error(c, 409,
+                           "An update is already active, or the release could not be prepared.");
+    if (method == "POST" && url == "/api/update/install")
+        return ps5_update::request_install()
+                   ? respond(c, 202, update_status())
+                   : error(c, 409, "Download and verify an update before installing it.");
     if (method == "GET" && url == "/api/content")
         return list_content(c);
     if (method == "GET" && url == "/api/download")
@@ -1047,6 +1160,7 @@ bool ps5_webui_start(const char *root, unsigned short port)
     if (web_daemon)
         return true;
     root_path = root;
+    ps5_update::initialize(root_path);
     apply_core_settings();
     listen_port = port;
     token = nonce();
@@ -1068,4 +1182,5 @@ void ps5_webui_stop()
         web_daemon = nullptr;
         std::fprintf(stderr, "webui: stopped\n");
     }
+    ps5_update::stop();
 }

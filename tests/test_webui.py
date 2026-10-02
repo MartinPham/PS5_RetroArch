@@ -16,6 +16,7 @@ class WebUI(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         archive = subprocess.check_output(['bash', 'tools/build-webui-http.sh', 'host'], cwd=ROOT, text=True).strip()
+        update = subprocess.check_output(['bash', 'tools/build-webui-update.sh', 'host'], cwd=ROOT, text=True).strip()
         cls.temp = tempfile.TemporaryDirectory()
         cls.root = Path(cls.temp.name)
         for name in ('config', 'content', 'webui'):
@@ -26,7 +27,8 @@ class WebUI(unittest.TestCase):
         cls.binary = cls.root / 'server'
         subprocess.run(['c++', '-std=c++17', '-O1', '-g', '-pthread',
                         '-I'+str(ROOT / '.deps/webui/libmicrohttpd-1.0.10/src/include'),
-                        'tests/webui_server_main.cpp', 'src/webui_ps5.cpp', archive, '-o', str(cls.binary)], cwd=ROOT, check=True)
+                        '-I'+str(ROOT / '.deps/native/zlib/zlib-1.3.2/contrib/minizip'), '-I'+str(ROOT / 'vendor/retroarch/deps/mbedtls'),
+                        'tests/webui_server_main.cpp', 'src/webui_ps5.cpp', 'src/webui_update.cpp', archive, update, '-lz', '-o', str(cls.binary)], cwd=ROOT, check=True)
         with socket.socket() as s:
             s.bind(('127.0.0.1', 0)); cls.port = s.getsockname()[1]
         cls.process = subprocess.Popen([str(cls.binary), str(cls.root), str(cls.port)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -65,6 +67,44 @@ class WebUI(unittest.TestCase):
         self.assertEqual(self.request('POST', '/api/folder?path=nope', headers={'Origin': 'https://attacker.example'})[0], 403)
         self.assertEqual(self.request('POST', '/api/folder?path=nope', headers={'X-RetroArch-Token': 'wrong'})[0], 403)
         self.assertEqual(self.request('GET', '/config/retroarch.cfg')[0], 404)
+
+    def test_alerts_follow_installed_cores_and_custom_system_folder(self):
+        catalog = self.root / 'webui/core-metadata'
+        catalog.mkdir(exist_ok=True)
+        index = catalog / 'index.cfg'
+        previous = index.read_bytes() if index.exists() else None
+        for folder in ('cores', 'info', 'system/Saturn', 'config/Beetle Saturn'):
+            (self.root / folder).mkdir(parents=True, exist_ok=True)
+        index.write_text('mednafen_saturn_libretro.so = "Beetle Saturn"\n')
+        core = self.root / 'cores/mednafen_saturn_libretro.so'; core.write_bytes(b'fixture')
+        info = self.root / 'info/mednafen_saturn_libretro.info'
+        info.write_text('firmware0_path = "required.bin"\nfirmware0_opt = "false"\nfirmware0_desc = "Region BIOS"\nfirmware1_path = "optional.bin"\nfirmware1_opt = "true"\n')
+        cfg = self.root / 'config/Beetle Saturn/Beetle Saturn.cfg'
+        original_cfg = cfg.read_bytes() if cfg.exists() else None
+        cfg.unlink(missing_ok=True)
+        try:
+            alerts = json.loads(self.request('GET', '/api/alerts')[2])['alerts']
+            self.assertEqual(len(alerts), 1)
+            self.assertEqual(alerts[0]['path'], str(self.root/'system/Saturn/required.bin'))
+            (self.root/'system/Saturn/required.bin').write_bytes(b'present')
+            self.assertEqual(json.loads(self.request('GET', '/api/alerts')[2])['alerts'], [])
+            cfg.write_text(f'system_directory = "{self.root}/custom-bios"\n')
+            alerts = json.loads(self.request('GET', '/api/alerts')[2])['alerts']
+            self.assertEqual(alerts[0]['path'], str(self.root/'custom-bios/required.bin'))
+            core.unlink()
+            self.assertEqual(json.loads(self.request('GET', '/api/alerts')[2])['alerts'], [])
+        finally:
+            if previous is None: index.unlink(missing_ok=True)
+            else: index.write_bytes(previous)
+            if original_cfg is None: cfg.unlink(missing_ok=True)
+            else: cfg.write_bytes(original_cfg)
+            core.unlink(missing_ok=True); info.unlink(missing_ok=True)
+
+    def test_update_requests_require_session_and_ready_package(self):
+        self.assertEqual(json.loads(self.request('GET', '/api/update')[2])['state'], 'idle')
+        self.assertEqual(self.request('POST', '/api/update/download?tag=v1.0.0', headers={'X-RetroArch-Token':'wrong'})[0], 403)
+        self.assertEqual(self.request('POST', '/api/update/download?tag=../escape')[0], 409)
+        self.assertEqual(self.request('POST', '/api/update/install')[0], 409)
 
     def test_registered_core_metadata(self):
         status, _, body = self.request('GET', '/api/core-metadata?core=Metadata%20test')

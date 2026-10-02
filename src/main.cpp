@@ -53,6 +53,7 @@
 #include "../build/title_build_identity.h"
 #include "title_threads.hpp"
 #include "webui_ps5.h"
+#include "webui_update.h"
 
 /* RetroArch's entry, in C. */
 extern "C" int rarch_main(int argc, char *argv[], void *data);
@@ -558,6 +559,7 @@ int main()
     ps5::debug::mark_value("rarch_main returned", status);
     if (ps5vk_display_retain != nullptr)
         ps5vk_display_retain(false);
+    ps5_update::install();
     ps5::memory::finish();
 
     return status;

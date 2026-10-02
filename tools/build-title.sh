@@ -256,6 +256,8 @@ fi
 # HTTP parser shared with the websrv reference; bounded streaming avoids whole-game buffers.
 webui_http=$(bash "$root/tools/build-webui-http.sh" ps5)
 webui_http=${webui_http#"$root/"}
+webui_update=$(bash "$root/tools/build-webui-update.sh" ps5)
+webui_update=${webui_update#"$root/"}
 
 # Extract once, before the identity is computed, so catalog changes identify the build.
 python3 "$root/tools/generate-core-metadata.py" "$root/build/webui-core-metadata"
@@ -268,7 +270,8 @@ root = pathlib.Path(sys.argv[1])
 inputs = sorted(p for p in (root / "src").rglob("*") if p.is_file())
 inputs += [root / name for name in (
     "build/ra/libretroarch.a", "build/ra-conf/config.h", "tools/build-title.sh",
-    "build/core_imports.inc", "tools/build-webui-http.sh",
+    "build/core_imports.inc", "tools/build-webui-http.sh", "tools/build-webui-update.sh",
+    "build/webui-update-ps5/libupdate.a",
     "build/webui-mhd-ps5/src/microhttpd/.libs/libmicrohttpd.a",
     # The SDK fork's revision: its platform layer is linked into the title, and
     # a change there alone changes no other input.
@@ -310,8 +313,8 @@ PS5_PAYLOAD_SDK="$sdk" \
 PS5_CLANG=/usr/bin/clang \
 PYTHONPATH="$root/tooling/pystub${PYTHONPATH:+:$PYTHONPATH}" \
 APP_DEFINITIONS="${title_definition_names[*]}" \
-APP_INCLUDE_PATHS="build/ra-conf build vendor/retroarch build/ra-conf/libretro-common/include vendor/retroarch/deps vendor/retroarch/deps/stb .deps/webui/libmicrohttpd-1.0.10/src/include" \
-APP_STATIC_ARCHIVES="build/ra/libretroarch.a $webui_http" \
+APP_INCLUDE_PATHS="build/ra-conf build vendor/retroarch build/ra-conf/libretro-common/include vendor/retroarch/deps vendor/retroarch/deps/stb .deps/webui/libmicrohttpd-1.0.10/src/include .deps/native/zlib/zlib-1.3.2 .deps/native/zlib/zlib-1.3.2/contrib/minizip vendor/retroarch/deps/mbedtls" \
+APP_STATIC_ARCHIVES="build/ra/libretroarch.a $webui_http $webui_update" \
 APP_SDK_ARCHIVES="libps5platform.a" \
 APP_VULKAN_ARCHIVES="${vulkan_archives[*]}" \
 APP_EXTRA_OBJECTS="${vulkan_objects[*]}" \

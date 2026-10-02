@@ -28,13 +28,13 @@
     },
     {
       "id": "retroarch",
-      "name": "RetroArch 1.22.2",
+      "name": "RetroArch 1.22.2 and bundled mbedTLS SHA-256",
       "kind": "code",
       "always": true,
       "artifacts": ["eboot.bin", "assets/rgui/**"],
       "licence": "GPL-3.0-or-later",
-      "copyright": ["Copyright (C) 2010-2026 The RetroArch team and contributors"],
-      "texts": [{"from": "vendor/retroarch/COPYING", "to": "COPYING"}],
+      "copyright": ["Copyright (C) 2010-2026 The RetroArch team and contributors", "Copyright (C) 2006-2015 ARM Limited (mbedTLS SHA-256, Apache-2.0)"],
+      "texts": [{"from": "vendor/retroarch/COPYING", "to": "COPYING"}, {"from": "vendor/retroarch/deps/mbedtls/sha256.c", "to": "mbedtls-sha256-notice.txt", "head": 21}, {"from": "vendor/retroarch/deps/SPIRV-Cross/LICENSES/Apache-2.0.txt", "to": "Apache-2.0.txt"}],
       "source": {"kind": "pin", "file": "tools/fetch-retroarch.sh", "var": "revision", "remote": "https://github.com/libretro/RetroArch"},
       "modifications": "patches/series, applied by tools/fetch-retroarch.sh and tools/apply-port-patches.py (PS5_RetroArch)."
     },
@@ -91,13 +91,13 @@
     },
     {
       "id": "zlib",
-      "name": "zlib 1.3.2",
+      "name": "zlib 1.3.2 and MiniZip (release extraction)",
       "kind": "code",
       "always": true,
       "artifacts": ["eboot.bin"],
       "licence": "Zlib",
-      "copyright": ["Copyright (C) 1995-2026 Jean-loup Gailly and Mark Adler"],
-      "texts": [{"from": ".deps/native/zlib/zlib-1.3.2/LICENSE", "to": "LICENSE"}],
+      "copyright": ["Copyright (C) 1995-2026 Jean-loup Gailly and Mark Adler", "Copyright (C) 1998-2026 Gilles Vollant; 2007-2008 Even Rouault; 2009-2010 Mathias Svensson"],
+      "texts": [{"from": ".deps/native/zlib/zlib-1.3.2/LICENSE", "to": "LICENSE"}, {"from": ".deps/native/zlib/zlib-1.3.2/contrib/minizip/MiniZip64_info.txt", "to": "MiniZip64_info.txt"}],
       "source": {"kind": "pin", "file": "tools/setup-native-dependencies.sh", "var": "zlib_version", "url": "https://zlib.net/fossils/zlib-{rev}.tar.gz"},
       "modifications": "Unmodified."
     },
