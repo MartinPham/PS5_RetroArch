@@ -233,3 +233,7 @@
 # 0103  shared CPU/GPU memory reports before and after state loads
 #       runloop.c
 0103-state-load-memory-reports
+
+# 0104  owner-selected PPSSPP 6x with 8x MSAA; retain saved overrides
+#       core_option_manager.c
+0104-ppsspp-msaa-default

@@ -65,7 +65,7 @@ int main(void)
 {
    const char *profiles[][3] = {
       {"ppsspp_internal_resolution", "4800x2720", "2880x1632"},
-      {"ppsspp_mulitsample_level", "x8", "Disabled"},
+      {"ppsspp_mulitsample_level", "Disabled", "x8"},
       {"dolphin_efb_scale", "6", "4"},
       {"pcsx2_upscale_multiplier", "6x Native (~2160p/4K)", "4x Native (~1440p/2K)"},
       {"beetle_psx_hw_internal_resolution", "16x", "8x"},

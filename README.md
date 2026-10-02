@@ -96,7 +96,7 @@ previous tests, including the former showcase settings.
 
 | Core | Balanced internal resolution | Anti-aliasing |
 | --- | --- | --- |
-| PPSSPP | 6× (2880×1632) | MSAA off |
+| PPSSPP | 6× (2880×1632) | 8× MSAA |
 | Dolphin | 4× | Core default (no MSAA) |
 | LRPS2 | 4× (~1440p) | Core default |
 | Beetle PSX HW | 8× | MSAA off (1×) |
@@ -104,9 +104,11 @@ previous tests, including the former showcase settings.
 | Azahar | 6× (2400×1440 top screen) | Core default |
 | DeSmuME | 4× (1024×768 per screen) | Core default |
 
-Native-resolution 2D cores and MAME's 4K vector target are unchanged, as are
-renderer, JIT, filtering and accuracy options. Higher resolutions remain
-selectable per game. RPCS3's separate source-only profile is unchanged.
+FCEUmm, mGBA, Snes9x, Genesis Plus GX, FBNeo, Beetle Saturn and VICE retain
+native rendering, scaled by RetroArch for the display. MAME uses its 4K target
+for vector games and native rendering for raster games. Renderer, JIT, filtering
+and accuracy options are unchanged. Higher resolutions remain selectable per
+game. RPCS3's separate source-only profile is unchanged.
 
 Saved core, content-directory and game options take precedence over these
 new defaults. On an existing install, use **Quick Menu → Core Options → Manage
@@ -118,8 +120,8 @@ also be updated if it supplies those values.
 
 **God of War: Chains of Olympus (PPSSPP):** a user on firmware 5.02 reported an
 intro crash at 10× and working play at 6×. Their logs show 10× geometry, 8× MSAA
-pipelines and a null-pointer fault. The new default uses 6× with MSAA off to
-reduce rendering cost.
+pipelines and a null-pointer fault. The default now uses 6× with 8× MSAA, selected after the console
+save-state checks below; turning MSAA off leaves additional memory headroom.
 
 The **Ghost of Sparta** save-state reproduction now reports the actual failure:
 Vulkan runs out of device memory at 10× with 8× MSAA. The new build checks image
@@ -131,7 +133,8 @@ recommended configuration.
 
 The same state passed three loads and one save/load round trip at both 6× with
 MSAA off and 6× with 8× MSAA, each in an 80-second run with normal exit.
-The existing 6×/MSAA-off profile remains the default recommendation. These tests
+The owner-selected default is now 6× with 8× MSAA; MSAA off remains a
+lower-cost option for demanding games. These tests
 cover one affected state, not every game, the original reporter's firmware 5.02
 console, or a long soak. See the [memory recovery test record](evidence/ppsspp-memory-recovery/).
 
@@ -201,7 +204,7 @@ PPSSPP's JIT runs: its code memory is mapped read-write and then made
 executable, and its fast-memory fault handler reads the console's own signal
 context layout. The port builds PPSSPP v1.20.4 with one patch
 (`patches/ppsspp/ps5-port.patch`) and FFmpeg 3.0.2 for game videos. It starts
-with the frontend's balanced defaults (6× internal resolution, MSAA off),
+with the frontend's balanced defaults (6× internal resolution, 8× MSAA),
 retaining 16× anisotropy, auto max-quality filtering, hardware transform,
 software skinning, no frameskip and no speed hacks. The core's older one-time
 profile migration still sets an existing `PPSSPP.opt` aside as
