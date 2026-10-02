@@ -62,6 +62,7 @@ ps5vk, the project's first driver.
 | XMB | ✅ Default menu, with icons, fonts and background rendering |
 | RGUI | ✅ Alternative menu |
 | Native controller input | ✅ Buttons, left-stick menu navigation and button/axis binding capture |
+| Controller feedback | Core rumble drives synthesized DualSense haptics, with ordinary rumble fallback if the haptic path fails. Native streaming verified; physical feel awaits confirmation. Inspired by [PR #6](https://github.com/mihawk-99/PS5_RetroArch/pull/6). |
 | Native audio | ✅ `audio_ps5` stereo PCM output, audible channel test and buffering diagnostics |
 | Filesystem and configuration | ✅ Directory browsing, configuration loading/saving and FTP-writable application folders |
 | Core loading | ✅ Native shared-core loader, official `.info` discovery and recovery from rejected loads |
