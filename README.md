@@ -67,7 +67,7 @@ ps5vk, the project's first driver.
 | Core loading | ✅ Native shared-core loader, official `.info` discovery and recovery from rejected loads |
 | Content loading | ✅ Tested games and archives with the cores below. Load Content opens two roots: **INTERNAL**, the title's folder, and **EXTERNAL**, the console's `/mnt`, where USB drives and extended storage mount. The title's sandbox hides `/mnt` for now, so EXTERNAL is empty |
 | Colour and menu transitions | ✅ Corrected pixel uploads; Quick Menu/Close Content/next-game transitions I verified on the console |
-| Hardware-rendered cores | ✅ PPSSPP, Dolphin, LRPS2, Beetle PSX HW, Mupen64Plus-Next (ParaLLEl-RDP) and Azahar render on RADV through their Vulkan renderers, with JITs where they have them, at up to 18× internal resolution; PPSSPP's MSAA works |
+| Hardware-rendered cores | ✅ PPSSPP, Dolphin, LRPS2, Beetle PSX HW, Mupen64Plus-Next (ParaLLEl-RDP) and Azahar render on RADV through their Vulkan renderers, with JITs where they have them, at up to 18× internal resolution; PPSSPP's MSAA renders, with the save-state caveat below |
 | Shader cache | ✅ RADV keeps compiled pipelines in `radv-shader-cache/`: a game's next start reads them back instead of compiling |
 | Save states and fast-forward | ✅ Save/load states (including `--entryslot`) and fast-forward, tested with PPSSPP and mGBA |
 | 120 Hz output | ✅ 120 Hz by default where the display offers it; the refresh is measured, and a display that stays at 60 Hz gets 60 Hz |
@@ -119,8 +119,16 @@ also be updated if it supplies those values.
 **God of War: Chains of Olympus (PPSSPP):** a user on firmware 5.02 reported an
 intro crash at 10× and working play at 6×. Their logs show 10× geometry, 8× MSAA
 pipelines and a null-pointer fault. The new default uses 6× with MSAA off to
-reduce rendering cost. The logs do not establish the underlying crash cause;
-the new profile still needs a console regression run.
+reduce rendering cost.
+
+A subsequent **Ghost of Sparta** console save-state test still reproduces the **null-image
+fault at 10× with 8× MSAA** on the balanced-default build when those saved
+settings override the defaults. The same state passed repeated loads and a new
+save/load round trip at 6× with MSAA off, 6× with 8× MSAA, and 10× with MSAA off.
+Each passing run lasted 80 seconds and exited normally. This verifies the
+balanced profile for that reproduction; it does not fix the underlying image
+creation failure or establish stability for every game. See the
+[console test record](evidence/ppsspp-balanced-state-run/).
 
 | Core | Systems covered by the core | Console verification in this port |
 | --- | --- | --- |
