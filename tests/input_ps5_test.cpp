@@ -141,6 +141,10 @@ extern "C"
         ++audio_closes;
         return 0;
     }
+    void ps5_memory_report(const char *, std::size_t, int)
+    {
+    }
+
     void ps5_input_trace(const char *line) noexcept
     {
         if (std::strstr(line, "back to motor rumble"))

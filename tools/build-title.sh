@@ -414,6 +414,9 @@ pathlib.Path(sys.argv[1]).write_text(json.dumps({"release": sys.argv[2], "build"
     "repository": "mihawk-99/PS5_RetroArch"}) + "\n")
 PY_WEBUI
 
+# Pinned production effects, with dependency and development-fixture checks.
+python3 "$root/tools/video-assets.py" stage "$dist"
+
 # The licences and notices the parts of this folder require, and the source revision
 # of each (tooling/notices/components.json, docs/RELEASING.md), written before the
 # manifest so the manifest covers them. It fails if a staged core is not the file its
@@ -432,6 +435,8 @@ bash "$root/tools/check-manifest.sh" --record
 
 printf '==> [title] built %s (%s files, eboot.bin %s bytes)\n' \
     "$dist" "$(find "$dist" -type f | wc -l)" "$(stat -c %s "$dist/eboot.bin")"
+
+python3 "$root/tools/video-assets.py" package "$dist" --output "$root/dist/PS5_RetroArch.zip"
 
 if $stage; then
     out="$root/handoff/$title_id"

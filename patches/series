@@ -246,3 +246,13 @@
 # 0106  route the default Saturn BIOS directory to system/Saturn
 #       runloop.c, core_info.c; explicit user paths remain unchanged
 0106-saturn-system-directory
+
+# 0107  compile upstream static CPU filters and resolve packaged video asset defaults
+#       Makefile.common, configuration.c
+0107-offline-video-effects
+
+0108  Full-composition Vulkan screenshots for gated console tests; preserve the game viewport and ordinary capture behavior.
+0109  Honor requested refresh at explicit fullscreen dimensions; automatic resolution keeps the highest refresh.
+0110  Expand overlay strips to both triangles for the existing list pipeline; retain UVs and alpha.
+
+0111  Normalize padded software frames before Slang sampling so history, feedback, LUTs and multipass Original use consistent coordinates.

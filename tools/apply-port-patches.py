@@ -34,6 +34,47 @@ from pathlib import Path
 
 # (file, anchor, inserted-before-anchor, already-present-marker)
 EDITS = [
+    (
+        "Makefile.common",
+        "ifeq ($(HAVE_STATIC_VIDEO_FILTERS), 1)\n"
+        "   OBJ +=",
+        "ifeq ($(HAVE_STATIC_VIDEO_FILTERS), 1)\n"
+        "   # patches/series, 0107: upstream static filter registry on PS5.\n"
+        "   DEFINES += -DHAVE_FILTERS_BUILTIN\n"
+        "   OBJ +=",
+        "patches/series, 0107: upstream static",
+    ),
+    (
+        "configuration.c",
+        "   } else if (string_is_equal(settings->paths.directory_video_shader, \"default\"))\n"
+        "      *settings->paths.directory_video_shader = '\\0';",
+        "   } else if (string_is_equal(settings->paths.directory_video_shader, \"default\"))\n"
+        "      /* patches/series, 0107: packaged directory_video_shader default. */\n"
+        "      configuration_set_string(settings, settings->paths.directory_video_shader,\n"
+        "            g_defaults.dirs[DEFAULT_DIR_SHADER]);",
+        "patches/series, 0107: packaged directory_video_shader",
+    ),
+    (
+        "configuration.c",
+        "   } else if (string_is_equal(settings->paths.directory_video_filter, \"default\"))\n"
+        "      *settings->paths.directory_video_filter = '\\0';",
+        "   } else if (string_is_equal(settings->paths.directory_video_filter, \"default\"))\n"
+        "      /* patches/series, 0107: packaged directory_video_filter default. */\n"
+        "      configuration_set_string(settings, settings->paths.directory_video_filter,\n"
+        "            g_defaults.dirs[DEFAULT_DIR_VIDEO_FILTER]);",
+        "patches/series, 0107: packaged directory_video_filter",
+    ),
+    (
+        "configuration.c",
+        "   if (string_is_equal(settings->paths.directory_overlay, \"default\"))\n"
+        "      *settings->paths.directory_overlay = '\\0';",
+        "   if (string_is_equal(settings->paths.directory_overlay, \"default\"))\n"
+        "      /* patches/series, 0107: packaged directory_overlay default. */\n"
+        "      configuration_set_string(settings, settings->paths.directory_overlay,\n"
+        "            g_defaults.dirs[DEFAULT_DIR_OVERLAY]);",
+        "patches/series, 0107: packaged directory_overlay",
+    ),
+
     ('core_info.c', '   for (i = 0; i < info->firmware_count; i++)\n   {\n      if (string_is_empty(info->firmware[i].path))', '   /* patches/series, 0106: BIOS preflight uses the same core directory. */\n   {\n      extern const char *ps5_core_system_directory(const char *, const char *);\n      systemdir = ps5_core_system_directory(info->core_name, systemdir);\n   }\n   for (i = 0; i < info->firmware_count; i++)\n   {\n      if (string_is_empty(info->firmware[i].path))', 'patches/series, 0106: BIOS preflight'),
     ('runloop.c', '            const char *dir_system          = settings->paths.directory_system;', '            /* patches/series, 0106: Saturn BIOS default; custom paths stay intact. */\n            extern const char *ps5_core_system_directory(const char *, const char *);\n            const char *dir_system = ps5_core_system_directory(\n                  runloop_st->system.info.library_name, settings->paths.directory_system);', 'patches/series, 0106: Saturn BIOS'),
     ('runloop.c', 'static core_option_manager_t *runloop_init_core_options(\n', '/* patches/series, 0105: snapshot core descriptions for the WebUI. */\nextern void ps5_webui_core_options(const char *, const struct retro_core_options_v2 *);\nextern void ps5_webui_core_variables(const char *, const struct retro_variable *);\n\nstatic core_option_manager_t *runloop_init_core_options(\n', 'patches/series, 0105: snapshot'),
@@ -3430,6 +3471,111 @@ static void ps5_core_option_default(struct core_option *option)
         "#endif\n",
         "patches/series, 0101): the pad script's",
     ),
+    (
+        "gfx/drivers/vulkan.c",
+        "   vp->full_height = height;\n"
+        "}",
+        "   vp->full_height = height;\n"
+        "#ifdef __PROSPERO__\n"
+        "   /* patches/series, 0108: capture the whole composition for test evidence. */\n"
+        "   {\n"
+        "      extern bool ps5_test_full_screenshot;\n"
+        "      if (ps5_test_full_screenshot && !(vk->flags & VK_FLAG_READBACK_STREAMED))\n"
+        "      {\n"
+        "         vp->x = vp->y = 0;\n"
+        "         vp->width = width;\n"
+        "         vp->height = height;\n"
+        "      }\n"
+        "   }\n"
+        "#endif\n"
+        "}",
+        "patches/series, 0108: capture the whole composition",
+    ),
+    (
+        "gfx/drivers/vulkan.c",
+        "         vk->vp.width, vk->vp.height,\n"
+        "         VK_FORMAT_B8G8R8A8_UNORM, /* Formats don't matter",
+        "         vp.width, vp.height, /* patches/series, 0108: capture extent */\n"
+        "         VK_FORMAT_B8G8R8A8_UNORM, /* Formats don't matter",
+        "patches/series, 0108: capture extent",
+    ),
+    (
+        "gfx/drivers/vulkan.c",
+        "      unsigned caller_width  = vk->vp.width;\n"
+        "      unsigned caller_height = vk->vp.height;",
+        "      /* patches/series, 0108: use the same capture extent as the caller. */\n"
+        "      struct video_viewport capture_vp;\n"
+        "      vulkan_viewport_info(vk, &capture_vp);\n"
+        "      unsigned caller_width  = capture_vp.width;\n"
+        "      unsigned caller_height = capture_vp.height;",
+        "patches/series, 0108: use the same capture extent",
+    ),
+    (
+        "gfx/drivers/vulkan.c",
+        "         int y;\n"
+        "         unsigned vp_width  = (vk->vp.width  > vk->video_width)  ? vk->video_width  : vk->vp.width;\n"
+        "         unsigned vp_height = (vk->vp.height > vk->video_height) ? vk->video_height : vk->vp.height;",
+        "         int y;\n"
+        "         /* patches/series, 0108: readback may include the border outside the game. */\n"
+        "         vulkan_viewport_info(vk, &capture_vp);\n"
+        "         unsigned vp_width  = (capture_vp.width > vk->video_width) ? vk->video_width : capture_vp.width;\n"
+        "         unsigned vp_height = (capture_vp.height > vk->video_height) ? vk->video_height : capture_vp.height;",
+        "patches/series, 0108: readback may include the border",
+    ),
+    (
+        "gfx/common/vulkan_common.c",
+        "                  || (mode_area == best_area && mode->parameters.refreshRate > best_refresh))\n",
+        "                  || (mode_area == best_area && (!best_refresh\n"
+        "                     /* patches/series, 0109: explicit modes honor the requested refresh. */\n"
+        "                     || ((info->width && info->height && info->refresh_rate_x1000)\n"
+        "                        ? abs((int)mode->parameters.refreshRate - (int)info->refresh_rate_x1000)\n"
+        "                           < abs((int)best_refresh - (int)info->refresh_rate_x1000)\n"
+        "                        : mode->parameters.refreshRate > best_refresh))))\n",
+        "patches/series, 0109: explicit modes honor",
+    ),
+    (
+        "gfx/drivers/vulkan.c",
+        "      if (!vulkan_buffer_chain_alloc(vk->context, &vk->chain->vbo,\n"
+        "               4 * sizeof(struct vk_vertex), &range))\n"
+        "         break;\n"
+        "\n"
+        "      memcpy(range.data, &vk->overlay.vertex[i * 4],\n"
+        "            4 * sizeof(struct vk_vertex));\n"
+        "\n"
+        "      call.vertices     = 4;",
+        "      /* patches/series, 0110: overlays share the port's triangle-list pipeline.\n"
+        "       * Upstream stores a four-vertex strip; expand both triangles, including\n"
+        "       * every vertex's UV and alpha, just as the menu draw path does. */\n"
+        "      if (!vulkan_buffer_chain_alloc(vk->context, &vk->chain->vbo,\n"
+        "               6 * sizeof(struct vk_vertex), &range))\n"
+        "         break;\n"
+        "\n"
+        "      {\n"
+        "         static const unsigned order[6] = { 0, 1, 2, 2, 1, 3 };\n"
+        "         struct vk_vertex *dst = (struct vk_vertex*)range.data;\n"
+        "         const struct vk_vertex *src = &vk->overlay.vertex[i * 4];\n"
+        "         unsigned j;\n"
+        "         for (j = 0; j < 6; j++)\n"
+        "            dst[j] = src[order[j]];\n"
+        "      }\n"
+        "\n"
+        "      call.vertices     = 6;",
+        "patches/series, 0110: overlays share",
+    ),
+    (
+        'gfx/drivers_shader/shader_vulkan.cpp',
+        '      vulkan_filter_chain_texture input_texture;',
+        '      vulkan_filter_chain_texture input_texture;\n      /* patches/series, 0111: one normalized upload per in-flight frame. */\n      std::vector<std::unique_ptr<Framebuffer>> ps5_logical_inputs;',
+        'patches/series, 0111: one normalized',
+    ),
+
+    (
+        'gfx/drivers_shader/shader_vulkan.cpp',
+        '   update_history_info();',
+        '   /* patches/series, 0111: all Slang samplers share logical image coordinates.\n    * Cropping the quad alone also crops unpadded history, feedback and LUTs.\n    * Normalize the padded CPU upload once before any shader sees it. */\n   if (input_texture.physical_width > input_texture.width)\n   {\n      if (ps5_logical_inputs.size() <= current_sync_index)\n         ps5_logical_inputs.resize(current_sync_index + 1);\n      auto &logical = ps5_logical_inputs[current_sync_index];\n      VkFormat format = input_texture.format == VK_FORMAT_UNDEFINED\n            ? original_format : input_texture.format;\n      Size2D size = { input_texture.width, input_texture.height };\n      DeferredDisposer disposer(deferred_calls[current_sync_index]);\n      if (!logical)\n         logical.reset(new Framebuffer(device, memory_properties, size, format, 1));\n      else if (logical->get_size().width != size.width\n            || logical->get_size().height != size.height\n            || logical->get_format() != format)\n         logical->set_size(disposer, size, format);\n\n      VkImageLayout layout = input_texture.layout;\n      if (layout != VK_IMAGE_LAYOUT_GENERAL)\n         VULKAN_IMAGE_LAYOUT_TRANSITION_LEVELS(cmd,\n               input_texture.image, VK_REMAINING_MIP_LEVELS, layout,\n               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, 0,\n               VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,\n               VK_PIPELINE_STAGE_TRANSFER_BIT, VK_QUEUE_FAMILY_IGNORED,\n               VK_QUEUE_FAMILY_IGNORED);\n      vulkan_framebuffer_copy(logical->get_image(), size, cmd,\n            input_texture.image, layout == VK_IMAGE_LAYOUT_GENERAL\n                  ? layout : VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);\n      if (layout != VK_IMAGE_LAYOUT_GENERAL)\n         VULKAN_IMAGE_LAYOUT_TRANSITION_LEVELS(cmd,\n               input_texture.image, VK_REMAINING_MIP_LEVELS,\n               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, layout, 0,\n               VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,\n               VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_QUEUE_FAMILY_IGNORED,\n               VK_QUEUE_FAMILY_IGNORED);\n      input_texture.image = logical->get_image();\n      input_texture.view = logical->get_view();\n      input_texture.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;\n      input_texture.format = format;\n      input_texture.physical_width = 0;\n   }\n\n   update_history_info();',
+        'patches/series, 0111: all Slang samplers',
+    ),
+
 ]
 
 # Changes that are withdrawn rather than deleted, by marker.

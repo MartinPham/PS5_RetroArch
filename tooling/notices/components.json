@@ -429,6 +429,82 @@
         "url": "https://ftp.gnu.org/gnu/libmicrohttpd/libmicrohttpd-1.0.10.tar.gz"
       },
       "modifications": "Unmodified source; static HTTP-only build, following ps5-payload-dev/websrv. Build flags and source checksum in tools/build-webui-http.sh."
+    },
+    {
+      "id": "slang-shaders",
+      "name": "slang-shaders offline video assets",
+      "kind": "assets",
+      "artifacts": [
+        "shaders/shaders_slang/**"
+      ],
+      "licence": "Mixed; individual shader source headers and collection license files are preserved",
+      "copyright": [
+        "Upstream authors; attribution retained beside assets and in shader source headers"
+      ],
+      "texts": [
+        {
+          "from": ".deps/video-assets/slang-shaders-0b3ff0b240f82f4cb5e5d0117f8f2080e2764cf7/bezel/koko-aio/LICENSE",
+          "to": "GPL-3.0.txt"
+        },
+        {
+          "from": ".deps/video-assets/slang-shaders-0b3ff0b240f82f4cb5e5d0117f8f2080e2764cf7/crt/shaders/crt-royale/LICENSE.TXT",
+          "to": "crt-royale-LICENSE.txt"
+        }
+      ],
+      "source": {
+        "kind": "fixed",
+        "revision": "0b3ff0b240f82f4cb5e5d0117f8f2080e2764cf7",
+        "remote": "https://github.com/libretro/slang-shaders"
+      },
+      "modifications": "Exact path corrections and exclusions recorded in video-assets.json and tooling/video-assets/collections.json. Full source trees and individual notices accompany the assets."
+    },
+    {
+      "id": "common-overlays",
+      "name": "common-overlays offline video assets",
+      "kind": "assets",
+      "artifacts": [
+        "overlays/common/**"
+      ],
+      "licence": "CC-BY-4.0",
+      "copyright": [
+        "Upstream authors; attribution retained beside assets and in shader source headers"
+      ],
+      "texts": [
+        {
+          "from": ".deps/video-assets/common-overlays-42c21b99889468a8e77fd7f002229ec16e2f9fa2/COPYING",
+          "to": "LICENSE.txt"
+        }
+      ],
+      "source": {
+        "kind": "fixed",
+        "revision": "42c21b99889468a8e77fd7f002229ec16e2f9fa2",
+        "remote": "https://github.com/libretro/common-overlays"
+      },
+      "modifications": "Exact path corrections and exclusions recorded in video-assets.json and tooling/video-assets/collections.json. Full source trees and individual notices accompany the assets."
+    },
+    {
+      "id": "overlay-borders",
+      "name": "overlay-borders offline video assets",
+      "kind": "assets",
+      "artifacts": [
+        "overlays/borders/**"
+      ],
+      "licence": "MIT",
+      "copyright": [
+        "Upstream authors; attribution retained beside assets and in shader source headers"
+      ],
+      "texts": [
+        {
+          "from": ".deps/video-assets/overlay-borders-9aceca2dd514c589a57d40086557b804851aafcf/LICENSE",
+          "to": "LICENSE.txt"
+        }
+      ],
+      "source": {
+        "kind": "fixed",
+        "revision": "9aceca2dd514c589a57d40086557b804851aafcf",
+        "remote": "https://github.com/libretro/overlay-borders"
+      },
+      "modifications": "Exact path corrections and exclusions recorded in video-assets.json and tooling/video-assets/collections.json. Full source trees and individual notices accompany the assets."
     }
   ]
 }

@@ -19,10 +19,9 @@ A native RetroArch homebrew title for jailbroken PlayStation 5 consoles, made by
 content, browse your library and adjust settings from your phone or computer.
 The purple WebUI starts with RetroArch and closes with it.
 
-**Development status:** this README describes the current source build. The WebUI,
-guided settings and recent stability changes are development features; consult
-[release notes](https://github.com/mihawk-99/PS5_RetroArch/releases) for what a
-particular download includes. Compatibility varies by core and workload.
+**v0.6.0-alpha.6** brings the WebUI, guided settings, offline video effects and
+recent stability fixes together. This is an alpha release; compatibility varies
+by core and workload. See the [release notes](https://github.com/mihawk-99/PS5_RetroArch/releases/tag/v0.6.0-alpha.6) for the tested scope.
 
 ## Get started
 
@@ -130,6 +129,20 @@ To adopt these defaults on an existing installation, change the listed options
 in the WebUI or **Quick Menu → Core Options**. Reset Core Options resets every
 option for that core, so use individual controls if you want to keep other choices.
 
+## Shaders, filters and bezels
+
+Release builds bundle offline Slang shaders, Mega Bezel, koko-aio and
+standard overlays. Load GPU presets through **Quick Menu → Shaders**, choose a
+CPU filter in **Settings → Video**, or choose artwork in **Settings → On-Screen
+Display → On-Screen Overlay**. CPU filters apply to software-rendered cores;
+hardware-rendered cores use GPU shaders.
+
+The package retains the upstream collections and their notices. Exact versions,
+path corrections and the five upstream file exclusions are recorded in
+`video-assets.json`. Development overlay fixtures are excluded from both the
+staged title and its ZIP. Representative presets and overlay layouts have been tested on PS5. Bundling
+does not imply every preset is verified; see the release notes for limitations.
+
 ## Your files
 
 `/app0` is the running title’s mount. Over FTP, use your installed title folder,
@@ -148,6 +161,9 @@ usually `/data/homebrew/PPSA99169/`.
 | `config/webui.cfg` | Saved global WebUI preferences |
 | `config/<core>/` | Core options and RetroArch overrides |
 | `savefiles/` and `savestates/` | Save RAM and save states |
+| `shaders/shaders_slang/` | GPU presets, including Mega Bezel and koko-aio |
+| `filters/` | Built-in CPU filter configurations |
+| `overlays/` | Standard overlay artwork and configurations |
 | `radv-shader-cache/` | Reusable compiled graphics pipelines |
 
 **Saturn setup:** place `mpr-17933.bin` (US/Europe) or `sega_101.bin` (Japan)

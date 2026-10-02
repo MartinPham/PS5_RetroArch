@@ -40,7 +40,8 @@ void initialize(void *)
 {
     const char *directories[] = {"/app0/config",    "/app0/cores",          "/app0/content",
                                  "/app0/system",    "/app0/savefiles",      "/app0/savestates",
-                                 "/app0/playlists", "/app0/content/Saturn", "/app0/system/Saturn"};
+                                 "/app0/playlists", "/app0/content/Saturn", "/app0/system/Saturn",
+                                 "/app0/shaders",   "/app0/filters",        "/app0/overlays"};
     for (const char *path : directories)
     {
         if (mkdir(path, 0777) != 0 && errno != EEXIST)
@@ -94,6 +95,9 @@ void initialize(void *)
     set_directory(DEFAULT_DIR_SAVESTATE, "/app0/savestates");
     set_directory(DEFAULT_DIR_PLAYLIST, "/app0/playlists");
     set_directory(DEFAULT_DIR_ASSETS, "/app0/assets");
+    set_directory(DEFAULT_DIR_SHADER, "/app0/shaders");
+    set_directory(DEFAULT_DIR_VIDEO_FILTER, "/app0/filters");
+    set_directory(DEFAULT_DIR_OVERLAY, "/app0/overlays");
     set_directory(DEFAULT_DIR_LOGS, "/app0");
     std::fprintf(stderr, "frontend ps5: config=%s browser=/app0 cores=/app0/cores\n", saved_config);
     // Startup summary: known roots only; never log the user's file names.

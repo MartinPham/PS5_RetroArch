@@ -52,3 +52,6 @@ config.h
 # Local design reviews and generated comparisons; keep the extracted design tokens.
 .impeccable/*
 !.impeccable/design.json
+
+# Published release notes are part of the versioned release.
+!releases/*.md

@@ -62,10 +62,15 @@
 
 #include <input/input_driver.h>
 #include "content.h"
+#include "memory_status.h"
 #ifdef HAVE_MENU
 #include "command.h"
 #include "configuration.h"
 #include "core_option_manager.h"
+#if defined(HAVE_SLANG)
+#include "gfx/video_shader_parse.h"
+#include "menu/menu_shader.h"
+#endif
 #endif
 #include "gfx/video_driver.h"
 #include "retroarch_types.h"
@@ -85,6 +90,8 @@ struct ScePadVibrationParam
 
 extern "C"
 {
+    // Scoped to synchronous test capture; normal screenshots keep the viewport.
+    bool ps5_test_full_screenshot = false;
     /* The console's pad service. Declarations rather than the SDK's headers: this
      * payload SDK ships no header for these, and ../ProsperoLight declares the same
      * shapes, which the console accepted. */
@@ -229,8 +236,10 @@ enum class ScriptActionKind
     save_state,
     load_state,
     screenshot,
+    screenshot_full,
     mark,
     option,
+    effect,
     rumble_strong,
     rumble_weak,
 };
@@ -249,9 +258,9 @@ struct ScriptAction
     double at;
     bool done;
     ScriptActionKind kind;
-    int slot;       // SAVE_STATE and LOAD_STATE: the slot given, or -1 for the current one
-    char key[64];   // OPTION: the core option's key
-    char value[32]; // OPTION: the value to set, as the core lists it
+    int slot;        // SAVE_STATE and LOAD_STATE: the slot given, or -1 for the current one
+    char key[64];    // OPTION: the core option's key
+    char value[512]; // OPTION value, or EFFECT preset path
 };
 constexpr int action_capacity = 32;
 ScriptAction actions[action_capacity];
@@ -281,7 +290,7 @@ void load_script() noexcept
     std::FILE *file = std::fopen("/app0/pad-script.txt", "rb");
     if (file == nullptr)
         return;
-    char line[160];
+    char line[640];
     while (script_count < script_capacity && std::fgets(line, sizeof(line), file) != nullptr)
     {
         char *hash = std::strchr(line, '#');
@@ -302,6 +311,7 @@ void load_script() noexcept
                             {"SAVE_STATE", ScriptActionKind::save_state},
                             {"LOAD_STATE", ScriptActionKind::load_state},
                             {"SCREENSHOT", ScriptActionKind::screenshot},
+                            {"SCREENSHOT_FULL", ScriptActionKind::screenshot_full},
                             {"MARK", ScriptActionKind::mark},
                             {"RUMBLE_STRONG", ScriptActionKind::rumble_strong},
                             {"RUMBLE_WEAK", ScriptActionKind::rumble_weak}};
@@ -312,6 +322,15 @@ void load_script() noexcept
             ScriptAction option{at, false, ScriptActionKind::option, -1, {0}, {0}};
             if (std::sscanf(line, "%lf %*s %63s %31s", &at, option.key, option.value) == 3)
                 actions[action_count++] = option;
+            continue;
+        }
+        // Development scripts share the normal frontend shader/overlay APIs.
+        // EFFECT shader|overlay <absolute path or off>; permits switch stress.
+        if (std::strcmp(buttons, "EFFECT") == 0 && action_count < action_capacity)
+        {
+            ScriptAction effect{at, false, ScriptActionKind::effect, -1, {0}, {0}};
+            if (std::sscanf(line, "%lf %*s %63s %511[^\r\n]", &at, effect.key, effect.value) == 3)
+                actions[action_count++] = effect;
             continue;
         }
         bool is_action = false;
@@ -790,6 +809,76 @@ void run_script_actions() noexcept
         if (action.done || seconds < action.at)
             continue;
         action.done = true;
+        if (action.kind == ScriptActionKind::effect)
+        {
+            bool ok = false;
+#ifdef HAVE_MENU
+            settings_t *settings = config_get_ptr();
+            const bool off = std::strcmp(action.value, "off") == 0;
+#if defined(HAVE_SLANG)
+            if (std::strcmp(action.key, "shader") == 0)
+                ok = video_shader_apply_shader(settings, RARCH_SHADER_SLANG,
+                                               off ? "" : action.value, true);
+            if (std::strcmp(action.key, "save-shader") == 0)
+            {
+                auto_shader_type scope = SHADER_PRESET_CURRENT;
+                if (std::strcmp(action.value, "global") == 0)
+                    scope = SHADER_PRESET_GLOBAL;
+                else if (std::strcmp(action.value, "core") == 0)
+                    scope = SHADER_PRESET_CORE;
+                else if (std::strcmp(action.value, "directory") == 0)
+                    scope = SHADER_PRESET_PARENT;
+                else if (std::strcmp(action.value, "game") == 0)
+                    scope = SHADER_PRESET_GAME;
+                if (scope != SHADER_PRESET_CURRENT)
+                    ok = menu_shader_manager_save_auto_preset(
+                        menu_shader_get(), scope, settings->paths.directory_video_shader,
+                        settings->paths.directory_menu_config, false);
+            }
+            if (std::strcmp(action.key, "parameter") == 0)
+            {
+                char id[64] = {};
+                float value = 0;
+                video_shader_ctx_t driver{};
+                video_shader *menu = menu_shader_get();
+                if (std::sscanf(action.value, "%63s %f", id, &value) == 2 && menu &&
+                    video_shader_driver_get_current_shader(&driver) && driver.data)
+                {
+                    auto *shader = static_cast<video_shader *>(driver.data);
+                    for (unsigned i = 0; i < shader->num_parameters; ++i)
+                        if (std::strcmp(shader->parameters[i].id, id) == 0)
+                        {
+                            const auto &param = shader->parameters[i];
+                            if (!(value >= param.minimum && value <= param.maximum))
+                                break;
+                            shader->parameters[i].current = value;
+                            for (unsigned j = 0; j < menu->num_parameters; ++j)
+                                if (std::strcmp(menu->parameters[j].id, id) == 0)
+                                    menu->parameters[j].current = value;
+                            menu->flags |= SHDR_FLAG_MODIFIED;
+                            ok = true;
+                            break;
+                        }
+                }
+            }
+#endif
+#ifdef HAVE_OVERLAY
+            if (std::strcmp(action.key, "overlay") == 0)
+            {
+                settings->bools.input_overlay_enable = !off;
+                std::snprintf(settings->paths.path_overlay, sizeof(settings->paths.path_overlay),
+                              "%s", off ? "" : action.value);
+                ok =
+                    command_event(off ? CMD_EVENT_OVERLAY_UNLOAD : CMD_EVENT_OVERLAY_INIT, nullptr);
+            }
+#endif
+#endif
+            char note[640];
+            std::snprintf(note, sizeof(note), "input: EFFECT %s %s result=%d", action.key,
+                          action.value, ok);
+            ps5_input_trace(note);
+            continue;
+        }
         if (action.kind == ScriptActionKind::save_state ||
             action.kind == ScriptActionKind::load_state)
         {
@@ -813,17 +902,20 @@ void run_script_actions() noexcept
             ps5_input_trace(note);
             continue;
         }
-        if (action.kind == ScriptActionKind::screenshot)
+        if (action.kind == ScriptActionKind::screenshot ||
+            action.kind == ScriptActionKind::screenshot_full)
         {
             char path[64];
             std::snprintf(path, sizeof(path), "/app0/pad-shot-%d.png", ++screenshot_count);
 #ifdef HAVE_SCREENSHOTS
+            ps5_test_full_screenshot = action.kind == ScriptActionKind::screenshot_full;
             const video_driver_state_t *video_st = video_state_get_ptr();
             const bool ok =
                 take_screenshot(nullptr, path, false,
                                 video_st->frame_cache_data &&
                                     video_st->frame_cache_data == RETRO_HW_FRAME_BUFFER_VALID,
                                 true, true);
+            ps5_test_full_screenshot = false;
 #else
             const bool ok = false;
 #endif
@@ -876,6 +968,7 @@ void run_script_actions() noexcept
                 static_cast<double>(worst_ns) / 1e6,
                 static_cast<unsigned long long>(new_frames_slow.load(std::memory_order_relaxed)));
             ps5_input_trace(note);
+            ps5_memory_report("pad-mark", 0, 0);
             continue;
         }
         if (action.kind == ScriptActionKind::stop)
