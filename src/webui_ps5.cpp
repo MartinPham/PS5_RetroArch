@@ -1,0 +1,653 @@
+/* Copyright (C) 2026 Mihawk; SPDX-License-Identifier: GPL-3.0-or-later
+ * HTTP transport follows ps5-payload-dev/websrv: libmicrohttpd manages framing,
+ * partial bodies, timeouts and connections. Routes are restricted to RetroArch.
+ */
+#include "webui_ps5.h"
+#include <microhttpd.h>
+#include <algorithm>
+#include <arpa/inet.h>
+#include <cerrno>
+#include <climits>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <dirent.h>
+#include <fcntl.h>
+#include <map>
+#include <new>
+#include <netinet/in.h>
+#include <string>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/statvfs.h>
+#include <unistd.h>
+#include <vector>
+
+namespace
+{
+MHD_Daemon *web_daemon = nullptr;
+std::string root_path, token;
+unsigned short listen_port;
+constexpr uint64_t upload_limit = UINT64_C(64) * 1024 * 1024 * 1024;
+struct Setting
+{
+    const char *key;
+    const char *label;
+    const char *kind;
+    const char *initial;
+    int min, max;
+};
+const Setting settings[] = {
+    {"audio_volume", "Audio volume", "number", "0", -80, 12},
+    {"input_rumble_gain", "Rumble strength", "number", "100", 0, 100},
+    {"video_smooth", "Smooth image scaling", "bool", "false", 0, 0},
+    {"video_vsync", "Vertical sync", "bool", "true", 0, 0},
+    {"savestate_auto_save", "Save state when closing content", "bool", "false", 0, 0},
+    {"savestate_auto_load", "Load state when opening content", "bool", "false", 0, 0},
+    {"menu_show_advanced_settings", "Show advanced settings", "bool", "false", 0, 0},
+    {"menu_driver", "Console menu", "menu", "xmb", 0, 0},
+};
+struct Request
+{
+    int file = -1;
+    std::string temporary, destination, body;
+    uint64_t received = 0, expected = 0;
+    unsigned error = 0;
+    const char *message = "";
+    ~Request()
+    {
+        if (file >= 0)
+            close(file);
+        if (!temporary.empty())
+            unlink(temporary.c_str());
+    }
+};
+std::string quote(const std::string &text)
+{
+    std::string out = "\"";
+    for (unsigned char c : text)
+    {
+        if (c == '"' || c == '\\')
+        {
+            out += '\\';
+            out += c;
+        }
+        else if (c < 32)
+        {
+            char escape[7];
+            std::snprintf(escape, sizeof escape, "\\u%04x", c);
+            out += escape;
+        }
+        else
+            out += c;
+    }
+    return out + '"';
+}
+std::string read_file(const std::string &name, size_t limit)
+{
+    std::string out;
+    int fd = open(name.c_str(), O_RDONLY | O_NOFOLLOW);
+    if (fd < 0)
+        return out;
+    char buffer[4096];
+    while (out.size() < limit)
+    {
+        ssize_t n = read(fd, buffer, std::min(sizeof buffer, limit - out.size()));
+        if (n <= 0)
+            break;
+        out.append(buffer, size_t(n));
+    }
+    close(fd);
+    return out;
+}
+std::string nonce()
+{
+    unsigned char bytes[16];
+    arc4random_buf(bytes, sizeof bytes);
+    std::string out;
+    for (auto b : bytes)
+    {
+        char hex[3];
+        std::snprintf(hex, sizeof hex, "%02x", b);
+        out += hex;
+    }
+    return out;
+}
+MHD_Result respond(MHD_Connection *c, unsigned status, const std::string &body,
+                   const char *type = "application/json")
+{
+    auto *response = MHD_create_response_from_buffer(body.size(), const_cast<char *>(body.data()),
+                                                     MHD_RESPMEM_MUST_COPY);
+    if (!response)
+        return MHD_NO;
+    MHD_add_response_header(response, "Content-Type", type);
+    MHD_add_response_header(response, "Cache-Control", "no-store");
+    MHD_add_response_header(response, "X-Content-Type-Options", "nosniff");
+    MHD_add_response_header(response, "Referrer-Policy", "no-referrer");
+    MHD_add_response_header(response, "Content-Security-Policy",
+                            "default-src 'self'; connect-src 'self' https://api.github.com; "
+                            "img-src 'self'; style-src 'self'; script-src 'self'; font-src 'self'; "
+                            "frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
+    auto result = MHD_queue_response(c, status, response);
+    MHD_destroy_response(response);
+    return result;
+}
+MHD_Result error(MHD_Connection *c, unsigned status, const char *message)
+{
+    return respond(c, status, "{\"error\":" + quote(message) + "}");
+}
+const char *arg(MHD_Connection *c, const char *key)
+{
+    const char *v = MHD_lookup_connection_value(c, MHD_GET_ARGUMENT_KIND, key);
+    return v ? v : "";
+}
+bool local_origin(MHD_Connection *c)
+{
+    const char *host = MHD_lookup_connection_value(c, MHD_HEADER_KIND, "Host");
+    if (!host)
+        return false;
+    const auto *info = MHD_get_connection_info(c, MHD_CONNECTION_INFO_CONNECTION_FD);
+    if (!info)
+        return false;
+    sockaddr_in addr{};
+    socklen_t size = sizeof addr;
+    if (getsockname(info->connect_fd, reinterpret_cast<sockaddr *>(&addr), &size) != 0 ||
+        addr.sin_family != AF_INET)
+        return false;
+    char ip[INET_ADDRSTRLEN];
+    if (!inet_ntop(AF_INET, &addr.sin_addr, ip, sizeof ip))
+        return false;
+    const std::string expected = std::string(ip) + ":" + std::to_string(listen_port);
+    if (host != expected)
+        return false; // Literal console address also prevents DNS rebinding.
+    const char *origin = MHD_lookup_connection_value(c, MHD_HEADER_KIND, "Origin");
+    return !origin || std::string(origin) == "http://" + expected;
+}
+bool valid_path(const std::string &relative)
+{
+    if (relative.size() > 1024 || (!relative.empty() && relative.front() == '/'))
+        return false;
+    size_t start = 0;
+    while (start < relative.size())
+    {
+        const auto end = relative.find('/', start);
+        const auto part = relative.substr(start, end - start);
+        if (part.empty() || part.front() == '.' || part.size() > 255)
+            return false;
+        for (unsigned char c : part)
+            if (c < 32 || c == 127 || c == '\\' || c == ':')
+                return false;
+        if (end == std::string::npos)
+            return true;
+        start = end + 1;
+        if (start == relative.size())
+            return false;
+    }
+    return true;
+}
+// A title cannot use lstat reliably. Opening without following links preserves
+// the path boundary and lets fstat obtain the native file type and size.
+int content_stat(const char *path, struct stat *st)
+{
+    int fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK);
+    if (fd < 0)
+        return -1;
+    int result = fstat(fd, st);
+    int saved_errno = errno;
+    close(fd);
+    errno = saved_errno;
+    return result;
+}
+bool storage_space(struct statvfs &storage)
+{
+#ifdef __PROSPERO__
+    // The SDK's statvfs compatibility answer is synthetic, not free disk space.
+    (void)storage;
+    return false;
+#else
+    return statvfs((root_path + "/content").c_str(), &storage) == 0;
+#endif
+}
+// Refuse symlinks at every component. Only files below content/ are exposed.
+bool content_path(const std::string &relative, std::string &absolute, bool new_leaf = false)
+{
+    if (!valid_path(relative))
+        return false;
+    absolute = root_path + "/content";
+    struct stat st{};
+    if (content_stat(absolute.c_str(), &st) || !S_ISDIR(st.st_mode))
+        return false;
+    size_t start = 0;
+    while (start < relative.size())
+    {
+        auto end = relative.find('/', start);
+        absolute += '/' + relative.substr(start, end - start);
+        if (end == std::string::npos && new_leaf)
+            return true;
+        if (content_stat(absolute.c_str(), &st) || S_ISLNK(st.st_mode))
+            return false;
+        if (end != std::string::npos && !S_ISDIR(st.st_mode))
+            return false;
+        if (end == std::string::npos)
+            break;
+        start = end + 1;
+    }
+    return true;
+}
+std::string trim(std::string s)
+{
+    auto first = s.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos)
+        return "";
+    s = s.substr(first, s.find_last_not_of(" \t\r\n") - first + 1);
+    if (s.size() >= 2 && s.front() == '"' && s.back() == '"')
+        s = s.substr(1, s.size() - 2);
+    return s;
+}
+std::map<std::string, std::string> config_values(bool overrides_only = false)
+{
+    std::map<std::string, std::string> values;
+    if (!overrides_only)
+        for (auto &s : settings)
+            values[s.key] = s.initial;
+    for (const auto *file : {"retroarch.cfg", "webui.cfg"})
+    {
+        if (overrides_only && std::strcmp(file, "webui.cfg") != 0)
+            continue;
+        std::string text = read_file(root_path + "/config/" + file, 1024 * 1024);
+        size_t start = 0;
+        while (start < text.size())
+        {
+            auto end = text.find('\n', start);
+            auto line = text.substr(start, end - start);
+            auto eq = line.find('=');
+            if (eq != std::string::npos)
+            {
+                auto key = trim(line.substr(0, eq));
+                for (const auto &s : settings)
+                    if (key == s.key)
+                        values[key] = trim(line.substr(eq + 1));
+            }
+            if (end == std::string::npos)
+                break;
+            start = end + 1;
+        }
+    }
+    return values;
+}
+MHD_Result get_settings(MHD_Connection *c)
+{
+    auto values = config_values();
+    std::string out = "{\"settings\":[";
+    for (const auto &s : settings)
+    {
+        if (out.back() != '[')
+            out += ',';
+        out += "{\"key\":" + quote(s.key) + ",\"label\":" + quote(s.label) +
+               ",\"kind\":" + quote(s.kind) + ",\"value\":" + quote(values[s.key]) +
+               ",\"min\":" + std::to_string(s.min) + ",\"max\":" + std::to_string(s.max) + '}';
+    }
+    return respond(c, 200, out + "],\"apply\":\"next_launch\"}");
+}
+MHD_Result save_settings(MHD_Connection *c, const std::string &body)
+{
+    // A bounded, plain key=value body: no arbitrary config paths or keys.
+    auto values = config_values(true);
+    std::string text;
+    size_t start = 0;
+    unsigned changed = 0;
+    while (start < body.size())
+    {
+        auto end = body.find('\n', start);
+        auto line = body.substr(start, end - start);
+        auto eq = line.find('=');
+        if (eq == std::string::npos)
+            return error(c, 400, "Invalid settings. Reload the page and try again.");
+        auto key = line.substr(0, eq), value = line.substr(eq + 1);
+        const Setting *setting = nullptr;
+        for (auto &s : settings)
+            if (key == s.key)
+                setting = &s;
+        if (!setting)
+            return error(c, 400, "This setting cannot be changed through the WebUI.");
+        bool valid = false;
+        if (std::strcmp(setting->kind, "bool") == 0)
+            valid = value == "true" || value == "false";
+        else if (std::strcmp(setting->kind, "menu") == 0)
+            valid = value == "xmb" || value == "rgui";
+        else
+        {
+            char *tail = nullptr;
+            errno = 0;
+            long n = std::strtol(value.c_str(), &tail, 10);
+            valid = !value.empty() && !errno && !*tail && n >= setting->min && n <= setting->max;
+        }
+        if (!valid)
+            return error(c, 400, "A setting is outside its supported range.");
+        values[key] = value;
+        ++changed;
+        if (end == std::string::npos)
+            break;
+        start = end + 1;
+    }
+    if (!changed)
+        return error(c, 400, "No settings were provided.");
+    // Persist only whitelisted fields; config_save_on_exit cannot overwrite this file.
+    for (const auto &value : values)
+        text += value.first + " = " + quote(value.second) + "\n";
+    std::string temp = root_path + "/config/.webui-" + nonce();
+    int fd = open(temp.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
+    if (fd < 0)
+        return error(c, 500, "Settings could not be saved. Check console storage.");
+    ssize_t n = write(fd, text.data(), text.size());
+    bool ok = n == ssize_t(text.size()) && fsync(fd) == 0;
+    close(fd);
+    if (ok)
+        ok = rename(temp.c_str(), (root_path + "/config/webui.cfg").c_str()) == 0;
+    unlink(temp.c_str());
+    return ok ? respond(c, 200, "{\"saved\":true,\"apply\":\"next_launch\"}")
+              : error(c, 500, "Settings could not be saved. Check console storage.");
+}
+MHD_Result list_content(MHD_Connection *c)
+{
+    const std::string relative = arg(c, "path");
+    std::string path;
+    if (!content_path(relative, path))
+        return error(c, 400, "Choose a folder inside RetroArch content.");
+    DIR *dir = opendir(path.c_str());
+    if (!dir)
+        return error(c, 404, "This folder is not available.");
+    struct Entry
+    {
+        std::string name;
+        bool folder;
+        uint64_t size;
+    };
+    std::vector<Entry> entries;
+    bool truncated = false;
+    while (auto *item = readdir(dir))
+    {
+        std::string name = item->d_name;
+        if (!valid_path(name) || name.find('/') != std::string::npos)
+            continue;
+        struct stat st{};
+        if (content_stat((path + '/' + name).c_str(), &st) ||
+            (!S_ISDIR(st.st_mode) && !S_ISREG(st.st_mode)))
+            continue;
+        if (entries.size() >= 10000)
+        {
+            truncated = true;
+            break;
+        }
+        entries.push_back({name, S_ISDIR(st.st_mode), uint64_t(st.st_size)});
+    }
+    closedir(dir);
+    std::sort(entries.begin(), entries.end(), [](const Entry &a, const Entry &b)
+              { return a.folder != b.folder ? a.folder > b.folder : a.name < b.name; });
+    std::string out = "{\"path\":" + quote(relative) + ",\"entries\":[";
+    for (const auto &e : entries)
+    {
+        if (out.back() != '[')
+            out += ',';
+        out += "{\"name\":" + quote(e.name) + ",\"directory\":" + (e.folder ? "true" : "false") +
+               ",\"size\":" + std::to_string(e.size) + '}';
+    }
+    return respond(c, 200, out + "],\"truncated\":" + (truncated ? "true" : "false") + '}');
+}
+MHD_Result download(MHD_Connection *c)
+{
+    std::string path;
+    if (!content_path(arg(c, "path"), path))
+        return error(c, 400, "Invalid content path.");
+    int fd = open(path.c_str(), O_RDONLY | O_NOFOLLOW);
+    struct stat st{};
+    if (fd < 0)
+        return error(c, 404, "This file is not available.");
+    if (fstat(fd, &st) || !S_ISREG(st.st_mode))
+    {
+        close(fd);
+        return error(c, 400, "Choose a file to download.");
+    }
+    auto *response = MHD_create_response_from_fd64(st.st_size, fd);
+    if (!response)
+    {
+        close(fd);
+        return MHD_NO;
+    }
+    const std::string disposition =
+        "attachment; filename=" + quote(path.substr(path.find_last_of('/') + 1));
+    MHD_add_response_header(response, "Content-Disposition", disposition.c_str());
+    MHD_add_response_header(response, "Content-Type", "application/octet-stream");
+    MHD_add_response_header(response, "X-Content-Type-Options", "nosniff");
+    MHD_add_response_header(response, "Cache-Control", "no-store");
+    auto result = MHD_queue_response(c, 200, response);
+    MHD_destroy_response(response);
+    return result;
+}
+void prepare_upload(MHD_Connection *c, Request &r)
+{
+    auto fail = [&](unsigned code, const char *message)
+    {
+        r.error = code;
+        r.message = message;
+    };
+    const std::string relative = arg(c, "path");
+    if (relative.empty() || !content_path(relative, r.destination, true))
+    {
+        fail(400, "Choose a valid content folder and filename.");
+        return;
+    }
+    struct stat st{};
+    if (content_stat(r.destination.c_str(), &st) == 0 || errno != ENOENT)
+    {
+        fail(409, "A file with this name already exists. Rename your file first.");
+        return;
+    }
+    const char *length = MHD_lookup_connection_value(c, MHD_HEADER_KIND, "Content-Length");
+    char *end = nullptr;
+    errno = 0;
+    if (!length || !*length || *length == '-')
+    {
+        fail(411, "A file size is required.");
+        return;
+    }
+    r.expected = std::strtoull(length, &end, 10);
+    if (errno || *end || r.expected > upload_limit)
+    {
+        fail(413, "Files must be 64 GiB or smaller.");
+        return;
+    }
+    struct statvfs storage{};
+    if (storage_space(storage) && r.expected > uint64_t(storage.f_bavail) * storage.f_frsize)
+    {
+        fail(507, "There is not enough free space on the console.");
+        return;
+    }
+    r.temporary =
+        r.destination.substr(0, r.destination.find_last_of('/') + 1) + ".upload-" + nonce();
+    r.file = open(r.temporary.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0644);
+    if (r.file < 0)
+    {
+        fail(507, "Could not create the upload. Check console storage.");
+        return;
+    }
+}
+MHD_Result route(MHD_Connection *c, const std::string &url, const std::string &method, Request &r)
+{
+    if (method == "GET" && url == "/api/status")
+    {
+        struct statvfs fs{};
+        bool space_known = storage_space(fs);
+        return respond(
+            c, 200,
+            "{\"name\":\"RetroArch\",\"port\":" + std::to_string(listen_port) +
+                ",\"token\":" + quote(token) + ",\"uploadLimit\":" + std::to_string(upload_limit) +
+                ",\"freeBytes\":" +
+                (space_known ? std::to_string(uint64_t(fs.f_bavail) * fs.f_frsize) : "null") + '}');
+    }
+    if (method == "GET" && url == "/api/content")
+        return list_content(c);
+    if (method == "GET" && url == "/api/download")
+        return download(c);
+    if (method == "GET" && url == "/api/settings")
+        return get_settings(c);
+    if (method == "POST" && url == "/api/settings")
+        return save_settings(c, r.body);
+    if (method == "POST" && url == "/api/folder")
+    {
+        std::string path;
+        const std::string relative = arg(c, "path");
+        if (relative.empty() || !content_path(relative, path, true))
+            return error(c, 400, "Enter a folder name inside content.");
+        if (mkdir(path.c_str(), 0755))
+            return error(c, errno == EEXIST ? 409 : 500,
+                         "This folder already exists or could not be created.");
+        return respond(c, 201, "{\"created\":true}");
+    }
+    if (method == "PUT" && url == "/api/upload")
+    {
+        if (r.error)
+            return error(c, r.error, r.message);
+        if (r.received != r.expected)
+            return error(c, 400, "The upload was incomplete. Try again.");
+        if (fsync(r.file))
+            return error(c, 507, "Could not finish writing the file. Check console storage.");
+        close(r.file);
+        r.file = -1;
+        struct stat st{};
+        // All HTTP handlers run on one MHD thread; concurrent uploads cannot replace a completed
+        // file.
+        if (content_stat(r.destination.c_str(), &st) == 0 || errno != ENOENT)
+            return error(c, 409, "A file with this name already exists. Rename your file first.");
+        if (rename(r.temporary.c_str(), r.destination.c_str()))
+            return error(c, 500, "Could not finish the upload.");
+        r.temporary.clear();
+        return respond(c, 201, "{\"uploaded\":true,\"bytes\":" + std::to_string(r.received) + '}');
+    }
+    if (method != "GET")
+        return error(c, 405, "This action is not supported.");
+    // Only shipped assets are reachable; no filesystem passthrough.
+    const std::map<std::string, const char *> assets = {
+        {"/", "text/html; charset=utf-8"},       {"/index.html", "text/html; charset=utf-8"},
+        {"/app.css", "text/css; charset=utf-8"}, {"/app.js", "text/javascript; charset=utf-8"},
+        {"/version.json", "application/json"},   {"/assets/mihawk.png", "image/png"},
+        {"/assets/ui.woff2", "font/woff2"},      {"/assets/retroarch.svg", "image/svg+xml"}};
+    auto asset = assets.find(url);
+    if (asset == assets.end())
+        return error(c, 404, "This page was not found.");
+    auto content =
+        read_file(root_path + "/webui" + (url == "/" ? "/index.html" : url), 2 * 1024 * 1024);
+    if (content.empty())
+        return error(c, 404, "WebUI assets are missing. Reinstall the complete RetroArch package.");
+    return respond(c, 200, content, asset->second);
+}
+MHD_Result handle(void *, MHD_Connection *c, const char *url, const char *method, const char *,
+                  const char *data, size_t *size, void **context)
+{
+    if (!*context)
+    {
+        auto *r = new (std::nothrow) Request;
+        if (!r)
+            return MHD_NO;
+        *context = r;
+        if (!local_origin(c))
+            return error(c, 403, "Open this page using the console IP address and port.");
+        const bool write_request = std::strcmp(method, "GET") != 0;
+        const char *provided = MHD_lookup_connection_value(c, MHD_HEADER_KIND, "X-RetroArch-Token");
+        if (write_request && (!provided || token != provided))
+            return error(c, 403, "Your session expired. Reload the page and try again.");
+        if (std::strcmp(method, "PUT") == 0 && std::strcmp(url, "/api/upload") == 0)
+        {
+            prepare_upload(c, *r);
+            if (r->error)
+                return error(c, r->error, r->message);
+        }
+        else
+        {
+            const char *length = MHD_lookup_connection_value(c, MHD_HEADER_KIND, "Content-Length");
+            if (length && std::strtoull(length, nullptr, 10) > 16384)
+                return error(c, 413, "This request is too large.");
+        }
+        return MHD_YES;
+    }
+    auto &r = *static_cast<Request *>(*context);
+    if (*size)
+    {
+        if (r.file >= 0 && !r.error)
+        {
+            if (*size > r.expected - r.received)
+            {
+                r.error = 413;
+                r.message = "Upload exceeded its declared file size.";
+            }
+            else
+            {
+                size_t offset = 0;
+                while (offset < *size)
+                {
+                    ssize_t n = write(r.file, data + offset, *size - offset);
+                    if (n < 0 && errno == EINTR)
+                        continue;
+                    if (n <= 0)
+                    {
+                        r.error = 507;
+                        r.message = "The console could not write the upload. Check free space.";
+                        break;
+                    }
+                    offset += size_t(n);
+                    r.received += uint64_t(n);
+                }
+            }
+        }
+        else if (!r.error)
+        {
+            if (*size > 16384 - r.body.size())
+            {
+                r.error = 413;
+                r.message = "This request is too large.";
+            }
+            else
+                r.body.append(data, *size);
+        }
+        *size = 0;
+        // MHD allows a response before receiving the body or after consuming it,
+        // never during a body callback. Drain failed streams without buffering.
+        return MHD_YES;
+    }
+    if (r.error)
+        return error(c, r.error, r.message);
+    return route(c, url, method, r);
+}
+void completed(void *, MHD_Connection *, void **context, MHD_RequestTerminationCode)
+{
+    delete static_cast<Request *>(*context);
+    *context = nullptr;
+}
+} // namespace
+bool ps5_webui_start(const char *root, unsigned short port)
+{
+    if (web_daemon)
+        return true;
+    root_path = root;
+    listen_port = port;
+    token = nonce();
+    mkdir((root_path + "/content").c_str(), 0755);
+    web_daemon = MHD_start_daemon(
+        MHD_USE_INTERNAL_POLLING_THREAD | MHD_USE_ITC | MHD_USE_ERROR_LOG, port, nullptr, nullptr,
+        handle, nullptr, MHD_OPTION_CONNECTION_LIMIT, unsigned(8), MHD_OPTION_CONNECTION_TIMEOUT,
+        unsigned(30), MHD_OPTION_CONNECTION_MEMORY_LIMIT, size_t(65536),
+        MHD_OPTION_THREAD_STACK_SIZE, size_t(256 * 1024), MHD_OPTION_NOTIFY_COMPLETED, completed,
+        nullptr, MHD_OPTION_END);
+    std::fprintf(stderr, "webui: %s port=%u\n", web_daemon ? "listening" : "unavailable", port);
+    return web_daemon != nullptr;
+}
+void ps5_webui_stop()
+{
+    if (web_daemon)
+    {
+        MHD_stop_daemon(web_daemon);
+        web_daemon = nullptr;
+        std::fprintf(stderr, "webui: stopped\n");
+    }
+}

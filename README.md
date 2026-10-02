@@ -48,6 +48,7 @@ ps5vk, the project's first driver.
 - [Roadmap](#roadmap)
 - [Build from source](#build-from-source)
 - [Install and file locations](#install-and-file-locations)
+- [WebUI](#webui)
 - [Testing and troubleshooting](#testing-and-troubleshooting)
 - [Documentation](#documentation)
 - [Authors and acknowledgements](#authors-and-acknowledgements)
@@ -248,7 +249,7 @@ in this port, even if upstream RetroArch already offers the feature.**
 - ❌ Save RAM and save-state persistence verified across restarts and core changes.
 - ❌ Core-option persistence and per-game/per-core overrides fully validated.
 - ❌ BIOS/system-file coverage, disc swapping and multi-disc acceptance tests.
-- ❌ RetroAchievements and netplay; networking is disabled in the current frontend build.
+- ❌ RetroAchievements and netplay; RetroArch’s netplay and achievement networking remain disabled; the separate local WebUI service is available.
 - ❌ User Slang shader presets and multipass effects validated on PS5_Vulkan.
 - ✅ 120 Hz output where the display offers it, with a 60 Hz fallback chosen by measuring the refresh.
 - ❌ No core losing speed while a shader compiles. On RADV (Alpha 5), PPSSPP's compiles on its own threads no longer cost it speed, and a game's second start reads its pipelines from the cache; Dolphin's first start of a game still compiles its ubershaders at a cost (see the release notes).
@@ -441,6 +442,41 @@ removal; `--clean` removes the entire title folder.
 `tools/deploy-title.py` publishes a built `dist/PPSA99169/` over FTP and reads
 every file back; console details belong in the ignored `.env`, based on
 `.env.example`.
+
+## WebUI
+
+Start RetroArch, then open **`http://<console-IP>:6769`** in a browser on the
+same network. The WebUI starts automatically and stops when RetroArch exits.
+It uses local HTML, CSS, JavaScript, fonts and artwork; only the GitHub release
+check needs internet access. This feature is in the source build and will be
+included in the next release.
+
+- **Overview:** release status, release notes, upload destination, recent
+  transfers and quick settings. Published builds compare their tag against
+  this repository’s releases, including alpha releases. Development builds
+  identify themselves without claiming to be up to date. “View repository”
+  opens GitHub; updates are not installed automatically.
+- **Content:** browse the title’s `content/` folder, create subfolders, upload
+  files by dropping them or choosing Browse files, and download existing files.
+  Uploads stream to storage, support cancellation, and refuse existing names.
+  The per-file limit is 64 GiB. Free space is not reported on PS5 because its
+  compatibility API does not provide a measured value.
+- **Transfers:** progress and results from the current browser session.
+  Downloads are handled by the browser’s download manager.
+- **Settings:** volume, rumble strength, scaling, vertical sync, automatic
+  states, advanced settings visibility and the console menu. Saved changes
+  apply the next time RetroArch starts. WebUI light/dark appearance applies
+  immediately and is remembered only in that browser.
+
+Browser changes are saved separately in `config/webui.cfg`; explicitly supplied
+launch overrides take precedence. Uploads are confined to `content/`, and the
+service does not expose arbitrary console paths. This is a local-network HTTP
+service without a login: use it on a trusted network and do not forward port
+6769 to the internet.
+
+The purple layout and discreet creator portrait are made for this project.
+The HTTP transport uses GNU libmicrohttpd, following
+[ps5-payload-dev/websrv](https://github.com/ps5-payload-dev/websrv).
 
 ## Testing and troubleshooting
 

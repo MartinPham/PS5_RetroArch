@@ -48,3 +48,7 @@ config.h
 # is the one that is committed.
 *.md
 !/README.md
+
+# Local design reviews and generated comparisons; keep the extracted design tokens.
+.impeccable/*
+!.impeccable/design.json
