@@ -34,6 +34,10 @@ from pathlib import Path
 
 # (file, anchor, inserted-before-anchor, already-present-marker)
 EDITS = [
+    ('runloop.c', 'static core_option_manager_t *runloop_init_core_options(\n', '/* patches/series, 0105: snapshot core descriptions for the WebUI. */\nextern void ps5_webui_core_options(const char *, const struct retro_core_options_v2 *);\nextern void ps5_webui_core_variables(const char *, const struct retro_variable *);\n\nstatic core_option_manager_t *runloop_init_core_options(\n', 'patches/series, 0105: snapshot'),
+    ('runloop.c', '   if (!string_is_empty(options_path))\n      return core_option_manager_new(options_path,', '   /* patches/series, 0105: v1/v2 metadata on the emulator thread. */\n   ps5_webui_core_options(runloop_state.system.info.library_name, options_v2);\n   if (!string_is_empty(options_path))\n      return core_option_manager_new(options_path,', 'patches/series, 0105: v1/v2'),
+    ('runloop.c', '   if (!string_is_empty(options_path))\n      return core_option_manager_new_vars(options_path, src_options_path, vars);', '   /* patches/series, 0105: legacy choices on the emulator thread. */\n   ps5_webui_core_variables(runloop_state.system.info.library_name, vars);\n   if (!string_is_empty(options_path))\n      return core_option_manager_new_vars(options_path, src_options_path, vars);', 'patches/series, 0105: legacy'),
+
     (
         "runloop.c",
         "bool core_unserialize(retro_ctx_serialize_info_t *info)\n{",

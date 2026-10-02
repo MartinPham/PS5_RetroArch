@@ -3,6 +3,7 @@
  * partial bodies, timeouts and connections. Routes are restricted to RetroArch.
  */
 #include "webui_ps5.h"
+#include "../vendor/retroarch/libretro-common/include/libretro.h"
 #include <microhttpd.h>
 #include <algorithm>
 #include <arpa/inet.h>
@@ -254,10 +255,9 @@ bool setting_key(const std::string &key)
                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-.") ==
                std::string::npos;
 }
-Config read_config(const std::string &path)
+Config parse_config(const std::string &text)
 {
     Config values;
-    std::string text = read_file(path, 2 * 1024 * 1024);
     size_t start = 0;
     while (start < text.size())
     {
@@ -276,14 +276,17 @@ Config read_config(const std::string &path)
     }
     return values;
 }
+Config read_config(const std::string &path)
+{
+    return parse_config(read_file(path, 2 * 1024 * 1024));
+}
 void overlay(Config &to, const Config &from)
 {
     for (const auto &entry : from)
         to[entry.first] = entry.second;
 }
-bool write_config(const std::string &path, const Config &values)
+bool write_config(const std::string &path, const Config &values, std::string text = {})
 {
-    std::string text;
     for (const auto &entry : values)
         text += entry.first + " = \"" + entry.second + "\"\n";
     const std::string temporary = path + ".webui-" + nonce();
@@ -307,9 +310,25 @@ bool write_config(const std::string &path, const Config &values)
     unlink(temporary.c_str());
     return ok;
 }
-std::vector<std::string> core_profiles()
+// Only catalogs whose core binary is installed participate in the profile list.
+std::vector<std::string> installed_cores()
 {
     std::vector<std::string> cores;
+    for (const auto &entry : read_config(root_path + "/webui/core-metadata/index.cfg"))
+    {
+        struct stat st{};
+        if (!valid_path(entry.first) || entry.first.find('/') != std::string::npos ||
+            !valid_path(entry.second) || entry.second.find('/') != std::string::npos)
+            continue;
+        if (!content_stat((root_path + "/cores/" + entry.first).c_str(), &st) &&
+            S_ISREG(st.st_mode))
+            cores.push_back(entry.second);
+    }
+    return cores;
+}
+std::vector<std::string> core_profiles()
+{
+    auto cores = installed_cores();
     DIR *dir = opendir((root_path + "/config").c_str());
     if (!dir)
         return cores;
@@ -331,6 +350,7 @@ std::vector<std::string> core_profiles()
     }
     closedir(dir);
     std::sort(cores.begin(), cores.end());
+    cores.erase(std::unique(cores.begin(), cores.end()), cores.end());
     return cores;
 }
 Config global_values()
@@ -350,6 +370,26 @@ std::string revision(const Config &values)
         for (unsigned char c : entry.first + '=' + entry.second + '\n')
             hash = (hash ^ c) * UINT64_C(1099511628211);
     return std::to_string(hash);
+}
+std::string catalog_revision(const std::string &core)
+{
+    // Catalogs include the staged core's binary hash, covering dynamic options
+    // even when its static option table has not changed in a new release.
+    return revision({{"catalog", read_file(root_path + "/webui/core-metadata/" + core + ".json",
+                                           2 * 1024 * 1024)}});
+}
+std::string runtime_metadata(const std::string &core, const char *extension)
+{
+    const std::string folder = root_path + "/config/webui-metadata";
+    struct stat st{};
+    if (content_stat(folder.c_str(), &st) || !S_ISDIR(st.st_mode))
+        return {};
+    auto text = read_file(folder + '/' + core + extension, 2 * 1024 * 1024);
+    const auto tag = catalog_revision(core);
+    const auto prefix = std::strcmp(extension, ".json") == 0
+                            ? "{\"catalogRevision\":" + quote(tag) + ','
+                            : "# catalog-revision: " + tag + '\n';
+    return text.compare(0, prefix.size(), prefix) == 0 ? text : std::string();
 }
 const char *value_kind(const std::string &value)
 {
@@ -394,12 +434,13 @@ MHD_Result config_editor(MHD_Connection *c, const std::string &method, const std
     {
         auto cores = core_profiles();
         if (std::find(cores.begin(), cores.end(), core) == cores.end())
-            return error(
-                c, 404,
-                "Open and close content with this core once, then refresh its saved profile.");
+            return error(c, 404, "This core is not installed and has no saved profile.");
         std::string ext = options ? ".opt" : ".cfg";
         if (options)
-            baseline.clear();
+        {
+            baseline = parse_config(runtime_metadata(core, ".opt"));
+            overlay(baseline, read_config(root_path + "/webui/core-metadata/" + core + ".opt"));
+        }
         overlay(baseline, read_config(root_path + "/config/" + core + '/' + core + ext));
         path = root_path + "/config/webui-cores/" + core + ext;
     }
@@ -476,13 +517,36 @@ void apply_core_settings()
             auto saved = read_config(root_path + "/config/webui-cores/" + core + ext);
             if (saved.empty())
                 continue;
-            std::string destination = root_path + "/config/" + core + '/' + core + ext;
+            const std::string folder = root_path + "/config/" + core;
+            mkdir(folder.c_str(), 0755);
+            struct stat st{};
+            if (content_stat(folder.c_str(), &st) || !S_ISDIR(st.st_mode))
+                continue;
+            std::string destination = folder + '/' + core + ext;
             auto values = read_config(destination);
             overlay(values, saved);
             if (!write_config(destination, values))
                 std::fprintf(stderr, "webui: could not apply saved core settings\n");
-            else if (unlink((root_path + "/config/webui-cores/" + core + ext).c_str()))
-                std::fprintf(stderr, "webui: could not clear applied core settings\n");
+            else
+            {
+                // These two ports retire pre-profile option files on first use.
+                // A deliberate WebUI edit is already a user profile: do not let
+                // that one-time migration rename it away when the core starts.
+                if (std::strcmp(ext, ".opt") == 0 && (core == "PPSSPP" || core == "dolphin-emu"))
+                {
+                    const std::string marker = folder + "/ps5-default-profile-v1";
+                    int fd = open(marker.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
+                    if (fd >= 0)
+                        close(fd);
+                    else if (errno != EEXIST)
+                    {
+                        std::fprintf(stderr, "webui: could not preserve first-use core profile\n");
+                        continue; // Keep the pending edit for a later retry.
+                    }
+                }
+                if (unlink((root_path + "/config/webui-cores/" + core + ext).c_str()))
+                    std::fprintf(stderr, "webui: could not clear applied core settings\n");
+            }
         }
 }
 Config config_values(bool overrides_only = false)
@@ -692,6 +756,21 @@ MHD_Result route(MHD_Connection *c, const std::string &url, const std::string &m
         return list_content(c);
     if (method == "GET" && url == "/api/download")
         return download(c);
+    if (url == "/api/core-metadata" && method == "GET")
+    {
+        const char *name = MHD_lookup_connection_value(c, MHD_GET_ARGUMENT_KIND, "core");
+        const std::string core = name ? name : "";
+        if (!valid_path(core) || core.find('/') != std::string::npos)
+            return error(c, 400, "Choose a core profile.");
+        const std::string empty = "{\"categories\":[],\"settings\":[]}";
+        auto bundled =
+            read_file(root_path + "/webui/core-metadata/" + core + ".json", 2 * 1024 * 1024);
+        auto runtime = runtime_metadata(core, ".json");
+        // Keep bundled options when a game's runtime table exposes only a subset.
+        return respond(c, 200,
+                       "{\"bundled\":" + (bundled.empty() ? empty : bundled) +
+                           ",\"runtime\":" + (runtime.empty() ? empty : runtime) + '}');
+    }
     if (url == "/api/config")
         return config_editor(c, method, r.body);
     if (method == "GET" && url == "/api/cores")
@@ -744,10 +823,15 @@ MHD_Result route(MHD_Connection *c, const std::string &url, const std::string &m
         return error(c, 405, "This action is not supported.");
     // Only shipped assets are reachable; no filesystem passthrough.
     const std::map<std::string, const char *> assets = {
-        {"/", "text/html; charset=utf-8"},       {"/index.html", "text/html; charset=utf-8"},
-        {"/app.css", "text/css; charset=utf-8"}, {"/app.js", "text/javascript; charset=utf-8"},
-        {"/version.json", "application/json"},   {"/assets/mihawk.png", "image/png"},
-        {"/assets/ui.woff2", "font/woff2"},      {"/assets/retroarch.svg", "image/svg+xml"}};
+        {"/", "text/html; charset=utf-8"},
+        {"/index.html", "text/html; charset=utf-8"},
+        {"/app.css", "text/css; charset=utf-8"},
+        {"/app.js", "text/javascript; charset=utf-8"},
+        {"/settings-guide.js", "text/javascript; charset=utf-8"},
+        {"/version.json", "application/json"},
+        {"/assets/mihawk.png", "image/png"},
+        {"/assets/ui.woff2", "font/woff2"},
+        {"/assets/retroarch.svg", "image/svg+xml"}};
     auto asset = assets.find(url);
     if (asset == assets.end())
         return error(c, 404, "This page was not found.");
@@ -839,7 +923,125 @@ void completed(void *, MHD_Connection *, void **context, MHD_RequestTerminationC
     delete static_cast<Request *>(*context);
     *context = nullptr;
 }
+// Registration runs on the emulator thread. HTTP reads only the atomic snapshot.
+void save_metadata(const char *name, std::string json, const Config &defaults)
+{
+    if (!name || root_path.empty() || !valid_path(name) || std::strchr(name, '/') ||
+        json.size() > 2 * 1024 * 1024)
+        return;
+    const std::string folder = root_path + "/config/webui-metadata";
+    mkdir(folder.c_str(), 0755);
+    struct stat st{};
+    if (content_stat(folder.c_str(), &st) || !S_ISDIR(st.st_mode))
+        return;
+    const auto tag = catalog_revision(name);
+    json.insert(1, "\"catalogRevision\":" + quote(tag) + ',');
+    // Both files carry their revision inside the atomic replacement, so an
+    // interrupted write or an upgrade cannot validate a stale companion file.
+    write_config(folder + '/' + name + ".opt", defaults, "# catalog-revision: " + tag + '\n');
+    const std::string path = folder + '/' + name + ".json";
+    const std::string temporary = path + ".tmp";
+    int fd = open(temporary.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0600);
+    if (fd < 0)
+        return;
+    size_t offset = 0;
+    while (offset < json.size())
+    {
+        ssize_t count = write(fd, json.data() + offset, json.size() - offset);
+        if (count < 0 && errno == EINTR)
+            continue;
+        if (count <= 0)
+            break;
+        offset += static_cast<size_t>(count);
+    }
+    bool ok = offset == json.size() && fsync(fd) == 0;
+    close(fd);
+    if (!ok || rename(temporary.c_str(), path.c_str()))
+        unlink(temporary.c_str());
+}
+std::string metadata_text(const char *value)
+{
+    return quote(value ? value : "");
+}
 } // namespace
+extern "C" void ps5_webui_core_options(const char *name, const retro_core_options_v2 *options)
+{
+    if (!options || !options->definitions)
+        return;
+    Config defaults;
+    std::string json = "{\"categories\":[";
+    if (options->categories)
+        for (const auto *c = options->categories; c->key; ++c)
+        {
+            if (c != options->categories)
+                json += ',';
+            json += "{\"key\":" + metadata_text(c->key) + ",\"label\":" + metadata_text(c->desc) +
+                    ",\"description\":" + metadata_text(c->info) + '}';
+        }
+    json += "],\"settings\":[";
+    for (const auto *s = options->definitions; s->key; ++s)
+    {
+        if (s != options->definitions)
+            json += ',';
+        const char *value = s->default_value ? s->default_value : s->values[0].value;
+        if (value && setting_key(s->key) && valid_setting_value(value, "text"))
+            defaults[s->key] = value;
+        json += "{\"key\":" + metadata_text(s->key) +
+                ",\"label\":" + metadata_text(s->desc_categorized ? s->desc_categorized : s->desc) +
+                ",\"description\":" +
+                metadata_text(s->info_categorized ? s->info_categorized : s->info) +
+                ",\"category\":" + metadata_text(s->category_key) +
+                ",\"default\":" + metadata_text(value) + ",\"choices\":[";
+        for (size_t i = 0; i < RETRO_NUM_CORE_OPTION_VALUES_MAX && s->values[i].value; ++i)
+        {
+            if (i)
+                json += ',';
+            json += '[' + metadata_text(s->values[i].value) + ',' +
+                    metadata_text(s->values[i].label ? s->values[i].label : s->values[i].value) +
+                    ']';
+        }
+        json += "]}";
+    }
+    save_metadata(name, json + "]}", defaults);
+}
+extern "C" void ps5_webui_core_variables(const char *name, const retro_variable *vars)
+{
+    if (!vars)
+        return;
+    Config defaults;
+    std::string json = "{\"categories\":[],\"settings\":[";
+    bool first = true;
+    for (const auto *s = vars; s->key; ++s)
+    {
+        std::string value = s->value ? s->value : "";
+        const size_t separator = value.find("; ");
+        if (separator == std::string::npos)
+            continue;
+        if (!first)
+            json += ',';
+        first = false;
+        json += "{\"key\":" + metadata_text(s->key) +
+                ",\"label\":" + quote(value.substr(0, separator)) +
+                ",\"description\":\"\",\"category\":\"\",\"choices\":[";
+        size_t start = separator + 2;
+        while (start <= value.size())
+        {
+            size_t end = value.find('|', start);
+            if (end == std::string::npos)
+                end = value.size();
+            if (start != separator + 2)
+                json += ',';
+            const auto raw = value.substr(start, end - start);
+            if (start == separator + 2 && setting_key(s->key) && valid_setting_value(raw, "text"))
+                defaults[s->key] = raw;
+            auto choice = quote(raw);
+            json += '[' + choice + ',' + choice + ']';
+            start = end + 1;
+        }
+        json += "]}";
+    }
+    save_metadata(name, json + "]}", defaults);
+}
 bool ps5_webui_start(const char *root, unsigned short port)
 {
     if (web_daemon)

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-02T15:32:21.474360+00:00",
+  "generatedAt": "2026-10-02T16:54:39.012163+00:00",
   "title": "Design System: PS5 RetroArch WebUI",
   "extensions": {
     "colorMeta": {
@@ -568,10 +568,16 @@
     {
       "name": "Settings value row",
       "kind": "custom",
-      "refersTo": "settings-input",
-      "description": "Readable setting name and exact configuration key with a value control; stacks on mobile.",
-      "html": "<div class=\"ds-setting-row\"><label class=\"ds-setting-label\" for=\"ds-setting-value\">Video Driver<small>video_driver</small></label><input id=\"ds-setting-value\" type=\"text\" value=\"gl\"></div>",
-      "css": ".ds-setting-row{font:.944444rem/1.45 Arial,Helvetica,sans-serif;color:var(--ink,#2d1447);display:grid;grid-template-columns:minmax(0,1fr) minmax(12rem,40%);align-items:center;gap:.444444rem 1.33333rem;padding:1rem 0;border-bottom:.0555556rem solid var(--line,#e0d6ef)}.ds-setting-label small{display:block;overflow-wrap:anywhere;margin-top:.2rem;color:var(--muted,#6c6f90);font-size:.777778rem}.ds-setting-row input{font:inherit;color:inherit;min-height:2.5rem;padding:.5rem .75rem;border:1px solid var(--control,#cbcbe0);border-radius:.35rem;background:var(--surface,#fcfaff);min-width:0;width:100%;caret-color:var(--accent,#7544b7)}.ds-setting-row input:focus-visible{outline:.166667rem solid var(--focus,#a566ef);outline-offset:.222222rem}.ds-setting-row input:invalid{border-color:#a32c51}.ds-setting-row input:disabled{opacity:.55;cursor:not-allowed}@media(max-width:768px){.ds-setting-row{grid-template-columns:minmax(0,1fr);gap:.444444rem .666667rem;font-size:.833333rem}}"
+      "description": "Guided setting with a plain-language label, explanation and catalog or current runtime choices; installed cores need no first game or saved profile. Advanced adds the exact key. Controls stack beneath descriptions on mobile.",
+      "html": "<div class=\"ds-setting-row\"><div><label class=\"ds-setting-label\" for=\"ds-setting-value\">Console menu style</label><p class=\"ds-setting-description\" id=\"ds-setting-help\">Choose the menu you see on your PS5. This does not change the WebUI theme.</p></div><select id=\"ds-setting-value\" aria-describedby=\"ds-setting-help\"><option>XMB \u2014 horizontal menu</option><option>RGUI \u2014 compact text menu</option></select></div>",
+      "css": ".ds-setting-row{font:.944444rem/1.45 Arial,Helvetica,sans-serif;color:var(--ink,#2d1447);display:grid;grid-template-columns:minmax(0,1fr) minmax(12rem,28%);align-items:center;gap:1.5rem;padding:1.25rem 0;border-bottom:.0555556rem solid var(--line,#e0d6ef)}.ds-setting-label{font-weight:600;display:block}.ds-setting-description{font-size:.875rem;line-height:1.55;max-width:70ch;margin:.4rem 0 0;color:var(--muted,#6c6f90)}.ds-setting-row select{font:inherit;color:inherit;min-height:2.5rem;padding:.388889rem .833333rem;border:.0555556rem solid var(--control,#cbcbe0);border-radius:.333333rem;background:var(--surface,#fcfaff);min-width:0;width:100%}.ds-setting-row select:focus-visible{outline:.166667rem solid var(--focus,#a566ef);outline-offset:.222222rem}.ds-setting-row select:disabled{opacity:.55;cursor:not-allowed}@media(max-width:768px){.ds-setting-row{grid-template-columns:minmax(0,1fr);gap:.85rem;font-size:.833333rem}.ds-setting-row select{font-size:.875rem;min-height:2.75rem;padding:.5rem .75rem}}"
+    },
+    {
+      "name": "Settings mode and categories",
+      "kind": "nav",
+      "description": "Guided/Advanced mode buttons and wrapping category navigation with distinct selected states.",
+      "html": "<div class=\"ds-settings-mode\" role=\"group\" aria-label=\"Settings mode\"><button type=\"button\" aria-pressed=\"true\">Guided</button><button type=\"button\" aria-pressed=\"false\">Advanced</button></div><nav class=\"ds-settings-categories\" aria-label=\"Setting categories\"><button type=\"button\" aria-pressed=\"true\">Video</button><button type=\"button\" aria-pressed=\"false\">Audio</button><button type=\"button\" aria-pressed=\"false\">Input</button></nav>",
+      "css": ".ds-settings-mode{display:flex;width:fit-content;border:1px solid var(--control,#cbcbe0);border-radius:.45rem;padding:.2rem;gap:.2rem}.ds-settings-mode button,.ds-settings-categories button{font:.875rem/1.45 Arial,Helvetica,sans-serif;border:0;background:transparent;color:var(--ink,#2d1447);padding:.65rem 1rem;border-radius:.333333rem;min-height:2.75rem;cursor:pointer}.ds-settings-mode button[aria-pressed=true]{background:var(--accent,#7544b7);color:#fff}.ds-settings-categories{display:flex;flex-wrap:wrap;gap:.35rem;border-bottom:1px solid var(--line,#e0d6ef);padding-bottom:.75rem;margin-top:1.25rem}.ds-settings-categories button[aria-pressed=true]{color:var(--accent,#7544b7);background:var(--ground,#ede7f6);font-weight:700}.ds-settings-mode button:hover,.ds-settings-categories button:hover{background:var(--ground,#ede7f6);color:var(--ink,#2d1447)}.ds-settings-mode button:focus-visible,.ds-settings-categories button:focus-visible{outline:.166667rem solid var(--focus,#a566ef);outline-offset:.222222rem}:host-context([data-theme=dark]) .ds-settings-mode button[aria-pressed=true]{color:#251434}@media(max-width:768px){.ds-settings-mode button{min-width:6rem}.ds-settings-categories{gap:.2rem}.ds-settings-categories button{padding:.55rem .75rem}}"
     }
   ],
   "narrative": {
@@ -611,7 +617,7 @@
       "Do use the local heading font, inline SVG icons and the discreet credited portrait.",
       "Do retain visible keyboard focus and stable Cancel controls while progress changes.",
       "Do stack working panels and keep release information visible on narrow screens.",
-      "Do keep settings scope, search, configuration keys and save status visible and explicitly labeled.",
+      "Do keep settings scope, mode, search and save status explicitly labeled; show explanations in Guided and exact configuration keys in Advanced.",
       "Do preserve the fixed root scale and center main content within its width cap on large monitors."
     ],
     "donts": [

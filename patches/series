@@ -237,3 +237,8 @@
 # 0104  owner-selected PPSSPP 6x with 8x MSAA; retain saved overrides
 #       core_option_manager.c
 0104-ppsspp-msaa-default
+
+# 0105  snapshot registered core option categories, descriptions and choices
+#       for the WebUI; no HTTP access to live emulator state
+#       runloop.c
+0105-webui-core-metadata

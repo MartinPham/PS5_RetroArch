@@ -257,6 +257,9 @@ fi
 webui_http=$(bash "$root/tools/build-webui-http.sh" ps5)
 webui_http=${webui_http#"$root/"}
 
+# Extract once, before the identity is computed, so catalog changes identify the build.
+python3 "$root/tools/generate-core-metadata.py" "$root/build/webui-core-metadata"
+
 # Bind the running trace and FTP readback to these exact source/archive inputs.
 # The console transforms the SELF container, so its whole-file digest differs.
 CORE_NAMES="${core_names[*]}" python3 - "$root" "$memory_diagnostics" "${vulkan_archives[@]}" "${vulkan_objects[@]}" <<'PY'
@@ -273,6 +276,7 @@ inputs += [root / name for name in (
     *(f"build/cores/stage/cores/{name}_libretro.so" for name in os.environ["CORE_NAMES"].split()),
     "tools/build.sh", "tools/retroarch-flags.sh")]
 inputs += sorted(p for p in (root / "webui").rglob("*") if p.is_file())
+inputs += sorted(p for p in (root / "build/webui-core-metadata").rglob("*") if p.is_file())
 inputs += [pathlib.Path(name) for name in sys.argv[3:]]
 digest = hashlib.sha256()
 digest.update(b"memory-diagnostics=" + sys.argv[2].encode() + b"\0")
@@ -400,6 +404,9 @@ fi
 # Ship local assets and honest release identity; development builds have no release tag.
 mkdir -p "$dist/webui"
 cp -a "$root/webui/." "$dist/webui/"
+# Core option catalogs are available before the first game is opened.
+mkdir -p "$dist/webui/core-metadata"
+cp -a "$root/build/webui-core-metadata/." "$dist/webui/core-metadata/"
 python3 - "$dist/webui/version.json" "${PS5_RELEASE_TAG:-}" "$root/build/title_build_identity.h" <<'PY_WEBUI'
 import json, pathlib, re, sys
 identity = re.search(r"build identity: ([a-f0-9]+)", pathlib.Path(sys.argv[3]).read_text())[1]

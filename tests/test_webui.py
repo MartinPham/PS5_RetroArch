@@ -66,6 +66,93 @@ class WebUI(unittest.TestCase):
         self.assertEqual(self.request('POST', '/api/folder?path=nope', headers={'X-RetroArch-Token': 'wrong'})[0], 403)
         self.assertEqual(self.request('GET', '/config/retroarch.cfg')[0], 404)
 
+    def test_registered_core_metadata(self):
+        status, _, body = self.request('GET', '/api/core-metadata?core=Metadata%20test')
+        self.assertEqual(status, 200)
+        data = json.loads(body)['runtime']
+        self.assertEqual(data['categories'][0]['label'], 'Video')
+        setting = data['settings'][0]
+        self.assertEqual(setting['label'], 'Resolution <test>')
+        self.assertIn('"quotes"', setting['description'])
+        self.assertEqual(setting['choices'], [['1', 'Native'], ['2', 'Double']])
+        legacy = json.loads(self.request('GET', '/api/core-metadata?core=Legacy%20test')[2])['runtime']
+        self.assertEqual(legacy['settings'][0]['choices'], [['normal', 'normal'], ['fast', 'fast']])
+        self.assertEqual(self.request('GET', '/api/core-metadata?core=../escape')[0], 400)
+        self.assertEqual(json.loads(self.request('GET', '/api/core-metadata?core=Unknown')[2])['runtime']['settings'], [])
+        self.assertFalse((self.root / 'config/escape.json').exists())
+        (self.root / 'config/webui-metadata/link.json').symlink_to(self.root / 'config/retroarch.cfg')
+        self.assertEqual(json.loads(self.request('GET', '/api/core-metadata?core=link')[2])['runtime']['settings'], [])
+
+    def test_installed_core_without_saved_profile(self):
+        catalog = self.root / 'webui/core-metadata'
+        catalog.mkdir(exist_ok=True)
+        (self.root / 'cores').mkdir(exist_ok=True)
+        (self.root / 'cores/fresh_libretro.so').write_bytes(b'installed core fixture')
+        (catalog / 'index.cfg').write_text('fresh_libretro.so = "Fresh Core"\nmissing_libretro.so = "Missing Core"\n')
+        metadata = {'categories': [{'key': 'video', 'label': 'Video', 'description': 'Picture'}],
+                    'settings': [{'key': 'fresh_resolution', 'label': 'Resolution', 'description': 'Picture detail.', 'category': 'video', 'choices': [['1', 'Native'], ['2', 'Double']]}]}
+        (catalog / 'Fresh Core.json').write_text(json.dumps(metadata))
+        (catalog / 'Fresh Core.opt').write_text('fresh_resolution = "2"\n')
+        profiles = json.loads(self.request('GET', '/api/cores')[2])['cores']
+        self.assertIn('Fresh Core', profiles)
+        self.assertNotIn('Missing Core', profiles)
+        self.assertFalse((self.root / 'config/Fresh Core').exists())
+        response = json.loads(self.request('GET', '/api/core-metadata?core=Fresh%20Core')[2])
+        self.assertEqual(response['bundled'], metadata)
+        self.assertEqual(response['runtime']['settings'], [])
+        url = '/api/config?scope=core-options&core=Fresh%20Core'
+        state = json.loads(self.request('GET', url)[2])
+        self.assertEqual(state['settings'][0]['value'], '2')
+        status, _, _ = self.request('POST', url, b'fresh_resolution=1', {'X-RetroArch-Revision': state['revision']})
+        self.assertEqual(status, 200)
+        self.assertFalse((self.root / 'config/Fresh Core').exists())
+        # A new profile must survive these ports' first-use default migration.
+        for stem, core, key in [('ppsspp', 'PPSSPP', 'ppsspp_internal_resolution'),
+                                ('dolphin', 'dolphin-emu', 'dolphin_efb_scale')]:
+            (self.root / 'cores' / (stem + '_libretro.so')).write_bytes(b'core fixture')
+            with (catalog / 'index.cfg').open('a') as index:
+                index.write(stem + '_libretro.so = "' + core + '"\n')
+            (catalog / (core + '.opt')).write_text(key + ' = "original"\n')
+            endpoint = '/api/config?scope=core-options&core=' + quote(core)
+            current = json.loads(self.request('GET', endpoint)[2])
+            self.assertEqual(self.request('POST', endpoint, (key + '=chosen').encode(),
+                             {'X-RetroArch-Revision': current['revision']})[0], 200)
+        self.process.terminate(); self.process.wait(timeout=5)
+        self.__class__.process = subprocess.Popen([str(self.binary), str(self.root), str(self.port)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        for _ in range(100):
+            try:
+                status, _, body = self.request('GET', '/api/status')
+                if status == 200: break
+            except OSError: pass
+            time.sleep(.02)
+        self.__class__.token = json.loads(body)['token']
+        self.assertEqual((self.root / 'config/Fresh Core/Fresh Core.opt').read_text(), 'fresh_resolution = "1"\n')
+        self.assertFalse((self.root / 'config/webui-cores/Fresh Core.opt').exists())
+        for core in ('PPSSPP', 'dolphin-emu'):
+            self.assertTrue((self.root / 'config' / core / 'ps5-default-profile-v1').is_file())
+            self.assertIn('"chosen"', (self.root / 'config' / core / (core + '.opt')).read_text())
+        self.assertEqual(json.loads(self.request('GET', url)[2])['settings'][0]['value'], '1')
+
+    def test_z_catalog_upgrade_ignores_stale_runtime(self):
+        catalog = self.root / 'webui/core-metadata'
+        catalog.mkdir(exist_ok=True)
+        path = '/api/core-metadata?core=Metadata%20test'
+        current = json.loads(self.request('GET', path)[2])
+        self.assertEqual(current['runtime']['settings'][0]['choices'], [['1', 'Native'], ['2', 'Double']])
+        # A new release's binary hash changes even if its static options do not.
+        upgraded = {'binary_sha256': 'new-core-build', 'categories': [], 'settings': [
+            {'key': 'test_resolution', 'label': 'Resolution', 'description': 'Updated choices',
+             'category': '', 'choices': [['1', 'Native'], ['3', 'Triple']]}]}
+        (catalog / 'Metadata test.json').write_text(json.dumps(upgraded))
+        after = json.loads(self.request('GET', path)[2])
+        self.assertEqual(after['bundled'], upgraded)
+        self.assertEqual(after['runtime']['settings'], [])
+        # An old defaults snapshot must not resurrect removed options either.
+        (self.root / 'config/Metadata test').mkdir(exist_ok=True)
+        (self.root / 'config/Metadata test/Metadata test.opt').write_text('saved_option = "preserve"\n')
+        state = json.loads(self.request('GET', '/api/config?scope=core-options&core=Metadata%20test')[2])
+        self.assertEqual([s['key'] for s in state['settings']], ['saved_option'])
+
     def test_upload_download_and_collision(self):
         self.assertEqual(self.request('POST', '/api/folder?path=PSP')[0], 201)
         content = bytes(range(256)) * 8192

@@ -463,14 +463,28 @@ included in the next release.
   compatibility API does not provide a measured value.
 - **Transfers:** progress and results from the current browser session.
   Downloads are handled by the browser’s download manager.
-- **Settings:** search and edit the global settings present in the console’s
-  saved configuration and packaged defaults. Choose a saved core profile to
-  edit its **Core options** or **RetroArch overrides**. Core profiles appear
-  after opening and closing content with that core. Fields without declared
-  type metadata use the exact configuration value; consult the core’s options
-  for supported choices. Settings are paged so large profiles remain usable.
+- **Settings:** start in **Guided** for categories, descriptions and ready-to-use
+  controls. Global preferences are grouped into Video, Audio, Input, Saving,
+  System and Interface. Choose a core profile for its **Core options** or
+  **RetroArch overrides**; PPSSPP provides System, Video, Input, Hacks and Network.
+  All 15 supported core guides (RPCS3 excluded) are available before opening a
+  game, with grouped options, exact dropdown choices and explanatory help.
+  Catalogs are generated from the pinned PS5 core sources and include the PS5
+  defaults; saved values take priority. BIOS/cartridge lists and game-specific
+  options such as arcade DIP switches are added when their core registers them.
+  **Advanced** retains the full saved configuration, technical keys and exact
+  value fields, with search and 40-row pages. Global settings without a guide
+  remain available there. Switching categories or modes keeps unsaved edits.
+  Values outside the listed choices are preserved as “Current” until changed.
   Saved changes apply the next time RetroArch starts. WebUI light/dark
   appearance applies immediately and is remembered only in that browser.
+
+Bundled catalogs live in `webui/core-metadata/`. Additional options registered
+by a running core are cached in `config/webui-metadata/`; the WebUI reads these
+snapshots without querying live emulator state. Snapshots are bound to the
+catalog and core binary, so an upgrade cannot reuse obsolete choices or defaults.
+The build-time generator uses a host C++ compiler to serialize option tables,
+without loading an emulator or executing a game.
 
 Browser changes are saved separately in `config/webui.cfg`; explicitly supplied
 launch overrides take precedence. Core edits wait in `config/webui-cores/`

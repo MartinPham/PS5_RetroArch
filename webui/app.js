@@ -261,7 +261,8 @@ function updateQuick() {
   }
 }
 let editorSettings = [], editorValues = {}, editorDraft = {}, editorRevision = '', editorPage = 0, editorRequest = 0;
-let editorProfile = '', editorKind = 'core-options';
+let editorProfile = '', editorKind = 'core-options', editorMode = 'guided', editorCategory = '';
+let editorMetadata = {}, editorCategories = [], metadataUnavailable = false;
 const pageSize = 40;
 function settingTitle(key) {
   const known = { audio_volume: 'Audio volume', input_rumble_gain: 'Rumble strength', video_smooth: 'Smooth image scaling', video_vsync: 'Vertical sync', menu_driver: 'Console menu' };
@@ -273,34 +274,88 @@ function markEdits() {
   $('#settings-result').textContent = count ? `${count} unsaved ${count === 1 ? 'change' : 'changes'}` : '';
   $('#refresh-settings').textContent = count ? 'Discard changes & refresh' : 'Refresh settings';
 }
+function settingGuide(setting) {
+  if (!editorProfile || editorKind === 'core-settings') return globalGuide[setting.key];
+  const meta = editorMetadata[setting.key];
+  if (!meta) return null;
+  return { ...meta, category: meta.category || 'general', control: meta.choices?.length ? 'select' : 'text', description: coreHelp(setting.key) || meta.description || 'This core provides the available choices but no explanation for this option. Keep its current value unless you know the change you need.' };
+}
+function choiceLabel(value, label) {
+  if (['enabled', 'true'].includes(label)) return 'On';
+  if (['disabled', 'Disabled', 'false'].includes(label)) return 'Off';
+  return label || value;
+}
 function renderSettings() {
-  const query = $('#settings-search').value.toLocaleLowerCase();
-  const matched = editorSettings.filter(s => (settingTitle(s.key) + ' ' + s.key).toLocaleLowerCase().includes(query));
+  const guided = editorMode === 'guided', query = $('#settings-search').value.trim().toLocaleLowerCase();
+  const available = editorSettings.filter(s => !guided || settingGuide(s));
+  if (guided) {
+    const order = Object.keys(!editorProfile || editorKind === 'core-settings' ? globalGuide : editorMetadata);
+    const rank = new Map(order.map((key, index) => [key, index]));
+    available.sort((a, b) => rank.get(a.key) - rank.get(b.key));
+  }
+  const categories = (!editorProfile || editorKind === 'core-settings' ? globalCategories : [...editorCategories, { key: 'general', label: 'General', description: 'Options supplied by this core.' }])
+    .filter(c => available.some(s => settingGuide(s)?.category === c.key));
+  if (!categories.some(c => c.key === editorCategory)) editorCategory = categories[0]?.key || '';
+  const nav = $('#settings-categories'); nav.replaceChildren(); nav.hidden = !guided || !categories.length;
+  for (const category of categories) {
+    const button = element('button', category.label); button.type = 'button'; button.dataset.category = category.key;
+    button.setAttribute('aria-pressed', String(category.key === editorCategory && !query));
+    button.addEventListener('click', () => { editorCategory = category.key; editorPage = 0; $('#settings-search').value = ''; renderSettings(); [...nav.children].find(n => n.dataset.category === category.key)?.focus(); }); nav.append(button);
+  }
+  const active = categories.find(c => c.key === editorCategory);
+  $('#settings-category-title').textContent = guided ? (query ? 'Search results' : active?.label || 'Guided settings') : 'All settings';
+  $('#settings-category-help').textContent = guided ? (query ? 'Matching settings from every category.' : active?.description || 'No option catalog is available for this core.') : 'Technical names and exact saved values. Use this view for settings not covered by the guide.';
+  const uncovered = editorSettings.length - available.length;
+  $('#settings-coverage').textContent = !guided ? '' : metadataUnavailable ? 'Core guidance could not be loaded. Refresh to try again, or use Advanced.' : uncovered ? `${uncovered} additional ${uncovered === 1 ? 'setting is' : 'settings are'} available in Advanced.` : '';
+  $('#settings-coverage').hidden = !$('#settings-coverage').textContent;
+  const matched = available.filter(s => {
+    const meta = settingGuide(s);
+    return (query ? `${meta?.label || settingTitle(s.key)} ${s.key} ${meta?.description || ''}`.toLocaleLowerCase().includes(query) : !guided || meta?.category === editorCategory);
+  });
   const pages = Math.max(1, Math.ceil(matched.length / pageSize)); editorPage = Math.min(editorPage, pages - 1);
   const fields = $('#settings-fields'); fields.replaceChildren();
   $('#settings-count').textContent = `${matched.length} settings${query ? ' matching your search' : ''}`;
   for (const setting of matched.slice(editorPage * pageSize, (editorPage + 1) * pageSize)) {
-    const value = editorDraft[setting.key] ?? setting.value;
-    const row = element('div', undefined, 'setting-row'), label = element('label', settingTitle(setting.key), 'setting-label');
-    const id = 'setting-' + setting.key; label.htmlFor = id; label.append(element('small', setting.key));
-    let input;
-    if (setting.key === 'menu_driver') { input = document.createElement('select'); for (const name of ['xmb', 'rgui']) input.add(new Option(name.toUpperCase(), name)); input.value = value; }
-    else { input = document.createElement('input'); input.type = setting.kind === 'bool' ? 'checkbox' : setting.kind;
-      if (setting.kind === 'bool') input.checked = value === 'true';
+    const meta = settingGuide(setting), value = editorDraft[setting.key] ?? setting.value;
+    const row = element('div', undefined, 'setting-row'), details = element('div', undefined, 'setting-details');
+    const label = element('label', guided ? meta.label : settingTitle(setting.key), 'setting-label');
+    const id = 'setting-' + setting.key; label.htmlFor = id;
+    if (!guided) label.append(element('small', setting.key));
+    const description = element('p', meta?.description || 'No description is available for this technical setting. Keep its value unless you know the configuration change you need.', 'setting-description');
+    description.id = id + '-help'; details.append(label, description);
+    let input, control = element('div', undefined, 'setting-control'), output;
+    const choices = guided ? meta.choices : setting.key === 'menu_driver' ? [['xmb', 'XMB'], ['rgui', 'RGUI']] : null;
+    if (choices?.length) {
+      input = document.createElement('select');
+      for (const [value, text] of choices) input.add(new Option(choiceLabel(value, text), value));
+      if (![...input.options].some(o => o.value === value)) input.add(new Option(`Current: ${value || '(empty)'}`, value));
+      input.value = value;
+    } else {
+      input = document.createElement('input');
+      input.type = guided && ['volume', 'rumble'].includes(meta.control) ? 'range' : (guided && meta.control === 'toggle') || setting.kind === 'bool' ? 'checkbox' : setting.kind;
+      if (input.type === 'checkbox') input.checked = value === 'true';
       else { input.value = value; input.maxLength = 4096; if (setting.kind === 'number') { input.step = 'any'; input.required = true; } }
+      if (input.type === 'range') { input.min = meta.control === 'volume' ? -80 : 0; input.max = meta.control === 'volume' ? 12 : 100; input.step = meta.control === 'volume' ? '0.1' : '1'; input.value = value; }
+      if (['checkbox', 'range'].includes(input.type)) {
+        output = element('output'); output.htmlFor = id;
+        const updateOutput = () => { output.textContent = input.type === 'checkbox' ? (input.checked ? 'On' : 'Off') : input.value + (meta?.control === 'volume' ? ' dB' : '%'); };
+        updateOutput(); input.addEventListener('input', updateOutput);
+      }
     }
     if (setting.key === 'audio_volume') { input.min = -80; input.max = 12; }
     if (setting.key === 'input_rumble_gain') { input.min = 0; input.max = 100; }
-    input.id = id; input.name = setting.key;
+    input.id = id; input.name = setting.key; input.setAttribute('aria-describedby', description.id);
     input.addEventListener('input', () => {
       const updated = input.type === 'checkbox' ? String(input.checked) : input.value;
       if (updated === editorValues[setting.key]) delete editorDraft[setting.key]; else editorDraft[setting.key] = updated;
-      markEdits();
+      row.classList.toggle('setting-edited', Object.hasOwn(editorDraft, setting.key)); markEdits();
     });
-    row.append(label, input); fields.append(row);
+    row.classList.toggle('setting-edited', Object.hasOwn(editorDraft, setting.key));
+    control.append(input); if (output) control.append(output); row.append(details, control); fields.append(row);
   }
-  if (!matched.length) fields.append(element('p', editorSettings.length ? 'No matching settings. Try another search.' : 'No saved core options yet. Open and close a game with this core, then refresh. You can also choose RetroArch overrides.', 'list-message'));
+  if (!matched.length) fields.append(element('p', query ? 'No matching settings. Try another search or switch to Advanced.' : guided ? 'No guided options are available. Refresh to try again, or use Advanced for saved values.' : 'No options are available for this profile.', 'list-message'));
   $('#settings-page').textContent = `Page ${editorPage + 1} of ${pages}`;
+  $('.settings-paging').hidden = pages <= 1;
   $('#settings-previous').disabled = editorPage === 0; $('#settings-next').disabled = editorPage >= pages - 1;
 }
 async function loadEditor() {
@@ -309,13 +364,19 @@ async function loadEditor() {
   $('#settings-fields').disabled = true; $('#save-settings').disabled = true;
   $('#settings-result').textContent = 'Loading settings…';
   try {
-    const data = await api(editorUrl()); if (request !== editorRequest) return;
+    const [data, metadata] = await Promise.all([api(editorUrl()), editorProfile && editorKind === 'core-options' ? api('/api/core-metadata?core=' + encodeURIComponent(editorProfile)).catch(() => null) : Promise.resolve({ categories: [], settings: [] })]);
+    if (request !== editorRequest) return;
+    metadataUnavailable = !metadata;
+    // The previous running title may serve new assets before its next restart.
+    const catalogs = [metadata?.bundled || {}, metadata?.runtime || metadata || {}];
+    editorMetadata = Object.fromEntries(catalogs.flatMap(m => m.settings || []).map(s => [s.key, s]));
+    editorCategories = [...new Map(catalogs.flatMap(m => m.categories || []).map(c => [c.key, c])).values()];
     editorSettings = data.settings; editorValues = Object.fromEntries(data.settings.map(s => [s.key, s.value]));
     editorRevision = data.revision; editorDraft = {}; editorPage = 0;
     $('#settings-heading').textContent = editorProfile ? `${editorProfile} · ${editorKind === 'core-options' ? 'Core options' : 'RetroArch overrides'}` : 'Global RetroArch settings';
     $('#settings-help').textContent = editorProfile
-      ? 'Changes apply when you restart RetroArch. Game and folder overrides can take priority. Core options use the values saved by the emulator; RetroArch overrides inherit global values until edited here.'
-      : 'All settings from the console’s saved configuration are available here. Changes apply when you restart RetroArch. Core, game and folder overrides can take priority. Core profiles appear after you open and close content with that core.';
+      ? 'Saved changes apply when you restart RetroArch. Game-specific settings may take priority. Core options control the emulator; RetroArch overrides change shared preferences for just this core.'
+      : 'Start with everyday preferences in Guided, or switch to Advanced for the full configuration. Saved changes apply when you restart RetroArch. Core and game preferences may take priority.';
     renderSettings(); markEdits();
   } catch (error) { if (request === editorRequest) { editorRevision = ''; $('#settings-fields').replaceChildren(); $('#settings-result').textContent = error.message; } }
   finally { if (request === editorRequest) { for (const id of ['settings-profile', 'settings-kind', 'refresh-settings']) $('#' + id).disabled = false; $('#settings-fields').disabled = !connected || !editorRevision; $('#save-settings').disabled = !connected || !editorRevision; } }
@@ -354,6 +415,12 @@ function changeProfile() {
   editorProfile = $('#settings-profile').value; editorKind = $('#settings-kind').value;
   $('#settings-kind-label').hidden = !editorProfile; $('#settings-search').value = ''; loadEditor();
 }
+for (const mode of ['guided', 'advanced']) $('#settings-' + mode).addEventListener('click', () => {
+  editorMode = mode; editorPage = 0;
+  for (const name of ['guided', 'advanced']) $('#settings-' + name).setAttribute('aria-pressed', String(name === mode));
+  $('#settings-mode-help').textContent = mode === 'guided' ? 'Clear explanations and ready-to-use choices.' : 'Full configuration with technical names and exact values.';
+  renderSettings();
+});
 $('#settings-profile').addEventListener('change', changeProfile); $('#settings-kind').addEventListener('change', changeProfile);
 $('#refresh-settings').addEventListener('click', () => { editorDraft = {}; loadSettings(); });
 $('#settings-search').addEventListener('input', () => { editorPage = 0; renderSettings(); });
