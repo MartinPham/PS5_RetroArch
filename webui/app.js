@@ -44,7 +44,7 @@ function setConnection(ok) {
   $('#connection span:last-child').textContent = ok ? 'RetroArch is running' : 'Console disconnected';
   $('#connection-notice').hidden = ok;
   for (const id of ['destination', 'dropzone', 'browse-files', 'upload-here', 'folder-name', 'quick-volume', 'quick-rumble', 'settings-fields', 'save-settings']) {
-    $('#' + id).disabled = !ok || (['quick-volume', 'quick-rumble', 'settings-fields', 'save-settings'].includes(id) && !Object.keys(settingsValues).length);
+    $('#' + id).disabled = !ok || (['settings-fields', 'save-settings'].includes(id) && !editorRevision) || (['quick-volume', 'quick-rumble', 'settings-fields', 'save-settings'].includes(id) && !Object.keys(settingsValues).length);
   }
   $('#folder-form button').disabled = !ok;
 }
@@ -253,50 +253,112 @@ for (const name of ['dragleave', 'drop']) $('#dropzone').addEventListener(name, 
 $('#dropzone').addEventListener('drop', event => queueFiles([...event.dataTransfer.files], $('#destination').value));
 window.addEventListener('dragover', event => event.preventDefault());
 window.addEventListener('drop', event => event.preventDefault());
-window.addEventListener('beforeunload', event => { if (transfers.some(t => ['queued', 'uploading'].includes(t.state))) { event.preventDefault(); event.returnValue = ''; } });
+window.addEventListener('beforeunload', event => { if (Object.keys(editorDraft).length || transfers.some(t => ['queued', 'uploading'].includes(t.state))) { event.preventDefault(); event.returnValue = ''; } });
 $('#clear-transfers').addEventListener('click', () => { for (let i = transfers.length - 1; i >= 0; i--) if (!['queued', 'uploading'].includes(transfers[i].state)) transfers.splice(i, 1); drawTransfers(); });
 function updateQuick() {
   for (const [id, key, unit] of [['quick-volume', 'audio_volume', ' dB'], ['quick-rumble', 'input_rumble_gain', '%']]) {
     $('#' + id).value = settingsValues[key]; $(`output[for="${id}"]`).textContent = Number(settingsValues[key]) + unit;
   }
 }
+let editorSettings = [], editorValues = {}, editorDraft = {}, editorRevision = '', editorPage = 0, editorRequest = 0;
+let editorProfile = '', editorKind = 'core-options';
+const pageSize = 40;
+function settingTitle(key) {
+  const known = { audio_volume: 'Audio volume', input_rumble_gain: 'Rumble strength', video_smooth: 'Smooth image scaling', video_vsync: 'Vertical sync', menu_driver: 'Console menu' };
+  return known[key] || key.replace(/[_-]/g, ' ').replace(/\b\w/g, c => c.toUpperCase()).replace(/\b(ppsspp|snes|nes|gba|gpu|cpu|msaa|fps|vsync|xmb|rgui)\b/gi, word => word.toUpperCase());
+}
+function editorUrl() { return '/api/config?scope=' + (editorProfile ? editorKind : 'global') + '&core=' + encodeURIComponent(editorProfile); }
+function markEdits() {
+  const count = Object.keys(editorDraft).length;
+  $('#settings-result').textContent = count ? `${count} unsaved ${count === 1 ? 'change' : 'changes'}` : '';
+  $('#refresh-settings').textContent = count ? 'Discard changes & refresh' : 'Refresh settings';
+}
+function renderSettings() {
+  const query = $('#settings-search').value.toLocaleLowerCase();
+  const matched = editorSettings.filter(s => (settingTitle(s.key) + ' ' + s.key).toLocaleLowerCase().includes(query));
+  const pages = Math.max(1, Math.ceil(matched.length / pageSize)); editorPage = Math.min(editorPage, pages - 1);
+  const fields = $('#settings-fields'); fields.replaceChildren();
+  $('#settings-count').textContent = `${matched.length} settings${query ? ' matching your search' : ''}`;
+  for (const setting of matched.slice(editorPage * pageSize, (editorPage + 1) * pageSize)) {
+    const value = editorDraft[setting.key] ?? setting.value;
+    const row = element('div', undefined, 'setting-row'), label = element('label', settingTitle(setting.key), 'setting-label');
+    const id = 'setting-' + setting.key; label.htmlFor = id; label.append(element('small', setting.key));
+    let input;
+    if (setting.key === 'menu_driver') { input = document.createElement('select'); for (const name of ['xmb', 'rgui']) input.add(new Option(name.toUpperCase(), name)); input.value = value; }
+    else { input = document.createElement('input'); input.type = setting.kind === 'bool' ? 'checkbox' : setting.kind;
+      if (setting.kind === 'bool') input.checked = value === 'true';
+      else { input.value = value; input.maxLength = 4096; if (setting.kind === 'number') { input.step = 'any'; input.required = true; } }
+    }
+    if (setting.key === 'audio_volume') { input.min = -80; input.max = 12; }
+    if (setting.key === 'input_rumble_gain') { input.min = 0; input.max = 100; }
+    input.id = id; input.name = setting.key;
+    input.addEventListener('input', () => {
+      const updated = input.type === 'checkbox' ? String(input.checked) : input.value;
+      if (updated === editorValues[setting.key]) delete editorDraft[setting.key]; else editorDraft[setting.key] = updated;
+      markEdits();
+    });
+    row.append(label, input); fields.append(row);
+  }
+  if (!matched.length) fields.append(element('p', editorSettings.length ? 'No matching settings. Try another search.' : 'No saved core options yet. Open and close a game with this core, then refresh. You can also choose RetroArch overrides.', 'list-message'));
+  $('#settings-page').textContent = `Page ${editorPage + 1} of ${pages}`;
+  $('#settings-previous').disabled = editorPage === 0; $('#settings-next').disabled = editorPage >= pages - 1;
+}
+async function loadEditor() {
+  const request = ++editorRequest; editorRevision = '';
+  for (const id of ['settings-profile', 'settings-kind', 'refresh-settings']) $('#' + id).disabled = true;
+  $('#settings-fields').disabled = true; $('#save-settings').disabled = true;
+  $('#settings-result').textContent = 'Loading settings…';
+  try {
+    const data = await api(editorUrl()); if (request !== editorRequest) return;
+    editorSettings = data.settings; editorValues = Object.fromEntries(data.settings.map(s => [s.key, s.value]));
+    editorRevision = data.revision; editorDraft = {}; editorPage = 0;
+    $('#settings-heading').textContent = editorProfile ? `${editorProfile} · ${editorKind === 'core-options' ? 'Core options' : 'RetroArch overrides'}` : 'Global RetroArch settings';
+    $('#settings-help').textContent = editorProfile
+      ? 'Changes apply when you restart RetroArch. Game and folder overrides can take priority. Core options use the values saved by the emulator; RetroArch overrides inherit global values until edited here.'
+      : 'All settings from the console’s saved configuration are available here. Changes apply when you restart RetroArch. Core, game and folder overrides can take priority. Core profiles appear after you open and close content with that core.';
+    renderSettings(); markEdits();
+  } catch (error) { if (request === editorRequest) { editorRevision = ''; $('#settings-fields').replaceChildren(); $('#settings-result').textContent = error.message; } }
+  finally { if (request === editorRequest) { for (const id of ['settings-profile', 'settings-kind', 'refresh-settings']) $('#' + id).disabled = false; $('#settings-fields').disabled = !connected || !editorRevision; $('#save-settings').disabled = !connected || !editorRevision; } }
+}
 async function loadSettings() {
   try {
-    const data = await api('/api/settings'); const fields = $('#settings-fields'); fields.replaceChildren(); settingsValues = {};
-    for (const setting of data.settings) {
-      settingsValues[setting.key] = setting.value;
-      const row = element('div', undefined, 'setting-row'), label = element('label', setting.label);
-      const id = 'setting-' + setting.key; label.htmlFor = id;
-      let input;
-      if (setting.kind === 'menu') { input = document.createElement('select'); for (const name of ['xmb', 'rgui']) input.add(new Option(name.toUpperCase(), name)); input.value = setting.value; }
-      else { input = document.createElement('input'); input.type = setting.kind === 'bool' ? 'checkbox' : 'number'; if (setting.kind === 'bool') input.checked = setting.value === 'true'; else { input.value = setting.value; input.min = setting.min; input.max = setting.max; input.step = '1'; input.required = true; } }
-      input.id = id; input.name = setting.key;
-      row.append(label, input);
-      if (setting.key === 'audio_volume') row.append(element('small', 'dB · 0 keeps the original volume'));
-      if (setting.key === 'input_rumble_gain') row.append(element('small', '% · strength of controller vibration'));
-      fields.append(row);
-    }
-    setConnection(connected); updateQuick();
+    const [data, profiles] = await Promise.all([api('/api/settings'), api('/api/cores')]);
+    settingsValues = Object.fromEntries(data.settings.map(s => [s.key, s.value]));
+    const select = $('#settings-profile'); select.replaceChildren(new Option('Global RetroArch', ''));
+    for (const name of profiles.cores) select.add(new Option(name, name)); select.value = editorProfile;
+    setConnection(connected); updateQuick(); if (!Object.keys(editorDraft).length) await loadEditor();
   } catch (error) { $('#settings-result').textContent = 'Settings unavailable. Reconnect to try again.'; }
 }
 async function saveSettings(changes) {
   const body = Object.entries(changes).map(([key, value]) => `${key}=${value}`).join('\n');
-  if (!body) { announce('No settings have changed.'); return; }
+  if (!body) return;
   await api('/api/settings', { method: 'POST', body, headers: { 'Content-Type': 'text/plain' } });
   Object.assign(settingsValues, changes); updateQuick();
+  if (!editorProfile && !Object.keys(editorDraft).length) await loadEditor();
   announce('Settings saved. They will apply the next time you open RetroArch.');
 }
 $('#settings-form').addEventListener('submit', async event => {
-  event.preventDefault(); const changes = {};
-  for (const input of $$('input,select', $('#settings-fields'))) {
-    const value = input.type === 'checkbox' ? String(input.checked) : input.value;
-    if (value !== settingsValues[input.name]) changes[input.name] = value;
-  }
-  $('#save-settings').disabled = true;
-  try { await saveSettings(changes); $('#settings-result').textContent = Object.keys(changes).length ? 'Saved for next launch.' : 'No changes to save.'; }
-  catch (error) { $('#settings-result').textContent = error.message; announce(error.message, true); }
-  finally { $('#save-settings').disabled = !connected; }
+  event.preventDefault(); if (!Object.keys(editorDraft).length) { $('#settings-result').textContent = 'No changes to save.'; return; }
+  $('#save-settings').disabled = true; $('#settings-fields').disabled = true;
+  for (const id of ['settings-profile', 'settings-kind', 'refresh-settings']) $('#' + id).disabled = true;
+  try {
+    const body = Object.entries(editorDraft).map(([key, value]) => `${key}=${value}`).join('\n');
+    await api(editorUrl(), { method: 'POST', body, headers: { 'Content-Type': 'text/plain', 'X-RetroArch-Revision': editorRevision } });
+    if (!editorProfile) { Object.assign(settingsValues, editorDraft); updateQuick(); }
+    await loadEditor(); $('#settings-result').textContent = 'Saved for next launch.'; announce('Settings saved. Restart RetroArch to apply them.');
+  } catch (error) { $('#settings-result').textContent = error.message; announce(error.message, true); }
+  finally { for (const id of ['settings-profile', 'settings-kind', 'refresh-settings']) $('#' + id).disabled = false; $('#save-settings').disabled = !connected || !editorRevision; $('#settings-fields').disabled = !connected || !editorRevision; }
 });
+function changeProfile() {
+  if (Object.keys(editorDraft).length) { $('#settings-profile').value = editorProfile; $('#settings-kind').value = editorKind; announce('Save your changes or discard them with Refresh before switching profiles.', true); return; }
+  editorProfile = $('#settings-profile').value; editorKind = $('#settings-kind').value;
+  $('#settings-kind-label').hidden = !editorProfile; $('#settings-search').value = ''; loadEditor();
+}
+$('#settings-profile').addEventListener('change', changeProfile); $('#settings-kind').addEventListener('change', changeProfile);
+$('#refresh-settings').addEventListener('click', () => { editorDraft = {}; loadSettings(); });
+$('#settings-search').addEventListener('input', () => { editorPage = 0; renderSettings(); });
+$('#settings-previous').addEventListener('click', () => { --editorPage; renderSettings(); });
+$('#settings-next').addEventListener('click', () => { ++editorPage; renderSettings(); });
 for (const [id, key, unit] of [['quick-volume', 'audio_volume', ' dB'], ['quick-rumble', 'input_rumble_gain', '%']]) {
   $('#' + id).addEventListener('input', event => { $(`output[for="${id}"]`).textContent = event.target.value + unit; });
   $('#' + id).addEventListener('change', async event => {

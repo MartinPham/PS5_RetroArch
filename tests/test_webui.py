@@ -107,6 +107,65 @@ class WebUI(unittest.TestCase):
         conn.close()
         self.assertEqual((self.root / 'config/webui.cfg').read_bytes(), saved)
 
+    def test_advanced_global_and_per_core_persistence(self):
+        # Full saved profiles, including values not in the quick-settings list.
+        (self.root / 'retroarch.cfg').write_text('video_rotation = "0"\nvideo_vsync = "true"\n')
+        profile = self.root / 'config/Example Core'
+        profile.mkdir()
+        original = b'example_resolution = "6x"\nexample_filter = "nearest"\n'
+        (profile / 'Example Core.opt').write_bytes(original)
+        (self.root / 'config/not-a-core').symlink_to(self.root / 'content', target_is_directory=True)
+        cores = json.loads(self.request('GET', '/api/cores')[2])['cores']
+        self.assertIn('Example Core', cores)
+        self.assertNotIn('not-a-core', cores)
+        def read(url):
+            status, _, body = self.request('GET', url)
+            self.assertEqual(status, 200, body)
+            return json.loads(body)
+        def save(url, body, revision):
+            return self.request('POST', url, body, {'X-RetroArch-Revision': revision})[0]
+        global_url = '/api/config?scope=global'
+        state = read(global_url)
+        self.assertEqual(save(global_url, b'video_rotation=2', state['revision']), 200)
+        self.assertEqual(save(global_url, b'video_rotation=3', state['revision']), 409)
+        for invalid in (b'new_arbitrary_key=1', b'audio_volume=abc', b'video_vsync=yes', b'video_rotation=2"\ninjected=1', b'audio_volume=999'):
+            self.assertEqual(save(global_url, invalid, read(global_url)['revision']), 400)
+        # A quick setting must retain the advanced override.
+        self.assertEqual(self.request('POST', '/api/settings', b'input_rumble_gain=75')[0], 200)
+        self.assertIn(b'video_rotation = "2"', (self.root / 'config/webui.cfg').read_bytes())
+        # Unknown config fields and core enums remain strings across edits.
+        self.assertEqual(save(global_url, b'unrelated=1', read(global_url)['revision']), 200)
+        self.assertEqual(save(global_url, b'unrelated=preserve', read(global_url)['revision']), 200)
+        options_url = '/api/config?scope=core-options&core=Example%20Core'
+        self.assertEqual(save(options_url, b'example_resolution=1', read(options_url)['revision']), 200)
+        self.assertEqual(save(options_url, b'example_resolution=4x', read(options_url)['revision']), 200)
+        self.assertEqual((profile / 'Example Core.opt').read_bytes(), original, 'Running core profile is untouched')
+        override_url = '/api/config?scope=core-settings&core=Example%20Core'
+        self.assertEqual(save(override_url, b'video_vsync=false', read(override_url)['revision']), 200)
+        self.assertNotEqual(next(x['value'] for x in read(global_url)['settings'] if x['key'] == 'video_vsync'), 'false')
+        self.assertEqual(self.request('GET', '/api/config?scope=core-options&core=..%2Fconfig')[0], 404)
+        # Simulate the current core saving on exit after the browser edit.
+        (profile / 'Example Core.opt').write_bytes(original)
+        cls = self.__class__
+        cls.process.terminate(); cls.process.wait(timeout=5)
+        cls.process = subprocess.Popen([str(cls.binary), str(cls.root), str(cls.port)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        for _ in range(100):
+            try:
+                status, _, body = cls.request('GET', '/api/status')
+                if status == 200: break
+            except OSError: pass
+            time.sleep(.02)
+        else: self.fail('Server did not restart')
+        cls.token = json.loads(body)['token']
+        self.assertIn(b'example_resolution = "4x"', (profile / 'Example Core.opt').read_bytes())
+        self.assertIn(b'example_filter = "nearest"', (profile / 'Example Core.opt').read_bytes())
+        self.assertIn(b'video_vsync = "false"', (profile / 'Example Core.cfg').read_bytes())
+        self.assertFalse((self.root / 'config/webui-cores/Example Core.opt').exists())
+        self.assertFalse((self.root / 'config/webui-cores/Example Core.cfg').exists())
+        self.assertEqual((self.root / 'config/retroarch.cfg').read_bytes(), self.original)
+        # Leave the shared fixture's original quick-settings baseline intact.
+        (self.root / 'config/webui.cfg').unlink()
+
     def test_interrupted_upload_is_removed(self):
         with socket.create_connection(('127.0.0.1', self.port)) as s:
             request = (f'PUT /api/upload?path=unfinished.iso HTTP/1.1\r\nHost: 127.0.0.1:{self.port}\r\n'

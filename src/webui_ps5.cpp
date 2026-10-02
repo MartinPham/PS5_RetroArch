@@ -8,6 +8,7 @@
 #include <arpa/inet.h>
 #include <cerrno>
 #include <climits>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -245,36 +246,248 @@ std::string trim(std::string s)
         s = s.substr(1, s.size() - 2);
     return s;
 }
-std::map<std::string, std::string> config_values(bool overrides_only = false)
+using Config = std::map<std::string, std::string>;
+bool setting_key(const std::string &key)
 {
-    std::map<std::string, std::string> values;
-    if (!overrides_only)
-        for (auto &s : settings)
-            values[s.key] = s.initial;
-    for (const auto *file : {"retroarch.cfg", "webui.cfg"})
+    return !key.empty() && key.size() <= 160 &&
+           key.find_first_not_of(
+               "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-.") ==
+               std::string::npos;
+}
+Config read_config(const std::string &path)
+{
+    Config values;
+    std::string text = read_file(path, 2 * 1024 * 1024);
+    size_t start = 0;
+    while (start < text.size())
     {
-        if (overrides_only && std::strcmp(file, "webui.cfg") != 0)
-            continue;
-        std::string text = read_file(root_path + "/config/" + file, 1024 * 1024);
-        size_t start = 0;
-        while (start < text.size())
+        auto end = text.find('\n', start);
+        auto line = text.substr(start, end - start);
+        auto eq = line.find('=');
+        if (eq != std::string::npos)
         {
-            auto end = text.find('\n', start);
-            auto line = text.substr(start, end - start);
-            auto eq = line.find('=');
-            if (eq != std::string::npos)
-            {
-                auto key = trim(line.substr(0, eq));
-                for (const auto &s : settings)
-                    if (key == s.key)
-                        values[key] = trim(line.substr(eq + 1));
-            }
-            if (end == std::string::npos)
-                break;
-            start = end + 1;
+            auto key = trim(line.substr(0, eq));
+            if (setting_key(key))
+                values[key] = trim(line.substr(eq + 1));
         }
+        if (end == std::string::npos)
+            break;
+        start = end + 1;
     }
     return values;
+}
+void overlay(Config &to, const Config &from)
+{
+    for (const auto &entry : from)
+        to[entry.first] = entry.second;
+}
+bool write_config(const std::string &path, const Config &values)
+{
+    std::string text;
+    for (const auto &entry : values)
+        text += entry.first + " = \"" + entry.second + "\"\n";
+    const std::string temporary = path + ".webui-" + nonce();
+    int fd = open(temporary.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
+    if (fd < 0)
+        return false;
+    size_t offset = 0;
+    while (offset < text.size())
+    {
+        ssize_t n = write(fd, text.data() + offset, text.size() - offset);
+        if (n < 0 && errno == EINTR)
+            continue;
+        if (n <= 0)
+            break;
+        offset += size_t(n);
+    }
+    bool ok = offset == text.size() && fsync(fd) == 0;
+    close(fd);
+    if (ok)
+        ok = rename(temporary.c_str(), path.c_str()) == 0;
+    unlink(temporary.c_str());
+    return ok;
+}
+std::vector<std::string> core_profiles()
+{
+    std::vector<std::string> cores;
+    DIR *dir = opendir((root_path + "/config").c_str());
+    if (!dir)
+        return cores;
+    while (auto *entry = readdir(dir))
+    {
+        std::string name = entry->d_name;
+        if (!valid_path(name) || name.find('/') != std::string::npos || name == "webui-cores")
+            continue;
+        struct stat st{};
+        std::string folder = root_path + "/config/" + name;
+        if (content_stat(folder.c_str(), &st) || !S_ISDIR(st.st_mode))
+            continue;
+        for (const char *ext : {".opt", ".cfg"})
+            if (!content_stat((folder + '/' + name + ext).c_str(), &st) && S_ISREG(st.st_mode))
+            {
+                cores.push_back(name);
+                break;
+            }
+    }
+    closedir(dir);
+    std::sort(cores.begin(), cores.end());
+    return cores;
+}
+Config global_values()
+{
+    Config values;
+    for (const auto &s : settings)
+        values[s.key] = s.initial;
+    overlay(values, read_config(root_path + "/retroarch.cfg"));
+    overlay(values, read_config(root_path + "/config/retroarch.cfg"));
+    overlay(values, read_config(root_path + "/config/webui.cfg"));
+    return values;
+}
+std::string revision(const Config &values)
+{
+    uint64_t hash = UINT64_C(14695981039346656037);
+    for (const auto &entry : values)
+        for (unsigned char c : entry.first + '=' + entry.second + '\n')
+            hash = (hash ^ c) * UINT64_C(1099511628211);
+    return std::to_string(hash);
+}
+const char *value_kind(const std::string &value)
+{
+    if (value == "true" || value == "false")
+        return "bool";
+    char *end = nullptr;
+    errno = 0;
+    double n = std::strtod(value.c_str(), &end);
+    if (!value.empty() && end && !*end && !errno && std::isfinite(n))
+        return "number";
+    return "text";
+}
+const char *setting_kind(const std::string &key, bool core_option)
+{
+    if (!core_option)
+        for (const auto &s : settings)
+            if (key == s.key)
+                return std::strcmp(s.kind, "menu") == 0 ? "text" : s.kind;
+    // Config files do not carry type metadata. Numeric-looking bindings and
+    // enum choices remain strings, so changing their value cannot change type.
+    return "text";
+}
+bool valid_setting_value(const std::string &value, const std::string &kind)
+{
+    if (value.size() > 4096)
+        return false;
+    // Config values are quoted. Reject syntax that could escape that value.
+    for (unsigned char c : value)
+        if (c < 32 || c == 127 || c == '"' || c == '\\')
+            return false;
+    return kind == "text" || kind == value_kind(value);
+}
+MHD_Result config_editor(MHD_Connection *c, const std::string &method, const std::string &body)
+{
+    const std::string scope = arg(c, "scope"), core = arg(c, "core");
+    const bool global = scope == "global", options = scope == "core-options";
+    if (!global && !options && scope != "core-settings")
+        return error(c, 400, "Choose global settings or a core profile.");
+    std::string path = root_path + "/config/webui.cfg";
+    Config baseline = global_values(), saved;
+    if (!global)
+    {
+        auto cores = core_profiles();
+        if (std::find(cores.begin(), cores.end(), core) == cores.end())
+            return error(
+                c, 404,
+                "Open and close content with this core once, then refresh its saved profile.");
+        std::string ext = options ? ".opt" : ".cfg";
+        if (options)
+            baseline.clear();
+        overlay(baseline, read_config(root_path + "/config/" + core + '/' + core + ext));
+        path = root_path + "/config/webui-cores/" + core + ext;
+    }
+    saved = read_config(path);
+    overlay(baseline, saved);
+    const std::string tag = revision(baseline);
+    if (method == "GET")
+    {
+        std::string out = "{\"revision\":" + quote(tag) + ",\"settings\":[";
+        for (const auto &entry : baseline)
+        {
+            if (out.back() != '[')
+                out += ',';
+            out += "{\"key\":" + quote(entry.first) + ",\"value\":" + quote(entry.second) +
+                   ",\"kind\":" + quote(setting_kind(entry.first, options)) + '}';
+        }
+        return respond(c, 200, out + "],\"apply\":\"next_launch\"}");
+    }
+    if (method != "POST")
+        return error(c, 405, "This action is not supported.");
+    const char *expected = MHD_lookup_connection_value(c, MHD_HEADER_KIND, "X-RetroArch-Revision");
+    if (!expected || tag != expected)
+        return error(c, 409,
+                     "Settings changed since this page loaded. Refresh before saving again.");
+    size_t start = 0;
+    unsigned changed = 0;
+    while (start < body.size())
+    {
+        auto end = body.find('\n', start), eq = body.find('=', start);
+        if (eq == std::string::npos || (end != std::string::npos && eq > end))
+            return error(c, 400, "Invalid settings. Reload the page and try again.");
+        auto key = body.substr(start, eq - start);
+        auto value = body.substr(eq + 1, end == std::string::npos ? end : end - eq - 1);
+        auto original = baseline.find(key);
+        if (original == baseline.end() || !valid_setting_value(value, setting_kind(key, options)))
+            return error(
+                c, 400, "Use an existing setting and a valid value without quotes or line breaks.");
+        if (!options)
+            for (const auto &s : settings)
+                if (key == s.key)
+                {
+                    if (std::strcmp(s.kind, "menu") == 0 && value != "xmb" && value != "rgui")
+                        return error(c, 400, "Choose XMB or RGUI for the console menu.");
+                    if (std::strcmp(s.kind, "number") == 0 &&
+                        (std::strtod(value.c_str(), nullptr) < s.min ||
+                         std::strtod(value.c_str(), nullptr) > s.max))
+                        return error(c, 400, "A setting is outside its supported range.");
+                }
+        saved[key] = value;
+        ++changed;
+        if (end == std::string::npos)
+            break;
+        start = end + 1;
+    }
+    if (!changed)
+        return error(c, 400, "No settings were provided.");
+    if (!global)
+    {
+        std::string folder = root_path + "/config/webui-cores";
+        mkdir(folder.c_str(), 0755);
+        struct stat st{};
+        if (content_stat(folder.c_str(), &st) || !S_ISDIR(st.st_mode))
+            return error(c, 500, "The settings folder is not available.");
+    }
+    return write_config(path, saved)
+               ? respond(c, 200, "{\"saved\":true,\"apply\":\"next_launch\"}")
+               : error(c, 500, "Settings could not be saved. Check console storage.");
+}
+void apply_core_settings()
+{
+    for (const auto &core : core_profiles())
+        for (const char *ext : {".opt", ".cfg"})
+        {
+            auto saved = read_config(root_path + "/config/webui-cores/" + core + ext);
+            if (saved.empty())
+                continue;
+            std::string destination = root_path + "/config/" + core + '/' + core + ext;
+            auto values = read_config(destination);
+            overlay(values, saved);
+            if (!write_config(destination, values))
+                std::fprintf(stderr, "webui: could not apply saved core settings\n");
+            else if (unlink((root_path + "/config/webui-cores/" + core + ext).c_str()))
+                std::fprintf(stderr, "webui: could not clear applied core settings\n");
+        }
+}
+Config config_values(bool overrides_only = false)
+{
+    return overrides_only ? read_config(root_path + "/config/webui.cfg") : global_values();
 }
 MHD_Result get_settings(MHD_Connection *c)
 {
@@ -294,7 +507,6 @@ MHD_Result save_settings(MHD_Connection *c, const std::string &body)
 {
     // A bounded, plain key=value body: no arbitrary config paths or keys.
     auto values = config_values(true);
-    std::string text;
     size_t start = 0;
     unsigned changed = 0;
     while (start < body.size())
@@ -333,22 +545,12 @@ MHD_Result save_settings(MHD_Connection *c, const std::string &body)
     }
     if (!changed)
         return error(c, 400, "No settings were provided.");
-    // Persist only whitelisted fields; config_save_on_exit cannot overwrite this file.
-    for (const auto &value : values)
-        text += value.first + " = " + quote(value.second) + "\n";
-    std::string temp = root_path + "/config/.webui-" + nonce();
-    int fd = open(temp.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
-    if (fd < 0)
-        return error(c, 500, "Settings could not be saved. Check console storage.");
-    ssize_t n = write(fd, text.data(), text.size());
-    bool ok = n == ssize_t(text.size()) && fsync(fd) == 0;
-    close(fd);
-    if (ok)
-        ok = rename(temp.c_str(), (root_path + "/config/webui.cfg").c_str()) == 0;
-    unlink(temp.c_str());
-    return ok ? respond(c, 200, "{\"saved\":true,\"apply\":\"next_launch\"}")
-              : error(c, 500, "Settings could not be saved. Check console storage.");
+    // Keep advanced global overrides when updating a quick setting.
+    return write_config(root_path + "/config/webui.cfg", values)
+               ? respond(c, 200, "{\"saved\":true,\"apply\":\"next_launch\"}")
+               : error(c, 500, "Settings could not be saved. Check console storage.");
 }
+
 MHD_Result list_content(MHD_Connection *c)
 {
     const std::string relative = arg(c, "path");
@@ -490,6 +692,19 @@ MHD_Result route(MHD_Connection *c, const std::string &url, const std::string &m
         return list_content(c);
     if (method == "GET" && url == "/api/download")
         return download(c);
+    if (url == "/api/config")
+        return config_editor(c, method, r.body);
+    if (method == "GET" && url == "/api/cores")
+    {
+        std::string out = "{\"cores\":[";
+        for (const auto &core : core_profiles())
+        {
+            if (out.back() != '[')
+                out += ',';
+            out += quote(core);
+        }
+        return respond(c, 200, out + "]}");
+    }
     if (method == "GET" && url == "/api/settings")
         return get_settings(c);
     if (method == "POST" && url == "/api/settings")
@@ -630,6 +845,7 @@ bool ps5_webui_start(const char *root, unsigned short port)
     if (web_daemon)
         return true;
     root_path = root;
+    apply_core_settings();
     listen_port = port;
     token = nonce();
     mkdir((root_path + "/content").c_str(), 0755);

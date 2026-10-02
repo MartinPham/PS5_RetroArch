@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
 const base = process.env.WEBUI_TEST_URL || 'http://127.0.0.1:6770';
-const out = path.resolve('.impeccable/review');
+const out = path.resolve(process.env.WEBUI_SCREENSHOTS || '.impeccable/review');
 const release = tag => ({ tag_name: tag, published_at: '2026-10-01T13:43:33Z', draft: false, prerelease: true, body: '## What changed\nMore reliable emulation.\n<script>window.notesExecuted=true</script>' });
 (async () => {
   const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium' });
@@ -60,10 +60,29 @@ const release = tag => ({ tag_name: tag, published_at: '2026-10-01T13:43:33Z', d
     const cancelledListing = await page.evaluate(async () => (await (await fetch('/api/content?path=PSP')).json()).entries);
     assert.equal(cancelledListing.some(entry => entry.name === cancelledName), false, 'Cancelled upload is not published');
     await page.locator('[data-page="settings"]').click();
+    await page.locator('#settings-search').fill('audio_volume');
     await page.locator('#setting-audio_volume').fill('-12'); await page.locator('#save-settings').click();
     await page.waitForFunction(() => document.querySelector('#settings-result').textContent.includes('Saved'));
     const settings = await page.evaluate(async () => (await (await fetch('/api/settings')).json()).settings);
     assert.equal(settings.find(s => s.key === 'audio_volume').value, '-12');
+    await page.locator('#settings-search').fill('');
+    await page.locator('#settings-profile').selectOption('PPSSPP');
+    await page.locator('#setting-ppsspp_internal_resolution').fill('1920x1088');
+    await page.locator('#save-settings').click();
+    await page.waitForFunction(() => document.querySelector('#settings-result').textContent.includes('Saved'));
+    await page.locator('#settings-kind').selectOption('core-settings');
+    await page.locator('#settings-search').fill('video_vsync');
+    await page.locator('#setting-video_vsync').uncheck();
+    await page.locator('#save-settings').click();
+    await page.waitForFunction(() => document.querySelector('#settings-result').textContent.includes('Saved'));
+    await page.locator('#settings-profile').selectOption('');
+    await page.locator('#settings-search').fill('video_vsync');
+    await page.waitForFunction(() => document.querySelector('#settings-heading').textContent === 'Global RetroArch settings');
+    assert.equal(await page.locator('#setting-video_vsync').isChecked(), true, 'Core override must not change global value');
+    await page.locator('#settings-search').fill('');
+    await page.locator('#settings-next').click();
+    assert.match(await page.locator('#settings-page').innerText(), /Page 2/);
+    await page.locator('#settings-previous').click();
     await page.locator('[data-page="content"]').click();
     await page.locator('#folder-name').fill('browser-created-' + Date.now()); await page.locator('#folder-form button').click();
     await page.waitForFunction(() => document.querySelector('#announcement').textContent.startsWith('Created'));
@@ -75,19 +94,24 @@ const release = tag => ({ tag_name: tag, published_at: '2026-10-01T13:43:33Z', d
     await page.evaluate(() => document.fonts.ready);
     fs.mkdirSync(out, { recursive: true });
     // One bounded visual round across the supported sizes and representative pages.
-    for (const [width, height, name] of [[1504, 1046, 'comp-size'], [1440, 1001, 'desktop'], [1280, 960, 'desktop-1280'], [390, 844, 'mobile']]) {
+    for (const [width, height, name] of [[3440, 1250, 'ultrawide'], [1920, 1080, 'desktop'], [1366, 768, 'laptop'], [390, 844, 'mobile']]) {
       await page.setViewportSize({ width, height });
       await page.screenshot({ path: path.join(out, name + '.png'), fullPage: true });
+      assert.equal(await page.evaluate(() => getComputedStyle(document.documentElement).fontSize), '16px', 'Screen width must not enlarge all controls');
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, `${name} horizontal overflow`);
     }
     await page.locator('[data-page="content"]').click(); await page.locator('#content-list .content-row').first().waitFor();
     await page.screenshot({ path: path.join(out, 'mobile-content.png'), fullPage: true });
     await page.locator('[data-page="settings"]').click(); await page.screenshot({ path: path.join(out, 'mobile-settings.png'), fullPage: true });
+    await page.setViewportSize({ width: 1920, height: 1080 }); await page.screenshot({ path: path.join(out, 'desktop-global-settings.png'), fullPage: true });
+    await page.locator('#settings-profile').selectOption('PPSSPP'); await page.locator('#settings-kind').selectOption('core-options'); await page.locator('#setting-ppsspp_internal_resolution').waitFor();
+    await page.screenshot({ path: path.join(out, 'desktop-core-settings.png'), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
     await page.locator('[data-page="overview"]').click(); await page.locator('#theme').selectOption('dark');
     await page.screenshot({ path: path.join(out, 'mobile-dark.png'), fullPage: true });
     await page.reload(); assert.equal(await page.locator('html').getAttribute('data-theme'), 'dark');
     await page.locator('#theme').selectOption('light');
     assert.deepEqual(errors, [], 'Browser JavaScript errors');
-    console.log('PASS: release ordering/current/update/unknown/offline/empty, safe notes, real upload/download, duplicate refusal, keyboard cancellation during upload, settings persistence, folder creation, navigation, mobile overflow and saved theme.');
+    console.log('PASS: release ordering/current/update/unknown/offline/empty, safe notes, real upload/download, duplicate refusal, keyboard cancellation during upload, global/core isolation, pagination, settings persistence, folder creation, navigation, mobile overflow and saved theme.');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

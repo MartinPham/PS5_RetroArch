@@ -463,18 +463,30 @@ included in the next release.
   compatibility API does not provide a measured value.
 - **Transfers:** progress and results from the current browser session.
   Downloads are handled by the browser’s download manager.
-- **Settings:** volume, rumble strength, scaling, vertical sync, automatic
-  states, advanced settings visibility and the console menu. Saved changes
-  apply the next time RetroArch starts. WebUI light/dark appearance applies
-  immediately and is remembered only in that browser.
+- **Settings:** search and edit the global settings present in the console’s
+  saved configuration and packaged defaults. Choose a saved core profile to
+  edit its **Core options** or **RetroArch overrides**. Core profiles appear
+  after opening and closing content with that core. Fields without declared
+  type metadata use the exact configuration value; consult the core’s options
+  for supported choices. Settings are paged so large profiles remain usable.
+  Saved changes apply the next time RetroArch starts. WebUI light/dark
+  appearance applies immediately and is remembered only in that browser.
 
 Browser changes are saved separately in `config/webui.cfg`; explicitly supplied
-launch overrides take precedence. Uploads are confined to `content/`, and the
+launch overrides take precedence. Core edits wait in `config/webui-cores/`
+until startup, then merge into the core’s own `.opt` or `.cfg` and are consumed.
+This prevents a running core from overwriting pending browser edits, while
+allowing later changes made on the console to persist normally. Core RetroArch
+overrides require automatic overrides to be enabled; game and folder overrides
+can take priority. Stale browser saves are rejected until refreshed. Uploads
+are confined to `content/`, and the
 service does not expose arbitrary console paths. This is a local-network HTTP
 service without a login: use it on a trusted network and do not forward port
 6769 to the internet.
 
-The purple layout and discreet creator portrait are made for this project.
+The purple layout uses a fixed desktop text scale and a bounded content width,
+so ultrawide screens do not enlarge every control. The discreet creator portrait
+is included locally.
 The HTTP transport uses GNU libmicrohttpd, following
 [ps5-payload-dev/websrv](https://github.com/ps5-payload-dev/websrv).
 
