@@ -35,6 +35,26 @@ from pathlib import Path
 # (file, anchor, inserted-before-anchor, already-present-marker)
 EDITS = [
     (
+        "runloop.c",
+        "bool core_unserialize(retro_ctx_serialize_info_t *info)\n{",
+        "/* patches/series, 0103: shared-pool state-load diagnostics. */\n"
+        "extern void ps5_memory_report(const char *, size_t, int);\n\n"
+        "bool core_unserialize(retro_ctx_serialize_info_t *info)\n{",
+        "patches/series, 0103: shared-pool state-load diagnostics",
+    ),
+    (
+        "runloop.c",
+        "   if (!info || !runloop_st->current_core.retro_unserialize(info->data_const, info->size))\n      return false;",
+        "   /* patches/series, 0103: report either state-load result. */\n"
+        "   bool loaded;\n"
+        "   if (!info)\n      return false;\n"
+        "   ps5_memory_report(\"state-load-before\", info->size, 0);\n"
+        "   loaded = runloop_st->current_core.retro_unserialize(info->data_const, info->size);\n"
+        "   ps5_memory_report(\"state-load-after\", info->size, loaded ? 0 : -1);\n"
+        "   if (!loaded)\n      return false;",
+        "patches/series, 0103: report either state-load result",
+    ),
+    (
         # 0102: choose frontend defaults before saved options are read. All v1,
         # v2 and translated definitions converge here; legacy variables use
         # the same helper. Never modify a core's (potentially const) definitions.

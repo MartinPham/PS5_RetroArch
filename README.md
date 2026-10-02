@@ -121,14 +121,19 @@ intro crash at 10× and working play at 6×. Their logs show 10× geometry, 8× 
 pipelines and a null-pointer fault. The new default uses 6× with MSAA off to
 reduce rendering cost.
 
-A subsequent **Ghost of Sparta** console save-state test still reproduces the **null-image
-fault at 10× with 8× MSAA** on the balanced-default build when those saved
-settings override the defaults. The same state passed repeated loads and a new
-save/load round trip at 6× with MSAA off, 6× with 8× MSAA, and 10× with MSAA off.
-Each passing run lasted 80 seconds and exited normally. This verifies the
-balanced profile for that reproduction; it does not fix the underlying image
-creation failure or establish stability for every game. See the
-[console test record](evidence/ppsspp-balanced-state-run/).
+The **Ghost of Sparta** save-state reproduction now reports the actual failure:
+Vulkan runs out of device memory at 10× with 8× MSAA. The new build checks image
+and view creation, reclaims retired GPU allocations and retries once. On the
+console, the first load recovered; an unrecoverable allocation after the second
+load closed content and returned to the frontend without the old null-image
+fault. This makes memory exhaustion recoverable; it does not make 10×/8× a
+recommended configuration.
+
+The same state passed three loads and one save/load round trip at both 6× with
+MSAA off and 6× with 8× MSAA, each in an 80-second run with normal exit.
+The existing 6×/MSAA-off profile remains the default recommendation. These tests
+cover one affected state, not every game, the original reporter's firmware 5.02
+console, or a long soak. See the [memory recovery test record](evidence/ppsspp-memory-recovery/).
 
 | Core | Systems covered by the core | Console verification in this port |
 | --- | --- | --- |
@@ -204,6 +209,23 @@ profile migration still sets an existing `PPSSPP.opt` aside as
 repeat that migration. The native loader has explicit limits, including
 no TLS or general exception-unwind registration, and it waits for a core's
 threads to finish before unmapping the core.
+
+The CPU heap and Vulkan allocations use the same console direct-memory pool.
+The heap commits memory on demand; each core does not receive a separate
+11.65 GiB allowance. SDK `f674976` replaces busy allocator waits with sleeping
+waits and exposes the pool's free space and largest contiguous block. This
+avoids consuming a CPU while another thread owns an allocator lock; it does
+not promise a particular frame-rate increase.
+
+PPSSPP uses that shared-pool snapshot to trim unused textures and temporary
+framebuffers under pressure. It keeps recent textures and guest framebuffer
+contents, waits for submitted work before reclaiming retired GPU objects, and
+retries a failed framebuffer allocation once. If image or image-view creation
+still fails, it requests a controlled content shutdown with an explanation
+instead of passing a missing image to the driver. Internal resolution and MSAA
+are not silently changed. `trace.txt` records CPU heap use, GPU allocations,
+free space, largest free block and allocation results around state loads and
+these failures; an unavailable measurement is explicitly marked unknown.
 
 ## Roadmap
 

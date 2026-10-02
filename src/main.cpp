@@ -49,6 +49,7 @@
 
 #include "trace.hpp"
 #include "memory_diagnostics.hpp"
+#include "memory_status.h"
 #include "../build/title_build_identity.h"
 #include "title_threads.hpp"
 
@@ -97,6 +98,7 @@ void *log_flusher(void *)
         nanosleep(&interval, nullptr);
         if (tick % 40 == 0 && g_memory_report.load(std::memory_order_relaxed))
         {
+            ps5_memory_report("periodic", 0, 0);
             std::size_t flexible = 0;
             sceKernelAvailableFlexibleMemorySize(&flexible);
             std::fprintf(stderr, "memory: flexible_free=%zu KiB\n", flexible >> 10);
@@ -503,6 +505,7 @@ int main()
     argv_with_extras[base_count + extra_count] = nullptr;
 
     ps5_crash_report_install();
+    ps5_memory_report("startup", 0, 0);
     ps5_core_threads_start();
     ps5_sampler_start();
     ps5_audio_test_if_requested();

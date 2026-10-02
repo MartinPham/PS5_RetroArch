@@ -229,3 +229,7 @@
 #       across legacy, v1, v2 and translated core options
 #       core_option_manager.c
 0102-balanced-core-defaults
+
+# 0103  shared CPU/GPU memory reports before and after state loads
+#       runloop.c
+0103-state-load-memory-reports
