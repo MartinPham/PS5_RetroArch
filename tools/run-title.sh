@@ -27,6 +27,9 @@
 #   tools/run-title.sh --picker-test=300:es-de --frontend-capture=20 --watch 60
 #                                       the picker, as the home screen starts it: 300 frames, a
 #                                       picture of the last, then it chooses EmulationStation
+#   tools/run-title.sh --pad-script=tests/pad/manual-scan-reentry.txt --watch 40
+#                                       RetroArch with the pad scripted (src/input_ps5.cpp says
+#                                       how); its SCREENSHOT pictures are collected afterwards
 #
 # Why this exists. Every earlier round of the console loop was four hand-driven
 # steps that needed a person: build, upload, launch, read. Two things went wrong
@@ -68,6 +71,7 @@ frontend_capture=
 frontend_scroll=
 picker_test=
 retroarch_frames=0
+pad_script=
 while (( $# )); do
     case "$1" in
         --no-build)  build=0 ;;
@@ -89,7 +93,8 @@ while (( $# )); do
         --frontend-launch) frontend_scroll=${frontend_scroll:+$frontend_scroll,}launch ;;
         --picker-test=*) picker_test=${1#*=} ;;
         --retroarch-frames=*) retroarch_frames=${1#*=} ;;
-        *) echo "usage: ${0##*/} [--no-build] [--no-deploy] [--watch SECONDS] [--gpu-profile 1..60] [--audio-test] [--core-test[=fceumm|mgba|snes9x|fbneo|genesis_plus_gx|ppsspp]] [--relaunch-test[=1..20] [--relaunch-image=PATH]] [--display-modes-test[=frames]] [--frontend-capture=SECONDS[,SECONDS...] [--frontend-scroll] [--frontend-profile] [--frontend-quit] [--frontend-launch]] [--picker-test=FRAMES:retroarch|es-de|none] [--retroarch-frames=N]" >&2; exit 2 ;;
+        --pad-script=*) pad_script=${1#*=} ;;
+        *) echo "usage: ${0##*/} [--no-build] [--no-deploy] [--watch SECONDS] [--gpu-profile 1..60] [--audio-test] [--core-test[=fceumm|mgba|snes9x|fbneo|genesis_plus_gx|ppsspp]] [--relaunch-test[=1..20] [--relaunch-image=PATH]] [--display-modes-test[=frames]] [--frontend-capture=SECONDS[,SECONDS...] [--frontend-scroll] [--frontend-profile] [--frontend-quit] [--frontend-launch]] [--picker-test=FRAMES:retroarch|es-de|none] [--retroarch-frames=N] [--pad-script=FILE]" >&2; exit 2 ;;
     esac
     shift
 done
@@ -145,6 +150,14 @@ fi
 
 [[ $retroarch_frames =~ ^[0-9]+$ ]] && (( retroarch_frames <= 100000 )) ||
     { echo "--retroarch-frames takes 1..100000 frames" >&2; exit 2; }
+
+# The pad script (src/input_ps5.cpp): presses and actions timed from RetroArch's
+# first poll, at most 128 lines.
+if [[ -n $pad_script ]]; then
+    [[ -f $pad_script ]] || { echo "--pad-script: no file $pad_script" >&2; exit 2; }
+    (( $(grep -cvE '^[[:space:]]*(#|$)' "$pad_script") <= 128 )) ||
+        { echo "--pad-script holds more than 128 presses and actions" >&2; exit 2; }
+fi
 
 if (( audio_test && watch < 20 )); then
     echo "--audio-test requires --watch of at least 20 seconds" >&2
@@ -236,7 +249,7 @@ fi
 # appeared. A run that does not ask for extras must not inherit them, so the file
 # is removed on every run - before the launch, because deleting it afterwards
 # would leave it for the next one if this run dies.
-python3 - "$title_id" "$profile" "$audio_test" "$core_test" "$relaunch_test" "$relaunch_run" "$display_modes_test" "$relaunch_image" "$frontend_capture" "$capture_run" "$frontend_scroll" "$picker_test" "$retroarch_frames" <<'PY'
+python3 - "$title_id" "$profile" "$audio_test" "$core_test" "$relaunch_test" "$relaunch_run" "$display_modes_test" "$relaunch_image" "$frontend_capture" "$capture_run" "$frontend_scroll" "$picker_test" "$retroarch_frames" "$pad_script" <<'PY'
 import importlib.util, sys
 spec = importlib.util.spec_from_file_location("dt", "tools/deploy-title.py")
 dt = importlib.util.module_from_spec(spec); spec.loader.exec_module(dt)
@@ -313,6 +326,17 @@ with connect(**dt.load_settings()) as ftp:
         ftp.storbinary(f"STOR /data/homebrew/{sys.argv[1]}/args.txt",
                        io.BytesIO(f"--max-frames={sys.argv[13]}\n".encode()))
         print(f"    RetroArch quits after {sys.argv[13]} frames")
+    # The pad script, and the pictures an earlier one took: a test launch keeps
+    # /app0/pad-script.txt, so one left behind would drive this run.
+    remove_if_present(ftp, f"/data/homebrew/{sys.argv[1]}/pad-script.txt")
+    from ps5_ftp import list_names
+    for name in sorted(list_names(ftp, f"/data/homebrew/{sys.argv[1]}")):
+        if name.startswith("pad-shot-") and name.endswith(".png"):
+            remove_if_present(ftp, f"/data/homebrew/{sys.argv[1]}/{name}")
+    if sys.argv[14]:
+        with open(sys.argv[14], "rb") as script:
+            ftp.storbinary(f"STOR /data/homebrew/{sys.argv[1]}/pad-script.txt", script)
+        print(f"    armed pad script {sys.argv[14]}")
     # The launch is a test run's (src/main.cpp): it keeps the test files this run
     # armed, and starts RetroArch rather than the frontend picker
     # (src/frontend_mode_ps5.cpp) unless a picker test is armed.
@@ -424,6 +448,31 @@ if rows and rows[-1] == {"frames": int(frames), "choice": choice, "next": expect
     print(f"    picker test PASS: {frames} frames, a picture of the last ({picture}), then {choice}")
 else:
     print(f"    picker test FAILED: wanted {frames} frames then {choice} ({expected!r}), got {rows}")
+PY
+fi
+
+# --- the pad script's pictures ------------------------------------------------
+if [[ -n $pad_script ]]; then
+python3 - "$title_id" "$stamp" "$pad_script" <<'PY'
+import importlib.util, shutil, sys
+from pathlib import Path
+sys.path.insert(0, "tools")
+from ps5_ftp import connect, list_names, remove_if_present
+spec = importlib.util.spec_from_file_location("dt", "tools/deploy-title.py")
+dt = importlib.util.module_from_spec(spec); spec.loader.exec_module(dt)
+base = f"/data/homebrew/{sys.argv[1]}"
+out = Path("klog") / f"pad-{sys.argv[2]}"
+out.mkdir(parents=True, exist_ok=True)
+shutil.copyfile(sys.argv[3], out / "pad-script.txt")
+with connect(**dt.load_settings()) as ftp:
+    remove_if_present(ftp, f"{base}/pad-script.txt")
+    shots = sorted((name for name in list_names(ftp, base) if name.startswith("pad-shot-") and name.endswith(".png")),
+                   key=lambda name: int(name[9:-4]) if name[9:-4].isdigit() else 0)
+    for name in shots:
+        with (out / name).open("wb") as stream:
+            ftp.retrbinary(f"RETR {base}/{name}", stream.write)
+        remove_if_present(ftp, f"{base}/{name}")
+print(f"    pad script: {len(shots)} picture(s) saved to {out}")
 PY
 fi
 

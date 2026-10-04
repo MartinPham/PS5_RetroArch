@@ -42,7 +42,10 @@
  * prints how many new frames the core has made and the longest gap between
  * two since the last MARK, so a run's frame rate is read over exact script
  * times. RUMBLE_STRONG and RUMBLE_WEAK take a strength (0..65535) and exercise
- * controller feedback; send 0 to stop. Testing only: the file is never shipped.
+ * controller feedback; send 0 to stop. `<seconds> MENU` prints where the menu
+ * is: the list on top of its stack (label and path), the selected entry and the
+ * pending selection, which pictures cannot show (SCREENSHOT leaves the XMB out
+ * when no content runs). Testing only: the file is never shipped.
  *
  * Reference: docs/REFERENCE.md, "Input".
  */
@@ -68,6 +71,7 @@
 #include "command.h"
 #include "configuration.h"
 #include "core_option_manager.h"
+#include "menu/menu_driver.h"
 #if defined(HAVE_SLANG)
 #include "gfx/video_shader_parse.h"
 #include "menu/menu_shader.h"
@@ -243,6 +247,7 @@ enum class ScriptActionKind
     effect,
     rumble_strong,
     rumble_weak,
+    menu,
 };
 // The core's new frames (gfx/video_driver.c, patches/series 0101), the
 // longest time between two of them since the last MARK and how many came more
@@ -315,7 +320,8 @@ void load_script() noexcept
                             {"SCREENSHOT_FULL", ScriptActionKind::screenshot_full},
                             {"MARK", ScriptActionKind::mark},
                             {"RUMBLE_STRONG", ScriptActionKind::rumble_strong},
-                            {"RUMBLE_WEAK", ScriptActionKind::rumble_weak}};
+                            {"RUMBLE_WEAK", ScriptActionKind::rumble_weak},
+                            {"MENU", ScriptActionKind::menu}};
         // OPTION key value: set a core option as the Quick Menu does (the core
         // sees it as an update at its next frame)
         if (std::strcmp(buttons, "OPTION") == 0 && action_count < action_capacity)
@@ -923,6 +929,37 @@ void run_script_actions() noexcept
             char note[128];
             std::snprintf(note, sizeof(note), "input: pad script SCREENSHOT at %.2f s: %s %d",
                           seconds, path, ok ? 1 : 0);
+            ps5_input_trace(note);
+            continue;
+        }
+        if (action.kind == ScriptActionKind::menu)
+        {
+            char note[768];
+#ifdef HAVE_MENU
+            struct menu_state *menu_st = menu_state_get_ptr();
+            menu_list_t *menu_list = menu_st->entries.list;
+            const file_list_t *stack = MENU_LIST_GET(menu_list, 0);
+            const file_list_t *entries = MENU_LIST_GET_SELECTION(menu_list, 0);
+            const char *label = "", *path = "", *selected = "";
+            if (stack != nullptr && stack->size > 0)
+            {
+                const struct item_file &top = stack->list[stack->size - 1];
+                label = top.label != nullptr ? top.label : "";
+                path = top.path != nullptr ? top.path : "";
+            }
+            const std::size_t selection = menu_st->selection_ptr;
+            if (entries != nullptr && selection < entries->size &&
+                entries->list[selection].path != nullptr)
+                selected = entries->list[selection].path;
+            std::snprintf(note, sizeof(note),
+                          "input: pad script MENU at %.2f s: depth %zu, list '%.120s' '%.200s', "
+                          "entry %zu of %zu '%.200s', pending '%.120s'",
+                          seconds, stack != nullptr ? stack->size : 0, label, path, selection,
+                          entries != nullptr ? entries->size : 0, selected,
+                          menu_st->pending_selection);
+#else
+            std::snprintf(note, sizeof(note), "input: pad script MENU at %.2f s: no menu", seconds);
+#endif
             ps5_input_trace(note);
             continue;
         }

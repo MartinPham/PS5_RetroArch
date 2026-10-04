@@ -298,6 +298,22 @@ fi
     --exclude-libs=ALL -L "$build/obj" \
     -e _start -o "$build/llvm-pie.elf" "${link_inputs[@]}" \
     --as-needed "$sdk_root"/target/lib/*.so
+# A title loads neither libkernel_sys's exports nor libScePosixForWebKit's: an
+# import only their stubs define links, and is null at run time, so its first
+# call jumps to address 0 (getcwd and the *at functions; strcasestr from the
+# menu's list search, 2026-10-04). Each is bound to the platform layer instead
+# (src/platform_wraps.c, the --wrap flags in tools/build-title.sh).
+mapfile -t null_imports < <(comm -23 \
+    <("$sdk_root/bin/llvm-nm" -D --undefined-only "$build/llvm-pie.elf" |
+        awk '$1 == "U" { sub(/@.*/, "", $2); print $2 }' | sort -u) \
+    <(for stub in "$sdk_root"/target/lib/*.so "$agc_stub" "$agc_driver_stub"; do
+        case $(basename "$stub") in libkernel_sys.so | libScePosixForWebKit.so) continue ;; esac
+        "$sdk_root/bin/llvm-nm" -D --defined-only "$stub" 2>/dev/null | awk '{ print $NF }'
+    done | sort -u))
+((${#null_imports[@]} == 0)) || {
+    echo "error: the title imports what no module it loads exports (null at run time): ${null_imports[*]}" >&2
+    exit 1
+}
 "$tool" link --in "$build/llvm-pie.elf" --out "$build/eboot.elf" \
     --stub-dir "$sdk_root/target/lib" --stub "$agc_stub" \
     --stub "$agc_driver_stub" --module-sdk "$module_sdk" \

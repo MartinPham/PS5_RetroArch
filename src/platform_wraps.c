@@ -12,8 +12,12 @@
  * tools/core-imports.py.
  */
 
+#include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdarg.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include <ps5platform/libc.h>
 
@@ -75,4 +79,56 @@ struct dirent *__wrap_readdir(DIR *directory)
 int __wrap_closedir(DIR *directory)
 {
     return ps5_closedir(directory);
+}
+
+/* No module a title loads exports these, so each import was null at run time:
+ * strcasestr and mkstemp linked against libScePosixForWebKit's stub, link,
+ * symlink, readlink and pathconf against libkernel_sys's. RetroArch's menu
+ * finds the entry it should select with strcasestr: Import Content -> Manual
+ * Scan -> Content Directory, opened a second time, starts on the parent of the
+ * folder chosen before with that folder pending, and jumped to address 0
+ * (2026-10-04). tools/build.sh refuses a title that imports one again. */
+char *__wrap_strcasestr(const char *haystack, const char *needle)
+{
+    return ps5_strcasestr(haystack, needle);
+}
+
+int __wrap_mkstemp(char *path_template)
+{
+    return ps5_mkstemp(path_template);
+}
+
+int __wrap_link(const char *existing, const char *name)
+{
+    return ps5_link(existing, name);
+}
+
+int __wrap_symlink(const char *target, const char *name)
+{
+    return ps5_symlink(target, name);
+}
+
+ssize_t __wrap_readlink(const char *path, char *buffer, size_t size)
+{
+    return ps5_readlink(path, buffer, size);
+}
+
+/* libc++'s std::filesystem::current_path sizes its buffer with pathconf; the
+ * platform layer has none, so the limits are the console's FreeBSD ones for a
+ * path that exists, as the frontends answer (frontends/common/frontend_shims.c). */
+long __wrap_pathconf(const char *path, int name)
+{
+    struct stat status;
+    if (!path || stat(path, &status) != 0)
+        return -1;
+    switch (name)
+    {
+    case _PC_PATH_MAX:
+        return PATH_MAX;
+    case _PC_NAME_MAX:
+        return NAME_MAX;
+    default:
+        errno = EINVAL;
+        return -1;
+    }
 }

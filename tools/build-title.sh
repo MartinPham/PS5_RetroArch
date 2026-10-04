@@ -311,6 +311,11 @@ directory_wrap_flags+=" --wrap=getcwd"
 # Folders the title or a core creates are 0777 and files at least 0666, so FTP,
 # which runs as another user, can reach them (src/permissions_ps5.cpp).
 directory_wrap_flags+=" --wrap=mkdir --wrap=open --wrap=fopen"
+# No module a title loads exports these: each import was null at run time, and
+# RetroArch's menu search (strcasestr) jumped to address 0 from Manual Scan's
+# Content Directory (src/platform_wraps.c). tools/build.sh refuses the title
+# should one be imported again.
+directory_wrap_flags+=" --wrap=strcasestr --wrap=mkstemp --wrap=link --wrap=symlink --wrap=readlink --wrap=pathconf"
 echo "==> [title] step 2/3: the title"
 # Large frontend/core buffers use mapped memory; wrap all ownership operations.
 PS5_PAYLOAD_SDK="$sdk" \
