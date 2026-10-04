@@ -9,6 +9,7 @@
 #define _POSIX_C_SOURCE 200809L
 #endif
 #include "ps5_game.h"
+#include "ps5_library.h"
 
 #include <ctype.h>
 #include <dirent.h>
@@ -236,263 +237,25 @@ int ps5_game_check(struct ps5_game *game)
     return 0;
 }
 
-/* --- RetroArch's playlists: a reader of the JSON they are written in ------------ */
+/* --- RetroArch's playlists (src/ps5_library.h reads them) ------------------------ */
 
-struct json
+struct core_search
 {
-    const char *at, *end;
+    const char *content;
+    char *core;
+    size_t size;
+    int found;
 };
 
-static void json_space(struct json *json)
+static void match_entry(void *context, const struct ps5_playlist_entry *entry)
 {
-    while (json->at < json->end && isspace((unsigned char)*json->at))
-        json->at++;
-}
-
-static void put_utf8(char *out, size_t size, size_t *length, unsigned code)
-{
-    unsigned char bytes[4];
-    size_t count;
-    if (code < 0x80)
-        bytes[0] = (unsigned char)code, count = 1;
-    else if (code < 0x800)
-        bytes[0] = (unsigned char)(0xc0 | code >> 6),
-        bytes[1] = (unsigned char)(0x80 | (code & 0x3f)), count = 2;
-    else if (code < 0x10000)
-        bytes[0] = (unsigned char)(0xe0 | code >> 12),
-        bytes[1] = (unsigned char)(0x80 | ((code >> 6) & 0x3f)),
-        bytes[2] = (unsigned char)(0x80 | (code & 0x3f)), count = 3;
-    else
-        bytes[0] = (unsigned char)(0xf0 | code >> 18),
-        bytes[1] = (unsigned char)(0x80 | ((code >> 12) & 0x3f)),
-        bytes[2] = (unsigned char)(0x80 | ((code >> 6) & 0x3f)),
-        bytes[3] = (unsigned char)(0x80 | (code & 0x3f)), count = 4;
-    for (size_t i = 0; i < count; i++)
-        if (*length + 1 < size)
-            out[(*length)++] = (char)bytes[i];
-}
-
-static int hex4(const char *at, unsigned *value)
-{
-    *value = 0;
-    for (int i = 0; i < 4; i++)
+    struct core_search *search = (struct core_search *)context;
+    /* "DETECT" (or nothing) leaves the choice to RetroArch at launch: no core. */
+    if (!search->found && strcmp(entry->path, search->content) == 0 && entry->core_path[0] &&
+        strcmp(entry->core_path, "DETECT") != 0)
     {
-        const char c = at[i];
-        const int digit = c >= '0' && c <= '9'   ? c - '0'
-                          : c >= 'a' && c <= 'f' ? c - 'a' + 10
-                          : c >= 'A' && c <= 'F' ? c - 'A' + 10
-                                                 : -1;
-        if (digit < 0)
-            return -1;
-        *value = *value << 4 | (unsigned)digit;
-    }
-    return 0;
-}
-
-/* A JSON string, unescaped into out (truncated to size); 0, or -1 when malformed. */
-static int json_string(struct json *json, char *out, size_t size)
-{
-    size_t length = 0;
-    if (json->at >= json->end || *json->at != '"')
-        return -1;
-    json->at++;
-    while (json->at < json->end && *json->at != '"')
-    {
-        char c = *json->at++;
-        if (c == '\\')
-        {
-            if (json->at >= json->end)
-                return -1;
-            c = *json->at++;
-            unsigned code;
-            switch (c)
-            {
-            case 'b':
-                c = '\b';
-                break;
-            case 'f':
-                c = '\f';
-                break;
-            case 'n':
-                c = '\n';
-                break;
-            case 'r':
-                c = '\r';
-                break;
-            case 't':
-                c = '\t';
-                break;
-            case 'u':
-                if (json->end - json->at < 4 || hex4(json->at, &code) != 0)
-                    return -1;
-                json->at += 4;
-                if (code >= 0xd800 && code < 0xdc00 && json->end - json->at >= 6 &&
-                    json->at[0] == '\\' && json->at[1] == 'u')
-                {
-                    unsigned low;
-                    if (hex4(json->at + 2, &low) == 0 && low >= 0xdc00 && low < 0xe000)
-                    {
-                        code = 0x10000 + ((code - 0xd800) << 10) + (low - 0xdc00);
-                        json->at += 6;
-                    }
-                }
-                put_utf8(out, size, &length, code);
-                continue;
-            default:
-                break; /* '"', '\\' and '/' stand for themselves */
-            }
-        }
-        if (length + 1 < size)
-            out[length++] = c;
-    }
-    if (json->at >= json->end)
-        return -1;
-    json->at++;
-    if (size)
-        out[length] = '\0';
-    return 0;
-}
-
-/* Skips one JSON value of any kind; 0, or -1 when malformed. */
-static int json_skip(struct json *json, int depth)
-{
-    json_space(json);
-    if (json->at >= json->end || depth > 64)
-        return -1;
-    const char c = *json->at;
-    if (c == '"')
-    {
-        char ignored[1];
-        return json_string(json, ignored, 0);
-    }
-    if (c == '{' || c == '[')
-    {
-        const char close = c == '{' ? '}' : ']';
-        json->at++;
-        json_space(json);
-        if (json->at < json->end && *json->at == close)
-        {
-            json->at++;
-            return 0;
-        }
-        for (;;)
-        {
-            if (c == '{')
-            {
-                char ignored[1];
-                json_space(json);
-                if (json_string(json, ignored, 0) != 0)
-                    return -1;
-                json_space(json);
-                if (json->at >= json->end || *json->at++ != ':')
-                    return -1;
-            }
-            if (json_skip(json, depth + 1) != 0)
-                return -1;
-            json_space(json);
-            if (json->at >= json->end)
-                return -1;
-            if (*json->at == ',')
-            {
-                json->at++;
-                continue;
-            }
-            if (*json->at++ != close)
-                return -1;
-            return 0;
-        }
-    }
-    while (json->at < json->end && !strchr(",]} \t\r\n", *json->at))
-        json->at++; /* a number, true, false or null */
-    return 0;
-}
-
-/* In a playlist's items, the core of the entry whose path is content: 1 when found. */
-static int playlist_items(struct json *json, const char *content, char *core, size_t size)
-{
-    json_space(json);
-    if (json->at >= json->end || *json->at++ != '[')
-        return 0;
-    for (;;)
-    {
-        json_space(json);
-        if (json->at >= json->end || *json->at == ']')
-            return 0;
-        if (*json->at != '{')
-        {
-            if (json_skip(json, 1) != 0)
-                return 0;
-        }
-        else
-        {
-            char path[PS5_GAME_PATH_MAX] = "", entry_core[PS5_GAME_PATH_MAX] = "", key[32];
-            json->at++;
-            for (;;)
-            {
-                json_space(json);
-                if (json->at < json->end && *json->at == '}')
-                {
-                    json->at++;
-                    break;
-                }
-                if (json_string(json, key, sizeof(key)) != 0)
-                    return 0;
-                json_space(json);
-                if (json->at >= json->end || *json->at++ != ':')
-                    return 0;
-                json_space(json);
-                if (strcmp(key, "path") == 0 && json->at < json->end && *json->at == '"')
-                {
-                    if (json_string(json, path, sizeof(path)) != 0)
-                        return 0;
-                }
-                else if (strcmp(key, "core_path") == 0 && json->at < json->end && *json->at == '"')
-                {
-                    if (json_string(json, entry_core, sizeof(entry_core)) != 0)
-                        return 0;
-                }
-                else if (json_skip(json, 1) != 0)
-                    return 0;
-                json_space(json);
-                if (json->at < json->end && *json->at == ',')
-                    json->at++;
-            }
-            /* "DETECT" (or nothing) leaves the choice to RetroArch at launch: no core. */
-            if (strcmp(path, content) == 0 && entry_core[0] && strcmp(entry_core, "DETECT") != 0)
-            {
-                snprintf(core, size, "%s", entry_core);
-                return 1;
-            }
-        }
-        json_space(json);
-        if (json->at < json->end && *json->at == ',')
-            json->at++;
-    }
-}
-
-static int playlist_core(const char *text, size_t length, const char *content, char *core,
-                         size_t size)
-{
-    struct json json = {text, text + length};
-    json_space(&json);
-    if (json.at >= json.end || *json.at++ != '{')
-        return 0;
-    for (;;)
-    {
-        char key[32];
-        json_space(&json);
-        if (json.at >= json.end || *json.at == '}' || json_string(&json, key, sizeof(key)) != 0)
-            return 0;
-        json_space(&json);
-        if (json.at >= json.end || *json.at++ != ':')
-            return 0;
-        if (strcmp(key, "items") == 0)
-            return playlist_items(&json, content, core, size);
-        if (json_skip(&json, 1) != 0)
-            return 0;
-        json_space(&json);
-        if (json.at < json.end && *json.at == ',')
-            json.at++;
+        snprintf(search->core, search->size, "%s", entry->core_path);
+        search->found = 1;
     }
 }
 
@@ -501,28 +264,19 @@ int ps5_game_playlist_core(const char *playlists, const char *content, char *cor
     DIR *folder = opendir(playlists);
     if (!folder)
         return 0;
-    int found = 0;
-    for (struct dirent *entry; !found && (entry = readdir(folder)) != NULL;)
+    struct core_search search = {content, core, size, 0};
+    for (struct dirent *entry; !search.found && (entry = readdir(folder)) != NULL;)
     {
         const size_t name_length = strlen(entry->d_name);
         if (name_length < 5 || strcmp(entry->d_name + name_length - 4, ".lpl") != 0)
             continue;
         char path[PS5_GAME_PATH_MAX];
         snprintf(path, sizeof(path), "%s/%s", playlists, entry->d_name);
-        FILE *file = fopen(path, "rb");
-        if (!file)
-            continue;
-        char *text = NULL;
-        long length = 0;
-        if (fseek(file, 0, SEEK_END) == 0 && (length = ftell(file)) > 0 && length < (32L << 20) &&
-            fseek(file, 0, SEEK_SET) == 0 && (text = (char *)malloc((size_t)length)) != NULL &&
-            fread(text, 1, (size_t)length, file) == (size_t)length)
-            found = playlist_core(text, (size_t)length, content, core, size);
-        free(text);
-        fclose(file);
+        char ignored[8];
+        ps5_playlist_read(path, ignored, sizeof(ignored), match_entry, &search);
     }
     closedir(folder);
-    return found;
+    return search.found;
 }
 
 /* --- the frontend's side -------------------------------------------------------- */

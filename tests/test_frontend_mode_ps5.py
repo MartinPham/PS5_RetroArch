@@ -14,10 +14,14 @@ class FrontendModePs5(unittest.TestCase):
             # Game mode's contract (src/ps5_game.c) is C, with its cores folder in the scratch folder.
             defines = [f'-DPS5_GAME_CORES="{td}/cores/"']
             contract = str(Path(td) / 'ps5_game.o')
+            library = str(Path(td) / 'ps5_library.o')
             subprocess.run(['cc', '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror', *defines, '-c',
                             'src/ps5_game.c', '-o', contract], cwd=ROOT, check=True)
+            subprocess.run(['cc', '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror', '-c',
+                            'src/ps5_library.c', '-o', library], cwd=ROOT, check=True)
             subprocess.run(['c++', '-std=c++17', '-O2', '-Wall', '-Wextra', '-Werror', '-Isrc', *defines,
-                            'tests/frontend_mode_ps5_test.cpp', contract, '-o', binary], cwd=ROOT, check=True)
+                            'tests/frontend_mode_ps5_test.cpp', contract, library, '-o', binary], cwd=ROOT,
+                           check=True)
             subprocess.run([binary, td], cwd=ROOT, check=True, timeout=15)
 
 

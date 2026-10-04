@@ -75,10 +75,13 @@ while IFS= read -r -d '' source; do
     objects+=("$object")
 done < <(find "$root/frontends/$program" "$root/frontends/common" -type f \( -name '*.c' -o -name '*.cpp' \) \
     -print0 | sort -z)
-# Game mode's contract (src/ps5_game.h), the one every frontend starts games through:
-# the same file eboot.bin is built with.
-"${cc[@]}" -std=c11 "${common[@]}" "${includes[@]}" -c "$root/src/ps5_game.c" -o "$work/obj/ps5_game.o"
-objects+=("$work/obj/ps5_game.o")
+# The contracts every frontend shares with eboot.bin, the same files it is built with:
+# game mode (src/ps5_game.h), how a frontend starts a game, and the game library
+# (src/ps5_library.h), what a frontend shows, read from RetroArch's playlists.
+for contract in ps5_game ps5_library; do
+    "${cc[@]}" -std=c11 "${common[@]}" "${includes[@]}" -c "$root/src/$contract.c" -o "$work/obj/$contract.o"
+    objects+=("$work/obj/$contract.o")
+done
 
 # ../PS5_OpenGL's linker script includes this project's base layout by that path.
 cp "$native/ps5-pie.ld" "$work/tooling/native/ps5-pie-base.ld"

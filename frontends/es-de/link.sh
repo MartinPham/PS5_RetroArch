@@ -7,7 +7,7 @@
 PS5_SDL2="$sdl" PS5_OPENGL_SDK="$gl_sdk" bash "$root/tools/build-esde.sh"
 deps="$root/.deps/native"
 esde="$root/build/es-de/src"
-extra_includes=("$root/frontends/es-de/ps5/include")
+extra_includes=("$root/frontends/es-de/ps5/include" "$deps/pugixml-ps5/include")
 extra_system_includes=("$root/.deps/stb-2c980bb59875b0d32144a71867fbdebb2f77cd20" "$deps/libwebp-ps5/include")
 extra_archives=(
     "$esde/libes-de.a" "$esde/libes-core.a" "$esde/liblunasvg.a" "$esde/libplutovg.a" "$esde/librlottie.a"

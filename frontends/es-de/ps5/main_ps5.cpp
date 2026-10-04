@@ -13,6 +13,8 @@
  *    finds its resources (/app0/es-de/resources; it has no /proc/self/exe here);
  *  - $HOME names its data directory: /app0/es-de, so its settings, game lists
  *    and themes are /app0/es-de/ES-DE, inside the title's folder;
+ *  - its systems and game lists, written from RetroArch's playlists before it starts
+ *    (library_ps5.cpp, the library every frontend shares), and --gamelist-only;
  *  - a working directory getcwd can name: /app0/es-de again
  *    (frontends/common/frontend_shims.c), since ES-DE makes every path absolute
  *    against it.
@@ -45,6 +47,7 @@ extern "C" int sceSystemServiceHideSplashScreen(void);
 extern "C" int sceKernelUsleep(unsigned int microseconds);
 extern "C" int ps5_frontend_chdir(const char *path);
 extern "C" int ps5_esde_take_game_result(void);
+extern "C" int ps5_esde_write_library(char *summary, size_t summary_size);
 
 /* ../PS5_OpenGL's heap (native-app/app_heap.c), which every allocation of this
  * program goes through: its 128 MiB default refused the Alekfull NX theme's
@@ -95,8 +98,21 @@ int main(int argc, char **argv)
     /* Back from a game RetroArch ran (game mode, game_ps5.cpp)? ES-DE's start asks. */
     note("start: back from a game", ps5_esde_take_game_result());
 
+    /* Its systems and game lists, from RetroArch's playlists (library_ps5.cpp), then
+     * --gamelist-only: ES-DE holds exactly those games and scans for none. */
+    char library[256] = "";
+    const int systems = ps5_esde_write_library(library, sizeof(library));
+    if (std::FILE *log = std::fopen(start_log, "a"))
+    {
+        std::fprintf(log, "%lld start: library from RetroArch's playlists: %s\n",
+                     static_cast<long long>(std::time(nullptr)), library);
+        std::fclose(log);
+    }
+    note("start: systems written", systems);
+
     std::vector<std::string> port_arguments;
-    std::vector<char *> arguments{const_cast<char *>(program)};
+    static char gamelist_only[] = "--gamelist-only";
+    std::vector<char *> arguments{const_cast<char *>(program), gamelist_only};
     for (int i = 0; i < argc && argv && argv[i]; i++)
     {
         if (std::strncmp(argv[i], "--ps5-", 6) == 0)

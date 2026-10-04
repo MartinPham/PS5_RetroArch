@@ -5,7 +5,7 @@
  *
  * ES-DE starts a game through the title's game mode (src/ps5_game.h), the same
  * contract every frontend uses. Its launch command, from es_systems.xml
- * (frontends/es-de/systems.py), is RetroArch's own command line,
+ * (written from RetroArch's playlists by library_ps5.cpp), is RetroArch's own command line,
  * "/app0/eboot.bin -L <core> <content>", which ES-DE expands as it does on a PC;
  * the ES-DE patch (patches/0001, FileData::launchGame) saves its game lists, releases
  * the display and calls ps5_esde_launch_game with it in place of starting a process.

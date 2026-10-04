@@ -14,7 +14,7 @@ class Ps5Game(unittest.TestCase):
             defines = [f'-DPS5_GAME_CORES="{td}/cores/"', f'-DPS5_GAME_REQUEST_PATH="{td}/game-request.txt"',
                        f'-DPS5_GAME_RESULT_PATH="{td}/game-result.txt"']
             subprocess.run(['cc', '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror', *defines,
-                            'tests/ps5_game_test.c', '-o', binary], cwd=ROOT, check=True)
+                            'tests/ps5_game_test.c', 'src/ps5_library.c', '-o', binary], cwd=ROOT, check=True)
             subprocess.run([binary, td], cwd=ROOT, check=True, timeout=15)
 
 
