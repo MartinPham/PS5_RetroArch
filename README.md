@@ -279,8 +279,9 @@ bash tools/verify.sh
 
 The five gates are **format → unit → build → integration → evidence**. The build
 pins RetroArch 1.22.2, fetches core sources/metadata with checked hashes, builds the
-frontend and all sixteen cores, and stages the native title in `dist/PPSA99169/` (a
-release build, `PS5_RELEASE_TAG` set, leaves RPCS3 out).
+frontend and fifteen cores, and stages the native title in `dist/PPSA99169/`. RPCS3
+is left out unless you build your own title with `PS5_WITH_RPCS3=1`, and a release
+never carries it.
 The initial dependency/source fetch requires network access.
 
 For an already configured checkout:
@@ -314,11 +315,11 @@ scripts. **If you want RPCS3, you must compile it yourself**, for your own
 console:
 
 ```bash
-bash tools/build-title.sh     # a development build: the frontend and every core, RPCS3 included
+PS5_WITH_RPCS3=1 bash tools/build-title.sh   # your own build: the frontend, every core and RPCS3
 ```
 
-Leave `PS5_RELEASE_TAG` unset: a release build (`PS5_RELEASE_TAG=...`) leaves
-RPCS3 out, and `tools/check-notices.py --release` refuses a title with any
+Leave `PS5_RELEASE_TAG` unset: a plain build leaves RPCS3 out, a release build
+(`PS5_RELEASE_TAG=...`) refuses `PS5_WITH_RPCS3=1`, and `tools/check-notices.py --release` refuses a title with any
 RPCS3 file in it. Build the whole title, not the core alone: the title's native
 import table is made from the cores it is built with, so a release title cannot
 load an RPCS3 core built on its own. `tools/build-rpcs3.sh` builds only the
