@@ -13,6 +13,8 @@
 #   tools/run-title.sh --display-modes-test=180 --watch 60  every display size, then RetroArch
 #   tools/run-title.sh --relaunch-test=1 --relaunch-image=es-de/es-de.bin --frontend-capture=20,40 --watch 60
 #                                       hand over to EmulationStation, picture its frames at 20 and 40 s
+#                                       (--frontend-scroll: and press Right every 400 ms meanwhile;
+#                                       --frontend-profile: and sample the CPU, for tools/esde-profile.py)
 #
 # Why this exists. Every earlier round of the console loop was four hand-driven
 # steps that needed a person: build, upload, launch, read. Two things went wrong
@@ -51,6 +53,7 @@ relaunch_test=0
 display_modes_test=0
 relaunch_image=
 frontend_capture=
+frontend_scroll=
 while (( $# )); do
     case "$1" in
         --no-build)  build=0 ;;
@@ -66,7 +69,9 @@ while (( $# )); do
         --display-modes-test) display_modes_test=180 ;;
         --display-modes-test=*) display_modes_test=${1#*=} ;;
         --frontend-capture=*) frontend_capture=${1#*=} ;;
-        *) echo "usage: ${0##*/} [--no-build] [--no-deploy] [--watch SECONDS] [--gpu-profile 1..60] [--audio-test] [--core-test[=fceumm|mgba|snes9x|fbneo|genesis_plus_gx|ppsspp]] [--relaunch-test[=1..20] [--relaunch-image=PATH]] [--display-modes-test[=frames]] [--frontend-capture=SECONDS[,SECONDS...]]" >&2; exit 2 ;;
+        --frontend-scroll) frontend_scroll=${frontend_scroll:+$frontend_scroll,}scroll ;;
+        --frontend-profile) frontend_scroll=${frontend_scroll:+$frontend_scroll,}profile ;;
+        *) echo "usage: ${0##*/} [--no-build] [--no-deploy] [--watch SECONDS] [--gpu-profile 1..60] [--audio-test] [--core-test[=fceumm|mgba|snes9x|fbneo|genesis_plus_gx|ppsspp]] [--relaunch-test[=1..20] [--relaunch-image=PATH]] [--display-modes-test[=frames]] [--frontend-capture=SECONDS[,SECONDS...] [--frontend-scroll] [--frontend-profile]]" >&2; exit 2 ;;
     esac
     shift
 done
@@ -201,7 +206,7 @@ fi
 # appeared. A run that does not ask for extras must not inherit them, so the file
 # is removed on every run - before the launch, because deleting it afterwards
 # would leave it for the next one if this run dies.
-python3 - "$title_id" "$profile" "$audio_test" "$core_test" "$relaunch_test" "$relaunch_run" "$display_modes_test" "$relaunch_image" "$frontend_capture" "$capture_run" <<'PY'
+python3 - "$title_id" "$profile" "$audio_test" "$core_test" "$relaunch_test" "$relaunch_run" "$display_modes_test" "$relaunch_image" "$frontend_capture" "$capture_run" "$frontend_scroll" <<'PY'
 import importlib.util, sys
 spec = importlib.util.spec_from_file_location("dt", "tools/deploy-title.py")
 dt = importlib.util.module_from_spec(spec); spec.loader.exec_module(dt)
@@ -258,8 +263,10 @@ with connect(**dt.load_settings()) as ftp:
     remove_if_present(ftp, control)
     if sys.argv[9]:
         remove_if_present(ftp, f"/data/homebrew/{sys.argv[1]}/es-de/capture-test.jsonl")
-        ftp.storbinary(f"STOR {control}", io.BytesIO(f"{sys.argv[9]} {sys.argv[10]}\n".encode()))
-        print(f"    armed frontend capture at {sys.argv[9]} s, run {sys.argv[10]}")
+        ftp.storbinary(f"STOR {control}", io.BytesIO(f"{sys.argv[9]} {sys.argv[10]} {sys.argv[11]}\n".encode()))
+        print(f"    armed frontend capture at {sys.argv[9]} s, run {sys.argv[10]}"
+              f"{', pressing Right every 400 ms' if 'scroll' in sys.argv[11] else ''}"
+              f"{', sampling the CPU every ms' if 'profile' in sys.argv[11] else ''}")
 PY
 
 # --- listen first, then launch ----------------------------------------------
@@ -334,7 +341,8 @@ out = Path("klog") / sys.argv[2]
 out.mkdir(parents=True, exist_ok=True)
 with connect(**dt.load_settings()) as ftp:
     remove_if_present(ftp, f"{base}/capture-test.txt")
-    for name in ("capture-test.jsonl", "es-de-ps5.log", "ES-DE/logs/es_log.txt"):
+    for name in ("capture-test.jsonl", "es-de-ps5.log", "stdout.txt", "ES-DE/logs/es_log.txt",
+                 f"profile-{sys.argv[2]}.txt"):
         target = out / Path(name).name
         try:
             with target.open("wb") as stream:
@@ -362,6 +370,13 @@ with connect(**dt.load_settings()) as ftp:
                 pass
         print(f"    frame {row['frame']} at {row['seconds']} s: {row['width']}x{row['height']}, "
               f"GL error {row['gl_error']}, {'saved to ' + str(local) if row['written'] else 'not written'}")
+        if "interval_ms" in row:
+            gap, swap = row["interval_ms"], row["swap_ms"]
+            print(f"      {row['interval_frames']} frames before it ({row['presses']} presses): between swaps "
+                  f"mean {gap['mean']} ms, p95 {gap['p95']}, max {gap['max']}, {gap['over_25']} over 25 ms; "
+                  f"in the swap mean {swap['mean']} ms, p95 {swap['p95']}, max {swap['max']}")
+            if row.get("slow"):
+                print(f"      frames over 100 ms (seconds:ms@presses): {' '.join(row['slow'])}")
     wanted = [int(value) for value in sys.argv[3].split(",")]
     if [row["seconds"] for row in rows if row["written"] and row["gl_error"] == 0] == wanted:
         print(f"    frontend capture PASS: {len(wanted)} pictures in {out}")

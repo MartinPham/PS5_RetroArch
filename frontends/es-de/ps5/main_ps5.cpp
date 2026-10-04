@@ -17,6 +17,12 @@
  *    (frontends/common/frontend_shims.c), since ES-DE makes every path absolute
  *    against it.
  *
+ * The OpenGL driver's own reports (its printf lines: presentation, batching,
+ * glthread) go to /app0/es-de/stdout.txt, a line at a time. /app0/es-de/env.txt,
+ * when present, sets environment variables before ES-DE starts, one NAME=VALUE a
+ * line: the driver's switches (PS5_GLTHREAD=1 runs Mesa's GL thread) can be tried
+ * on the console without a new build.
+ *
  * When ES-DE returns (Quit in its menu), the title goes back to eboot.bin, with
  * the arguments of this port that this run was given (a relaunch test's, so the
  * test sees its next generation).
@@ -62,7 +68,25 @@ void note(const char *what, int value)
 int main(int argc, char **argv)
 {
     note("start: hide splash", sceSystemServiceHideSplashScreen());
+    if (std::freopen("/app0/es-de/stdout.txt", "w", stdout))
+        std::setvbuf(stdout, nullptr, _IOLBF, 0);
     setenv("HOME", home, 1);
+    if (std::FILE *environment = std::fopen("/app0/es-de/env.txt", "r"))
+    {
+        char line[256];
+        int set = 0;
+        while (std::fgets(line, sizeof(line), environment))
+        {
+            line[std::strcspn(line, "\r\n")] = '\0';
+            char *equals = std::strchr(line, '=');
+            if (line[0] == '#' || !equals || equals == line)
+                continue;
+            *equals = '\0';
+            set += setenv(line, equals + 1, 1) == 0 ? 1 : 0;
+        }
+        std::fclose(environment);
+        note("start: variables from env.txt", set);
+    }
     note("start: working directory (errno if refused)", ps5_frontend_chdir(home) == 0 ? 0 : errno);
 
     std::vector<std::string> port_arguments;

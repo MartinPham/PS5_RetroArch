@@ -171,6 +171,35 @@ index d0c8264..c5a4ee5 100644
      mStringMap["ThemeVariant"] = {"", ""};
      mStringMap["ThemeColorScheme"] = {"", ""};
      mStringMap["ThemeFontSize"] = {"", ""};
+diff --git a/es-core/src/renderers/RendererOpenGL.cpp b/es-core/src/renderers/RendererOpenGL.cpp
+index 6e78440..3216de8 100644
+--- a/es-core/src/renderers/RendererOpenGL.cpp
++++ b/es-core/src/renderers/RendererOpenGL.cpp
+@@ -198,7 +198,12 @@ void RendererOpenGL::setup()
+     SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
+     SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
+     SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
++#if defined(__PROSPERO__)
++    // PS5: ES-DE never tests depth, so no depth buffer is asked for or cleared.
++    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 0);
++#else
+     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
++#endif
+     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+ 
+ #if !defined(USE_OPENGLES)
+@@ -425,7 +430,11 @@ void RendererOpenGL::swapBuffers()
+ #else
+     SDL_GL_SwapWindow(getSDLWindow());
+ #endif
++#if defined(__PROSPERO__)
++    GL_CHECK_ERROR(glClear(GL_COLOR_BUFFER_BIT));
++#else
+     GL_CHECK_ERROR(glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT));
++#endif
+ }
+ 
+ unsigned int RendererOpenGL::createTexture(const unsigned int texUnit,
 diff --git a/es-core/src/utils/FileSystemUtil.cpp b/es-core/src/utils/FileSystemUtil.cpp
 index ba0a43f..5b91645 100644
 --- a/es-core/src/utils/FileSystemUtil.cpp
