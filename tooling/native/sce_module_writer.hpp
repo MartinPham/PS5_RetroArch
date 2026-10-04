@@ -29,6 +29,11 @@ struct Options
     /* The libc heap the process parameters reserve: the most there is, unless a
      * program that keeps its memory elsewhere (an OpenGL frontend) asks for less. */
     std::uint64_t libc_heap_size = std::numeric_limits<std::uint64_t>::max();
+    /* The modules the system preloads for the process (its process parameters'
+     * pointer at 0x50): 0 leaves the pointer out and the system's full default list,
+     * VideoOut included. A headless helper asks for less (0x8000000000000002: libc
+     * only), as ../PS5_Proton measured for Sony's local processes. */
+    std::uint64_t preload_prx_flags = 0;
     std::vector<std::string> version_components;
 };
 

@@ -676,7 +676,13 @@ Bytes write_executable(const Image &image, std::span<const Stub> stubs, const Op
 
     const Bytes process_parameters =
         build_process_parameters(options.module_sdk, options.companion_sdk);
-    const ParameterBlocks blocks = build_parameter_blocks(options.libc_heap_size);
+    ParameterBlocks blocks = build_parameter_blocks(options.libc_heap_size);
+    const std::size_t preload_offset = blocks.data.size();
+    if (options.preload_prx_flags != 0)
+    {
+        blocks.data.resize(preload_offset + 8);
+        write_u64(blocks.data, preload_offset, options.preload_prx_flags);
+    }
     const std::uint64_t process_address =
         align_up(std::max(relro_content_end, ro_end > relro_start ? ro_end : 0), 8);
     const std::uint64_t blocks_address = align_up(process_address + process_parameters.size(), 8);
@@ -781,6 +787,9 @@ Bytes write_executable(const Image &image, std::span<const Stub> stubs, const Op
     std::vector<DynamicRelocation> relocations;
     for (const auto &[offset, addend] : parameter_pointers)
         relocations.push_back({offset, kRelRelative, addend});
+    if (options.preload_prx_flags != 0)
+        relocations.push_back(
+            {process_address + 0x50, kRelRelative, blocks_address + preload_offset});
     relocations.insert(relocations.end(), relative.begin(), relative.end());
     const std::size_t relative_count = relocations.size();
     relocations.insert(relocations.end(), symbolic.begin(), symbolic.end());
