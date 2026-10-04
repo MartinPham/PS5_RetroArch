@@ -1,0 +1,28 @@
+# RetroArch's content folders (/app0/content/<folder>) and the ES-DE system each
+# one is shown as. The ES-DE name selects the system's full name, extensions,
+# platform and theme from ES-DE's own es_systems.xml (frontends/es-de/systems.py).
+# ES-DE system	RetroArch content folder
+cps	ARCADE - CPS I, II & III
+neogeo	ARCADE - NeoGeo
+fbneo	ARCADE - Others (FBNeo)
+arcade	ARCADE - Sega System 16 & 32
+mame	MAME
+c64	Commodore 64
+dreamcast	Dreamcast
+gamegear	GameGear
+genesis	Genesis
+mastersystem	Master System
+saturn	Saturn
+gb	Nintendo - Game Boy
+gba	Nintendo - Game Boy Advance
+gbc	Nintendo - Game Boy Color
+nes	Nintendo - Nintendo Entertainment System
+snes	Nintendo - Super Nintendo Entertainment System
+n64	Nintendo 64
+nds	Nintendo DS
+n3ds	Nintendo 3DS
+gc	Nintendo - GameCube
+wii	Nintendo Wii
+psx	PS1
+ps2	PS2
+psp	PSP

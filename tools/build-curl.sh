@@ -6,7 +6,8 @@
 # them: mbedTLS 3.6.7 (the 3.6 long-term branch, 2026-07-07) and curl 8.22.0
 # (2026-09-02). RetroArch's own mbedTLS is 2.6.0, too old for today's TLS. curl is
 # HTTP and HTTPS only: no other protocols, compression, HTTP/2, IDN or
-# certificate store (EmulationStation names its bundled certificates).
+# certificate store (EmulationStation names its bundled certificates). The SDK
+# declares pipe2, which the console's libc does not have: curl uses a socketpair.
 #
 # Output: .deps/native/curl-ps5 (lib/libcurl.a, lib/libmbed{tls,x509,crypto}.a,
 # include/curl, include/mbedtls, include/psa), with the versions and this
@@ -72,6 +73,7 @@ echo "==> [curl] curl $curl_version (HTTP and HTTPS over mbedTLS)"
     --disable-pop3 --disable-imap --disable-smtp --disable-gopher --disable-mqtt --disable-file \
     --disable-ftp --disable-smb --disable-ipfs --disable-manual --disable-docs --disable-ntlm \
     --disable-unix-sockets --disable-threaded-resolver --disable-dependency-tracking \
+    ac_cv_func_pipe2=no \
     > "$build/curl-configure.log" 2>&1) ||
     { tail -30 "$build/curl-configure.log" >&2; exit 1; }
 make -C "$build/curl/lib" -j"${JOBS:-16}" > "$build/curl-make.log" 2>&1 ||

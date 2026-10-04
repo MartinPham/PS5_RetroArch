@@ -7,15 +7,135 @@
  * _FORTIFY_SOURCE, so its emulated thread-locals (emutls.c, which SDL2 and the
  * OpenGL SDK pull in) call __memset_chk, which the console's libc does not have.
  * The check is the caller's buffer size; this keeps it.
+ *
+ * faccessat: libc++'s std::filesystem asks with it (ES-DE's MiximageGenerator), and
+ * the console's libc has none. access() itself is the platform's here (bound by
+ * tools/build-frontend.sh), the console's refusing every path a title asks about.
+ *
+ * iswctype_l: libc++ classifies wide characters through it with FreeBSD's ctype
+ * masks (_CTYPE_S for a space; ctype_byname<wchar_t>::do_is, which a named
+ * std::locale reaches while it builds its time facets). The platform's
+ * ps5_iswctype_l hands the mask to the console's iswctype, which is Dinkumware's
+ * (it exports _Iswctype and _Getpwctytab) and reads its argument as an index into
+ * its class table: ES-DE's std::locale("C") faulted there on its first line
+ * (klog/run-PPSA99169-154622.log: SIGSEGV in libSceLibcInternal, c 0x20, mask
+ * 0x4000). This answers from the platform's FreeBSD rune type, as FreeBSD does.
+ *
+ * pathconf: libc++'s std::filesystem::current_path sizes its buffer with it, and
+ * only libkernel_sys exports it, which a title does not load: the import would be
+ * null. The limits are the console's FreeBSD ones, for a path that exists.
+ *
+ * getcwd: the platform's ps5_getcwd finds the working directory by walking up
+ * from "." and listing each parent, which failed in the title's sandbox; ES-DE,
+ * given no working directory, recursed until its stack ran out
+ * (klog/run-PPSA99169-160106.log). A frontend sets its working directory once,
+ * with ps5_frontend_chdir and an absolute path, and getcwd answers with that path;
+ * before it does, getcwd is the platform's. The console refuses chdir to a title
+ * (EPERM, klog/frontend-20261004-161318/es-de-ps5.log), so until that changes
+ * getcwd stays the platform's.
+ *
+ * lstat: refused to a title (EPERM) for every path; ES-DE asks it of every theme
+ * file through std::filesystem::is_symlink and logged 13,686 refusals in one
+ * start (klog/frontend-20261004-161318/es_log.txt). A title has no symbolic links
+ * (the platform refuses symlink and finds none with readlink), so lstat answers
+ * as stat. The platform's getcwd walks the tree with it too.
  */
+#include <errno.h>
+#include <fcntl.h>
+#include <limits.h>
 #include <stddef.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <wctype.h>
 
-void abort(void);
 
 void *__memset_chk(void *destination, int value, size_t length, size_t destination_length)
 {
     if (length > destination_length)
         abort();
     return memset(destination, value, length);
+}
+
+int faccessat(int directory, const char *path, int mode, int flags)
+{
+    (void)flags;
+    if (!path || (directory != AT_FDCWD && path[0] != '/'))
+    {
+        errno = ENOSYS;
+        return -1;
+    }
+    return access(path, mode);
+}
+
+unsigned long ps5____runetype_l(int c, void *locale);
+
+int iswctype_l(wint_t c, wctype_t class_mask, locale_t locale)
+{
+    return (ps5____runetype_l((int)c, (void *)locale) & class_mask) != 0;
+}
+
+long pathconf(const char *path, int name)
+{
+    struct stat status;
+    if (!path || stat(path, &status) != 0)
+        return -1;
+    switch (name)
+    {
+    case _PC_PATH_MAX:
+        return PATH_MAX;
+    case _PC_NAME_MAX:
+        return NAME_MAX;
+    default:
+        errno = EINVAL;
+        return -1;
+    }
+}
+
+char *ps5_getcwd(char *buffer, size_t size);
+
+static char working_directory[PATH_MAX];
+
+int ps5_frontend_chdir(const char *path)
+{
+    if (!path || path[0] != '/' || strlen(path) >= sizeof(working_directory))
+    {
+        errno = EINVAL;
+        return -1;
+    }
+    if (chdir(path) != 0)
+        return -1;
+    strcpy(working_directory, path);
+    return 0;
+}
+
+char *getcwd(char *buffer, size_t size)
+{
+    if (!working_directory[0])
+        return ps5_getcwd(buffer, size);
+    const size_t needed = strlen(working_directory) + 1;
+    if (buffer && size == 0)
+    {
+        errno = EINVAL;
+        return NULL;
+    }
+    if (!buffer)
+    {
+        buffer = malloc(size > needed ? size : needed);
+        if (!buffer)
+            return NULL;
+    }
+    else if (size < needed)
+    {
+        errno = ERANGE;
+        return NULL;
+    }
+    memcpy(buffer, working_directory, needed);
+    return buffer;
+}
+
+int lstat(const char *path, struct stat *status)
+{
+    return stat(path, status);
 }

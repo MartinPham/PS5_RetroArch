@@ -11,6 +11,8 @@
 #   tools/run-title.sh --relaunch-test=1 --relaunch-image=probe/eboot-copy.bin --watch 45
 #                                       restart through a copy of eboot.bin at /app0/probe/...
 #   tools/run-title.sh --display-modes-test=180 --watch 60  every display size, then RetroArch
+#   tools/run-title.sh --relaunch-test=1 --relaunch-image=es-de/es-de.bin --frontend-capture=20,40 --watch 60
+#                                       hand over to EmulationStation, picture its frames at 20 and 40 s
 #
 # Why this exists. Every earlier round of the console loop was four hand-driven
 # steps that needed a person: build, upload, launch, read. Two things went wrong
@@ -48,6 +50,7 @@ core_test=none
 relaunch_test=0
 display_modes_test=0
 relaunch_image=
+frontend_capture=
 while (( $# )); do
     case "$1" in
         --no-build)  build=0 ;;
@@ -62,7 +65,8 @@ while (( $# )); do
         --relaunch-image=*) relaunch_image=${1#*=} ;;
         --display-modes-test) display_modes_test=180 ;;
         --display-modes-test=*) display_modes_test=${1#*=} ;;
-        *) echo "usage: ${0##*/} [--no-build] [--no-deploy] [--watch SECONDS] [--gpu-profile 1..60] [--audio-test] [--core-test[=fceumm|mgba|snes9x|fbneo|genesis_plus_gx|ppsspp]] [--relaunch-test[=1..20] [--relaunch-image=PATH]] [--display-modes-test[=frames]]" >&2; exit 2 ;;
+        --frontend-capture=*) frontend_capture=${1#*=} ;;
+        *) echo "usage: ${0##*/} [--no-build] [--no-deploy] [--watch SECONDS] [--gpu-profile 1..60] [--audio-test] [--core-test[=fceumm|mgba|snes9x|fbneo|genesis_plus_gx|ppsspp]] [--relaunch-test[=1..20] [--relaunch-image=PATH]] [--display-modes-test[=frames]] [--frontend-capture=SECONDS[,SECONDS...]]" >&2; exit 2 ;;
     esac
     shift
 done
@@ -95,6 +99,16 @@ fi
 if (( display_modes_test && watch < 30 )); then
     echo "--display-modes-test requires --watch of at least 30 seconds" >&2
     exit 2
+fi
+
+# The frontend capture (frontends/es-de/ps5/capture_ps5.cpp): pictures of the frames
+# EmulationStation presents that many seconds after its first.
+capture_run=frontend-$(date +%Y%m%d-%H%M%S)
+if [[ -n $frontend_capture ]]; then
+    [[ $frontend_capture =~ ^[0-9]+(,[0-9]+)*$ ]] ||
+        { echo "--frontend-capture takes seconds, comma-separated" >&2; exit 2; }
+    (( ${frontend_capture##*,} + 15 <= watch )) ||
+        { echo "--watch must allow the last capture plus 15 seconds" >&2; exit 2; }
 fi
 
 if (( audio_test && watch < 20 )); then
@@ -187,7 +201,7 @@ fi
 # appeared. A run that does not ask for extras must not inherit them, so the file
 # is removed on every run - before the launch, because deleting it afterwards
 # would leave it for the next one if this run dies.
-python3 - "$title_id" "$profile" "$audio_test" "$core_test" "$relaunch_test" "$relaunch_run" "$display_modes_test" "$relaunch_image" <<'PY'
+python3 - "$title_id" "$profile" "$audio_test" "$core_test" "$relaunch_test" "$relaunch_run" "$display_modes_test" "$relaunch_image" "$frontend_capture" "$capture_run" <<'PY'
 import importlib.util, sys
 spec = importlib.util.spec_from_file_location("dt", "tools/deploy-title.py")
 dt = importlib.util.module_from_spec(spec); spec.loader.exec_module(dt)
@@ -240,6 +254,12 @@ with connect(**dt.load_settings()) as ftp:
         remove_if_present(ftp, f"/data/homebrew/{sys.argv[1]}/display-modes-test.jsonl")
         ftp.storbinary(f"STOR {control}", io.BytesIO(f"{sys.argv[7]}\n".encode()))
         print(f"    armed display modes test: {sys.argv[7]} frames a mode")
+    control = f"/data/homebrew/{sys.argv[1]}/es-de/capture-test.txt"
+    remove_if_present(ftp, control)
+    if sys.argv[9]:
+        remove_if_present(ftp, f"/data/homebrew/{sys.argv[1]}/es-de/capture-test.jsonl")
+        ftp.storbinary(f"STOR {control}", io.BytesIO(f"{sys.argv[9]} {sys.argv[10]}\n".encode()))
+        print(f"    armed frontend capture at {sys.argv[9]} s, run {sys.argv[10]}")
 PY
 
 # --- listen first, then launch ----------------------------------------------
@@ -298,6 +318,57 @@ except Exception as error:
     print(f"    unreadable: {error}")
     raise SystemExit(1)
 PY
+
+# --- the frontend's pictures and logs ----------------------------------------
+# Collected before RetroArch's logs, whose checks stop the script on a failure.
+if [[ -n $frontend_capture ]]; then
+python3 - "$title_id" "$capture_run" "$frontend_capture" <<'PY'
+import importlib.util, json, sys
+from pathlib import Path
+sys.path.insert(0, "tools")
+from ps5_ftp import connect, remove_if_present
+spec = importlib.util.spec_from_file_location("dt", "tools/deploy-title.py")
+dt = importlib.util.module_from_spec(spec); spec.loader.exec_module(dt)
+base = f"/data/homebrew/{sys.argv[1]}/es-de"
+out = Path("klog") / sys.argv[2]
+out.mkdir(parents=True, exist_ok=True)
+with connect(**dt.load_settings()) as ftp:
+    remove_if_present(ftp, f"{base}/capture-test.txt")
+    for name in ("capture-test.jsonl", "es-de-ps5.log", "ES-DE/logs/es_log.txt"):
+        target = out / Path(name).name
+        try:
+            with target.open("wb") as stream:
+                ftp.retrbinary(f"RETR {base}/{name}", stream.write)
+            print(f"    saved es-de/{name} to {target}")
+        except Exception as error:
+            target.unlink(missing_ok=True)
+            print(f"    could not retrieve es-de/{name}: {type(error).__name__}")
+    records = out / "capture-test.jsonl"
+    rows = [json.loads(line) for line in records.read_text().splitlines() if line.strip()] if records.exists() else []
+    rows = [row for row in rows if row.get("run") == sys.argv[2]]
+    for row in rows:
+        remote = row["file"].replace("/app0/", f"/data/homebrew/{sys.argv[1]}/", 1)
+        local = out / Path(remote).name
+        if row["written"]:
+            with local.open("wb") as stream:
+                ftp.retrbinary(f"RETR {remote}", stream.write)
+            remove_if_present(ftp, remote)
+            try:
+                from PIL import Image
+                Image.open(local).save(local.with_suffix(".png"))
+                local.unlink()
+                local = local.with_suffix(".png")
+            except ImportError:
+                pass
+        print(f"    frame {row['frame']} at {row['seconds']} s: {row['width']}x{row['height']}, "
+              f"GL error {row['gl_error']}, {'saved to ' + str(local) if row['written'] else 'not written'}")
+    wanted = [int(value) for value in sys.argv[3].split(",")]
+    if [row["seconds"] for row in rows if row["written"] and row["gl_error"] == 0] == wanted:
+        print(f"    frontend capture PASS: {len(wanted)} pictures in {out}")
+    else:
+        print(f"    frontend capture FAILED: wanted {wanted}, got {[row['seconds'] for row in rows]}")
+PY
+fi
 
 # --- preserve development logs and optional buffered timing ------------------
 python3 - "$title_id" "$profile" "$stamp" "$audio_test" "$expected_identity" "$core_test" "$relaunch_test" "$relaunch_run" "$display_modes_test" "$relaunch_image" <<'PY'
@@ -373,6 +444,13 @@ with connect(**dt.load_settings()) as ftp:
                 gaps = [(b["monotonic_ns"] - a["monotonic_ns"]) / 1e9 for a, b in zip(entries, entries[1:])]
                 if gaps:
                     print(f"    restart to restart: {min(gaps):.2f} to {max(gaps):.2f} s")
+                # A frontend image (es-de/...) is not eboot.bin: the chain ends when it starts.
+                if sys.argv[10].startswith("es-de/"):
+                    if events or [(row["generation"], row["action"]) for row in entries] != [(0, "restart")]:
+                        raise SystemExit("Relaunch test failed: see the generations above")
+                    print(f"    relaunch test PASS: handed over to /app0/{sys.argv[10]}")
+                    print(f"    saved {name} to {target}")
+                    continue
                 checks = (
                     not events,
                     [row["generation"] for row in entries] == list(range(count + 1)),
