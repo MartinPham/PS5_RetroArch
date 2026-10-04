@@ -114,6 +114,31 @@ def sizes(ftp, path: str) -> dict[str, int]:
         ftp.cwd(previous)
 
 
+SELF_MAGIC = bytes.fromhex("4f153d1d")
+
+
+def stored_digest(settings: dict, path: str) -> tuple[int, str]:
+    """A signed executable's size and sha256 as the console stores it.
+
+    The console's FTP service decodes a SELF on download unless its per-connection
+    SELF transfer mode is switched off (docs/FINDINGS.md, 2026-10-04: the first
+    `SELF` answers "SELF transfer mode disabled"), so the bytes it serves by default
+    are not the bytes uploaded. A connection of its own, with the mode off, reads
+    them as stored, and the digest is then the upload's.
+    """
+    import io
+    with connect(**settings) as raw:
+        for _ in range(2):
+            if "disabled" in raw.sendcmd("SELF"):
+                break
+        else:
+            raise SystemExit("the FTP service did not turn its SELF transfer mode off")
+        buffer = io.BytesIO()
+        raw.retrbinary(f"RETR {path}", buffer.write, blocksize=256 * 1024)
+    payload = buffer.getvalue()
+    return len(payload), hashlib.sha256(payload).hexdigest()
+
+
 def remote_digest(ftp, path: str) -> tuple[int, str]:
     """Read a file back and return its size and sha256.
 
@@ -242,6 +267,19 @@ def do_deploy(settings: dict, tid: str, force: bool = False) -> int:
                 skipped += 1
                 continue
             upload_atomic(ftp, local, remote)
+            if relative != "eboot.bin" and local.read_bytes()[:4] == SELF_MAGIC:
+                # Another signed executable of the title (a frontend, es-de/*.bin):
+                # compared as stored, so the digest is the whole answer.
+                size, digest = stored_digest(settings, remote)
+                if digest != expected:
+                    upload_atomic(ftp, local, remote)
+                    size, digest = stored_digest(settings, remote)
+                if digest != expected:
+                    raise SystemExit(f"{relative}: stored as {size} bytes with sha256 {digest[:16]}, "
+                                     f"not this build's {expected[:16]}")
+                print(f"    {relative:28} {size:>10,} bytes as stored; SHA-256 verified  ok")
+                record[relative] = expected
+                continue
             size, digest = remote_digest(ftp, remote)
             # A read-back can itself be the flaky part, so the same wrong answer
             # twice is not proof: one retry, then report what the console served.

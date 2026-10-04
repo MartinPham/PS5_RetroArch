@@ -264,6 +264,8 @@ int link_command(std::span<char *> args)
         link_options.module_sdk = static_cast<std::uint32_t>(parse_integer(*value));
     if (const auto value = option(args, "--companion-sdk"))
         link_options.companion_sdk = static_cast<std::uint32_t>(parse_integer(*value));
+    if (const auto value = option(args, "--libc-heap-size"))
+        link_options.libc_heap_size = parse_integer(*value);
     for (std::string_view value : options(args, "--component"))
         link_options.version_components.emplace_back(value);
 

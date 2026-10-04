@@ -423,6 +423,16 @@ PY_WEBUI
 # Pinned production effects, with dependency and development-fixture checks.
 python3 "$root/tools/video-assets.py" stage "$dist"
 
+# Frontend executables beside eboot.bin (frontends/, tools/build-frontend.sh), only
+# those PS5_FRONTENDS names: they need ../PS5_OpenGL's SDK and its SDL2 build, and a
+# default title carries none yet. Built before the manifest so it covers them.
+if [[ -n ${PS5_FRONTENDS:-} ]]; then
+    read -r -a frontends <<< "$PS5_FRONTENDS"
+    for frontend in "${frontends[@]}"; do
+        bash "$root/tools/build-frontend.sh" "$frontend"
+    done
+fi
+
 # The licences and notices the parts of this folder require, and the source revision
 # of each (tooling/notices/components.json, docs/RELEASING.md), written before the
 # manifest so the manifest covers them. It fails if a staged core is not the file its

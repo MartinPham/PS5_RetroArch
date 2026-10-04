@@ -307,7 +307,7 @@ struct ParameterBlocks
     std::size_t heap_extended{};
 };
 
-ParameterBlocks build_parameter_blocks()
+ParameterBlocks build_parameter_blocks(std::uint64_t libc_heap_size)
 {
     constexpr std::array<std::size_t, 6> sizes = {0xa8, 0x38, 0x10, 0x78, 0xc0, 0x38};
     constexpr std::array<std::uint64_t, 6> counts = {0x000000010000000e, 0, 0, 2, 3, 1};
@@ -327,7 +327,7 @@ ParameterBlocks build_parameter_blocks()
         if (counts[i] != 0)
             write_u64(result.data, result.offsets[i] + 8, counts[i]);
     }
-    write_u64(result.data, result.heap_size, std::numeric_limits<std::uint64_t>::max());
+    write_u64(result.data, result.heap_size, libc_heap_size);
     write_u32(result.data, result.heap_extended, 1);
     return result;
 }
@@ -676,7 +676,7 @@ Bytes write_executable(const Image &image, std::span<const Stub> stubs, const Op
 
     const Bytes process_parameters =
         build_process_parameters(options.module_sdk, options.companion_sdk);
-    const ParameterBlocks blocks = build_parameter_blocks();
+    const ParameterBlocks blocks = build_parameter_blocks(options.libc_heap_size);
     const std::uint64_t process_address =
         align_up(std::max(relro_content_end, ro_end > relro_start ? ro_end : 0), 8);
     const std::uint64_t blocks_address = align_up(process_address + process_parameters.size(), 8);

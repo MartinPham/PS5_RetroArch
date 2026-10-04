@@ -226,9 +226,12 @@ with connect(**dt.load_settings()) as ftp:
         if sys.argv[8]:
             from pathlib import Path
             from ps5_ftp import upload_atomic
-            upload_atomic(ftp, Path(f"dist/{sys.argv[1]}/eboot.bin"), f"/data/homebrew/{sys.argv[1]}/{sys.argv[8]}")
             image = f" /app0/{sys.argv[8]}"
-            print(f"    uploaded a copy of this build's eboot.bin to /app0/{sys.argv[8]}")
+            if Path(f"dist/{sys.argv[1]}/{sys.argv[8]}").is_file():
+                print(f"    the image is this build's /app0/{sys.argv[8]}, deployed with the title")
+            else:
+                upload_atomic(ftp, Path(f"dist/{sys.argv[1]}/eboot.bin"), f"/data/homebrew/{sys.argv[1]}/{sys.argv[8]}")
+                print(f"    uploaded a copy of this build's eboot.bin to /app0/{sys.argv[8]}")
         ftp.storbinary(f"STOR {control}", io.BytesIO(f"{sys.argv[5]} {sys.argv[6]}{image}\n".encode()))
         print(f"    armed relaunch test: {sys.argv[5]} restarts, run {sys.argv[6]}{image}")
     control = f"/data/homebrew/{sys.argv[1]}/display-modes-test.txt"
@@ -310,7 +313,8 @@ with connect(**dt.load_settings()) as ftp:
     remove_if_present(ftp, f"/data/homebrew/{sys.argv[1]}/core-loader-test.txt")
     remove_if_present(ftp, f"/data/homebrew/{sys.argv[1]}/relaunch-test.txt")
     remove_if_present(ftp, f"/data/homebrew/{sys.argv[1]}/display-modes-test.txt")
-    if sys.argv[10]:
+    from pathlib import Path
+    if sys.argv[10] and not Path(f"dist/{sys.argv[1]}/{sys.argv[10]}").is_file():
         remove_if_present(ftp, f"/data/homebrew/{sys.argv[1]}/{sys.argv[10]}")
     names = ["retroarch.log"]
     if int(sys.argv[7]):

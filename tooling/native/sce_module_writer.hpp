@@ -12,6 +12,7 @@
 #include "elf_object.hpp"
 
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <string>
 #include <vector>
@@ -25,6 +26,9 @@ struct Options
     std::string file_name = "eboot.elf";
     std::uint32_t module_sdk = 0x02000009;
     std::uint32_t companion_sdk = 0x08050001;
+    /* The libc heap the process parameters reserve: the most there is, unless a
+     * program that keeps its memory elsewhere (an OpenGL frontend) asks for less. */
+    std::uint64_t libc_heap_size = std::numeric_limits<std::uint64_t>::max();
     std::vector<std::string> version_components;
 };
 
