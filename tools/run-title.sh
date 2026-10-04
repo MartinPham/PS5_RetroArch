@@ -8,6 +8,7 @@
 #   tools/run-title.sh --audio-test --watch 45  native PCM tones and queue checks
 #   tools/run-title.sh --gpu-profile 60 --watch 80  buffered timing, then collect logs
 #   tools/run-title.sh --relaunch-test=5 --watch 60  restart the title 5 times, then RetroArch
+#   tools/run-title.sh --display-modes-test=180 --watch 60  every display size, then RetroArch
 #
 # Why this exists. Every earlier round of the console loop was four hand-driven
 # steps that needed a person: build, upload, launch, read. Two things went wrong
@@ -43,6 +44,7 @@ profile=0
 audio_test=0
 core_test=none
 relaunch_test=0
+display_modes_test=0
 while (( $# )); do
     case "$1" in
         --no-build)  build=0 ;;
@@ -54,7 +56,9 @@ while (( $# )); do
         --gpu-profile) shift; profile=${1:?--gpu-profile needs seconds} ;;
         --relaunch-test) relaunch_test=5 ;;
         --relaunch-test=*) relaunch_test=${1#*=} ;;
-        *) echo "usage: ${0##*/} [--no-build] [--no-deploy] [--watch SECONDS] [--gpu-profile 1..60] [--audio-test] [--core-test[=fceumm|mgba|snes9x|fbneo|genesis_plus_gx|ppsspp]] [--relaunch-test[=1..20]]" >&2; exit 2 ;;
+        --display-modes-test) display_modes_test=180 ;;
+        --display-modes-test=*) display_modes_test=${1#*=} ;;
+        *) echo "usage: ${0##*/} [--no-build] [--no-deploy] [--watch SECONDS] [--gpu-profile 1..60] [--audio-test] [--core-test[=fceumm|mgba|snes9x|fbneo|genesis_plus_gx|ppsspp]] [--relaunch-test[=1..20]] [--display-modes-test[=frames]]" >&2; exit 2 ;;
     esac
     shift
 done
@@ -75,6 +79,13 @@ if (( relaunch_test && watch < 30 )); then
     exit 2
 fi
 relaunch_run=relaunch-$(date +%Y%m%d-%H%M%S)
+# The display modes test (src/display_modes_ps5.cpp): frames a mode, every mode, then RetroArch.
+[[ $display_modes_test =~ ^[0-9]+$ ]] && (( display_modes_test <= 1200 )) ||
+    { echo "--display-modes-test takes 1..1200 frames a mode" >&2; exit 2; }
+if (( display_modes_test && watch < 30 )); then
+    echo "--display-modes-test requires --watch of at least 30 seconds" >&2
+    exit 2
+fi
 
 if (( audio_test && watch < 20 )); then
     echo "--audio-test requires --watch of at least 20 seconds" >&2
@@ -166,7 +177,7 @@ fi
 # appeared. A run that does not ask for extras must not inherit them, so the file
 # is removed on every run - before the launch, because deleting it afterwards
 # would leave it for the next one if this run dies.
-python3 - "$title_id" "$profile" "$audio_test" "$core_test" "$relaunch_test" "$relaunch_run" <<'PY'
+python3 - "$title_id" "$profile" "$audio_test" "$core_test" "$relaunch_test" "$relaunch_run" "$display_modes_test" <<'PY'
 import importlib.util, sys
 spec = importlib.util.spec_from_file_location("dt", "tools/deploy-title.py")
 dt = importlib.util.module_from_spec(spec); spec.loader.exec_module(dt)
@@ -203,6 +214,12 @@ with connect(**dt.load_settings()) as ftp:
         remove_if_present(ftp, f"/data/homebrew/{sys.argv[1]}/relaunch-test.jsonl")
         ftp.storbinary(f"STOR {control}", io.BytesIO(f"{sys.argv[5]} {sys.argv[6]}\n".encode()))
         print(f"    armed relaunch test: {sys.argv[5]} restarts, run {sys.argv[6]}")
+    control = f"/data/homebrew/{sys.argv[1]}/display-modes-test.txt"
+    remove_if_present(ftp, control)
+    if int(sys.argv[7]):
+        remove_if_present(ftp, f"/data/homebrew/{sys.argv[1]}/display-modes-test.jsonl")
+        ftp.storbinary(f"STOR {control}", io.BytesIO(f"{sys.argv[7]}\n".encode()))
+        print(f"    armed display modes test: {sys.argv[7]} frames a mode")
 PY
 
 # --- listen first, then launch ----------------------------------------------
@@ -263,7 +280,7 @@ except Exception as error:
 PY
 
 # --- preserve development logs and optional buffered timing ------------------
-python3 - "$title_id" "$profile" "$stamp" "$audio_test" "$expected_identity" "$core_test" "$relaunch_test" "$relaunch_run" <<'PY'
+python3 - "$title_id" "$profile" "$stamp" "$audio_test" "$expected_identity" "$core_test" "$relaunch_test" "$relaunch_run" "$display_modes_test" <<'PY'
 import importlib.util, json, sys
 from pathlib import Path
 sys.path.insert(0, "tools")
@@ -275,9 +292,12 @@ with connect(**dt.load_settings()) as ftp:
     remove_if_present(ftp, f"/data/homebrew/{sys.argv[1]}/audio-test.txt")
     remove_if_present(ftp, f"/data/homebrew/{sys.argv[1]}/core-loader-test.txt")
     remove_if_present(ftp, f"/data/homebrew/{sys.argv[1]}/relaunch-test.txt")
+    remove_if_present(ftp, f"/data/homebrew/{sys.argv[1]}/display-modes-test.txt")
     names = ["retroarch.log"]
     if int(sys.argv[7]):
         names.append("relaunch-test.jsonl")
+    if int(sys.argv[9]):
+        names.append("display-modes-test.jsonl")
     if sys.argv[6] != "none":
         names.extend(["core-loader-test.json", "core-recovery-test.json"])
     if int(sys.argv[4]):
@@ -342,6 +362,26 @@ with connect(**dt.load_settings()) as ftp:
                 if not all(checks):
                     raise SystemExit("Relaunch test failed: see the generations above")
                 print(f"    relaunch test PASS: {count} restarts, every one with its arguments")
+            if name == "display-modes-test.jsonl":
+                rows = [json.loads(line) for line in target.read_text().splitlines() if line.strip()]
+                frames = int(sys.argv[9])
+                for row in rows[:-1]:
+                    if "width" in row:
+                        rate = row["frames"] / row["seconds"] if row["seconds"] else 0
+                        print(f"    {row['width']}x{row['height']} at {row['refresh_millihertz'] / 1000:.2f} Hz: "
+                              f"{row['frames']} frames in {row['seconds']:.2f} s ({rate:.1f} a second), "
+                              f"{row['images']} images, {row['result']}")
+                    else:
+                        print(f"    setup failed: {row}")
+                modes = [row for row in rows if "width" in row]
+                checks = (
+                    rows and rows[-1] == {"result": "PASS"},
+                    len(modes) >= 2 and all(row["result"] == "ok" and row["frames"] == frames for row in modes),
+                    (1920, 1080) in [(row["width"], row["height"]) for row in modes],
+                )
+                if not all(checks):
+                    raise SystemExit("Display modes test failed: see the modes above")
+                print(f"    display modes test PASS: {len(modes)} presentations; confirm each size filled the screen")
             print(f"    saved {name} to {target}")
         except Exception as error:
             print(f"    could not retrieve {name}: {type(error).__name__}")

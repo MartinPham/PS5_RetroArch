@@ -52,6 +52,7 @@
 #include "memory_status.h"
 #include "../build/title_build_identity.h"
 #include "title_threads.hpp"
+#include "display_modes_ps5.h"
 #include "relaunch_ps5.h"
 #include "webui_ps5.h"
 #include "webui_update.h"
@@ -382,6 +383,9 @@ int main(int process_argc, char **process_argv)
      * test restarts it here, before anything that a restart would have to undo,
      * and its last generation continues into RetroArch. */
     ps5_relaunch_test_if_requested(process_argc, process_argv);
+    /* An armed display modes test (src/display_modes_ps5.cpp) presents every size the
+     * driver's display offers, on a device of its own, before RetroArch makes one. */
+    ps5_display_modes_test_if_requested();
 
     /* argv must be writable and NULL-terminated: RetroArch's option parsing
      * walks it the way the C runtime would have. */
