@@ -23,6 +23,9 @@
  * line: the driver's switches (PS5_GLTHREAD=1 runs Mesa's GL thread) can be tried
  * on the console without a new build.
  *
+ * A game ES-DE starts runs in RetroArch through the title's game mode, and the title
+ * comes back here when it is closed (game_ps5.cpp says how).
+ *
  * When ES-DE returns (Quit in its menu), the title goes back to eboot.bin, with
  * the arguments of this port that this run was given (a relaunch test's, so the
  * test sees its next generation).
@@ -41,6 +44,7 @@ extern "C" int sceSystemServiceLoadExec(const char *path, const char *const *arg
 extern "C" int sceSystemServiceHideSplashScreen(void);
 extern "C" int sceKernelUsleep(unsigned int microseconds);
 extern "C" int ps5_frontend_chdir(const char *path);
+extern "C" int ps5_esde_take_game_result(void);
 
 /* ../PS5_OpenGL's heap (native-app/app_heap.c), which every allocation of this
  * program goes through: its 128 MiB default refused the Alekfull NX theme's
@@ -88,6 +92,8 @@ int main(int argc, char **argv)
         note("start: variables from env.txt", set);
     }
     note("start: working directory (errno if refused)", ps5_frontend_chdir(home) == 0 ? 0 : errno);
+    /* Back from a game RetroArch ran (game mode, game_ps5.cpp)? ES-DE's start asks. */
+    note("start: back from a game", ps5_esde_take_game_result());
 
     std::vector<std::string> port_arguments;
     std::vector<char *> arguments{const_cast<char *>(program)};

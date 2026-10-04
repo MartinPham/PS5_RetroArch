@@ -51,7 +51,7 @@ extra_includes=() extra_system_includes=() extra_archives=() extra_link_flags=()
 for input in "${extra_archives[@]}"; do
     [[ -f $input ]] || { echo "missing archive: $input (frontends/$program/link.sh)" >&2; exit 2; }
 done
-includes=(-I"$sdl/include" -I"$sdl/include/SDL2" -I"$gl_sdk/include")
+includes=(-I"$sdl/include" -I"$sdl/include/SDL2" -I"$gl_sdk/include" -I"$root/src")
 for include in "${extra_includes[@]}"; do includes+=(-I"$include"); done
 for include in "${extra_system_includes[@]}"; do includes+=(-isystem "$include"); done
 
@@ -75,6 +75,10 @@ while IFS= read -r -d '' source; do
     objects+=("$object")
 done < <(find "$root/frontends/$program" "$root/frontends/common" -type f \( -name '*.c' -o -name '*.cpp' \) \
     -print0 | sort -z)
+# Game mode's contract (src/ps5_game.h), the one every frontend starts games through:
+# the same file eboot.bin is built with.
+"${cc[@]}" -std=c11 "${common[@]}" "${includes[@]}" -c "$root/src/ps5_game.c" -o "$work/obj/ps5_game.o"
+objects+=("$work/obj/ps5_game.o")
 
 # ../PS5_OpenGL's linker script includes this project's base layout by that path.
 cp "$native/ps5-pie.ld" "$work/tooling/native/ps5-pie-base.ld"

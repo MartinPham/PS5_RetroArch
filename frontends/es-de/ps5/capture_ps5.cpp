@@ -5,12 +5,12 @@
  *
  * Armed by /app0/es-de/capture-test.txt (tools/run-title.sh --frontend-capture):
  *
- *     <seconds>[,<seconds>...] <run id> [scroll][,profile][,quit]
+ *     <seconds>[,<seconds>...] <run id> [scroll][,profile][,quit][,launch]
  *
  * ES-DE presents each frame with SDL_GL_SwapWindow, which the link wraps
  * (frontends/es-de/link.sh). When a frame is presented that many seconds after
  * the first, its back buffer is read and written as
- * /app0/es-de/capture-<run id>-<seconds>.ppm (binary RGB, top row first), and a
+ * /app0/es-de/capture-<run id>-<pid>-<seconds>.ppm (binary RGB, top row first), and a
  * line is added to /app0/es-de/capture-test.jsonl with the frame's number, size,
  * the OpenGL error state and the frame times since the line before: how far
  * apart the swaps were and how long the swap itself took (it waits for the GPU
@@ -22,10 +22,16 @@
  * frame-pointer chain, written to /app0/es-de/profile-<run id>.txt at the last
  * capture, one sample a line, in hex, for symbolizing against the linked ELF. With
  * "quit", ES-DE is sent SDL_QUIT after the last capture, as its Quit entry does,
- * so it returns to eboot.bin (main_ps5.cpp).
+ * so it returns to eboot.bin (main_ps5.cpp). With "launch", Return is pressed at 6 s
+ * and at 8 s, which opens the system ES-DE starts on and starts its first game in
+ * RetroArch (game mode, game_ps5.cpp); an ES-DE back from that game presses nothing.
+ * The process id in each file name and line tells the ES-DE before a game from the
+ * one after it.
  * Unarmed, this costs one failed open, once.
  */
 #include <SDL.h>
+
+#include <unistd.h>
 
 #include <signal.h>
 #include <sys/time.h>
@@ -44,6 +50,7 @@
 #include <vector>
 
 extern "C" void __real_SDL_GL_SwapWindow(SDL_Window *window);
+extern "C" int ps5_esde_started_from_game(void);
 
 namespace
 {
@@ -59,6 +66,8 @@ struct Capture
     bool scroll = false;
     bool profile = false;
     bool quit = false;
+    bool launch = false;
+    unsigned launch_presses = 0;
     unsigned long long frames = 0;
     std::chrono::steady_clock::time_point first, last_swap, last_press;
     std::vector<float> intervals_ms, swaps_ms; // since the last record
@@ -92,6 +101,7 @@ void read_arm()
     state.scroll = fields == 3 && std::strstr(mode, "scroll") != nullptr;
     state.profile = fields == 3 && std::strstr(mode, "profile") != nullptr;
     state.quit = fields == 3 && std::strstr(mode, "quit") != nullptr;
+    state.launch = fields == 3 && std::strstr(mode, "launch") != nullptr && !ps5_esde_started_from_game();
     unsigned last = 0;
     for (char *token = std::strtok(list, ","); token; token = std::strtok(nullptr, ","))
     {
@@ -196,11 +206,12 @@ void record(unsigned seconds, int width, int height, const std::string &file, un
     if (std::FILE *out = std::fopen(record_file, "a"))
     {
         std::fprintf(out,
-                     "{\"run\":\"%s\",\"seconds\":%u,\"frame\":%llu,\"width\":%d,\"height\":%d,"
+                     "{\"run\":\"%s\",\"pid\":%d,\"seconds\":%u,\"frame\":%llu,\"width\":%d,\"height\":%d,"
                      "\"file\":\"%s\",\"gl_error\":%u,\"written\":%s,\"interval_frames\":%zu,"
                      "\"interval_ms\":{\"mean\":%.2f,\"p50\":%.2f,\"p95\":%.2f,\"max\":%.2f,\"over_25\":%ld},"
                      "\"swap_ms\":{\"mean\":%.2f,\"p95\":%.2f,\"max\":%.2f},\"presses\":%u,\"slow\":[%s]}\n",
-                     state.run.c_str(), seconds, state.frames, width, height, file.c_str(), error,
+                     state.run.c_str(), static_cast<int>(getpid()), seconds, state.frames, width, height,
+                     file.c_str(), error,
                      written ? "true" : "false", gaps.size(), mean(gaps), percentile(gaps, 0.5f),
                      percentile(gaps, 0.95f), percentile(gaps, 1.0f), slow, mean(state.swaps_ms),
                      percentile(state.swaps_ms, 0.95f), percentile(state.swaps_ms, 1.0f), state.presses,
@@ -213,13 +224,13 @@ void record(unsigned seconds, int width, int height, const std::string &file, un
     state.presses = 0;
 }
 
-void press_right()
+void press(SDL_Scancode scancode, SDL_Keycode key)
 {
     SDL_Event event{};
     event.type = SDL_KEYDOWN;
     event.key.state = SDL_PRESSED;
-    event.key.keysym.scancode = SDL_SCANCODE_RIGHT;
-    event.key.keysym.sym = SDLK_RIGHT;
+    event.key.keysym.scancode = scancode;
+    event.key.keysym.sym = key;
     SDL_PushEvent(&event);
     event.type = SDL_KEYUP;
     event.key.state = SDL_RELEASED;
@@ -228,11 +239,17 @@ void press_right()
     state.presses_total++;
 }
 
+void press_right()
+{
+    press(SDL_SCANCODE_RIGHT, SDLK_RIGHT);
+}
+
 void capture(SDL_Window *window, unsigned seconds)
 {
     int width = 0, height = 0;
     SDL_GL_GetDrawableSize(window, &width, &height);
-    const std::string file = "/app0/es-de/capture-" + state.run + "-" + std::to_string(seconds) + ".ppm";
+    const std::string file = "/app0/es-de/capture-" + state.run + "-" + std::to_string(getpid()) + "-" +
+                             std::to_string(seconds) + ".ppm";
     if (width <= 0 || height <= 0 || width > 8192 || height > 8192)
     {
         record(seconds, width, height, file, 0, false);
@@ -291,6 +308,12 @@ extern "C" void __wrap_SDL_GL_SwapWindow(SDL_Window *window)
     }
     state.last_swap = now;
     state.frames++;
+    if (state.launch && state.launch_presses < 2 &&
+        now - state.first >= std::chrono::seconds(6 + 2 * state.launch_presses))
+    {
+        press(SDL_SCANCODE_RETURN, SDLK_RETURN);
+        state.launch_presses++;
+    }
     if (state.scroll && state.next < state.seconds.size() && now - state.first >= std::chrono::seconds(5) &&
         now - state.last_press >= std::chrono::milliseconds(400))
     {

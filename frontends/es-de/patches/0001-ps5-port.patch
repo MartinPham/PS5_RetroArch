@@ -97,6 +97,50 @@ index fdebe01..66c6792 100644
  # Setup for installation and package generation.
  if(WIN32)
      install(TARGETS ES-DE RUNTIME DESTINATION .)
+diff --git a/es-app/src/FileData.cpp b/es-app/src/FileData.cpp
+index 67bd3c5..0f708de 100644
+--- a/es-app/src/FileData.cpp
++++ b/es-app/src/FileData.cpp
+@@ -34,6 +34,12 @@
+ #include <assert.h>
+ #include <regex>
+ 
++#if defined(__PROSPERO__)
++// PS5: games run in RetroArch through the title's game mode (frontends/es-de/ps5/game_ps5.cpp).
++extern "C" int ps5_esde_launch_game(const char* command, const char* system, const char* path,
++                                    char* error, size_t errorSize);
++#endif
++
+ FileData::FileData(FileType type,
+                    const std::string& path,
+                    SystemEnvironmentData* envData,
+@@ -2301,7 +2307,25 @@ void FileData::launchGame()
+         androidExtrasInteger, androidExtrasBool, androidActivityFlags, launchOnOtherScreen);
+ #else
+ 
+-#if defined(DEINIT_ON_LAUNCH)
++#if defined(__PROSPERO__)
++    // PS5: the game runs in RetroArch, in a process of its own (game mode, src/ps5_game.h).
++    // The game lists are saved and the display released, then the title restarts as
++    // RetroArch; it comes back to ES-DE when the game is closed (ViewController::goToStart).
++    // Only a launch that did not happen returns here.
++    for (auto system : SystemData::sSystemVector)
++        system->writeMetaData();
++    AudioManager::getInstance().deinit();
++    window->deinit();
++    {
++        char ps5Error[256] {};
++        returnValue = ps5_esde_launch_game(command.c_str(), mSystem->getName().c_str(),
++                                           getSourceFileData()->getPath().c_str(), ps5Error,
++                                           sizeof(ps5Error));
++        LOG(LogError) << "Game mode did not start the game: " << ps5Error;
++    }
++    AudioManager::getInstance().init();
++    window->init();
++#elif defined(DEINIT_ON_LAUNCH)
+ // Deinit both the AudioManager and the window which allows emulators to launch in KMS mode.
+ AudioManager::getInstance().deinit();
+ window->deinit();
 diff --git a/es-app/src/guis/GuiMenu.cpp b/es-app/src/guis/GuiMenu.cpp
 index a23c64a..e504c61 100644
 --- a/es-app/src/guis/GuiMenu.cpp
@@ -154,6 +198,88 @@ index c7ed13a..a60159a 100644
  int main(int argc, char* argv[])
  {
      const auto applicationStartTime {std::chrono::system_clock::now()};
+diff --git a/es-app/src/views/ViewController.cpp b/es-app/src/views/ViewController.cpp
+index a9af826..f911a41 100644
+--- a/es-app/src/views/ViewController.cpp
++++ b/es-app/src/views/ViewController.cpp
+@@ -495,6 +495,14 @@ void ViewController::updateAvailableDialog()
+     }
+ }
+ 
++#if defined(__PROSPERO__)
++#include "utils/StringUtil.h"
++#include "utils/TimeUtil.h"
++// PS5: a game RetroArch ran for ES-DE (game mode, frontends/es-de/ps5/game_ps5.cpp).
++extern "C" int ps5_esde_game_return(char* system, size_t systemSize, char* path, size_t pathSize,
++                                    long* seconds, int* status, char* error, size_t errorSize);
++#endif
++
+ void ViewController::goToStart(bool playTransition)
+ {
+     // Needed to avoid segfaults during emergency shutdown.
+@@ -506,6 +514,62 @@ void ViewController::goToStart(bool playTransition)
+     if (!mSystemListView)
+         getSystemListView();
+ 
++#if defined(__PROSPERO__)
++    // PS5: back from a game RetroArch ran (game mode): count the play, add the time
++    // RetroArch ran, and open the system's game list on the game.
++    {
++        char systemName[256] {};
++        char gamePath[1024] {};
++        char error[256] {};
++        long seconds {0};
++        int status {0};
++        if (ps5_esde_game_return(systemName, sizeof(systemName), gamePath, sizeof(gamePath),
++                                 &seconds, &status, error, sizeof(error))) {
++            SystemData* system {nullptr};
++            for (auto it : SystemData::sSystemVector) {
++                if (it->getName() == systemName)
++                    system = it;
++            }
++            FileData* game {nullptr};
++            if (system != nullptr) {
++                for (auto file : system->getRootFolder()->getFilesRecursive(GAME)) {
++                    if (file->getSourceFileData()->getPath() == gamePath) {
++                        game = file;
++                        break;
++                    }
++                }
++            }
++            if (status < 0) {
++                LOG(LogError) << "Game mode refused the game: " << error;
++                Window::getInstance()->queueInfoPopup(
++                    Utils::String::format(_("ERROR LAUNCHING GAME: %s"),
++                                          Utils::String::toUpper(error).c_str()),
++                    8000);
++            }
++            if (game != nullptr) {
++                goToGamelist(system);
++                getGamelistView(system)->setCursor(game);
++                if (status >= 0) {
++                    FileData* source {game->getSourceFileData()};
++                    LOG(LogInfo) << "Back from \"" << source->metadata.get("name") << "\" after "
++                                 << seconds << " seconds in RetroArch (status " << status << ")";
++                    source->metadata.set(
++                        "playcount",
++                        std::to_string(static_cast<long long>(source->metadata.getInt("playcount") + 1)));
++                    Settings::getInstance()->setInt(
++                        "GameLaunchTime",
++                        static_cast<int>(Utils::Time::DateTime(Utils::Time::now()).getTime() - seconds));
++                    game->setPlayMetadata(false);
++                    CollectionSystemsManager::getInstance()->refreshCollectionSystems(source);
++                    source->getSystem()->onMetaDataSavePoint();
++                }
++                cancelViewTransitions();
++                return;
++            }
++        }
++    }
++#endif
++
+     // If a specific system is requested then go directly to this system, which could be either
+     // the system view or the gamelist view.
+     std::string requestedSystem {Settings::getInstance()->getString("StartupSystem")};
 diff --git a/es-core/src/Settings.cpp b/es-core/src/Settings.cpp
 index d0c8264..c5a4ee5 100644
 --- a/es-core/src/Settings.cpp

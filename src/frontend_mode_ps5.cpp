@@ -1,4 +1,4 @@
-/* PS5 RetroArch - which frontend a launch of eboot.bin starts.
+/* PS5 RetroArch - which frontend a launch of eboot.bin starts, and game mode.
  *
  * Copyright (C) 2026 Mihawk
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -9,6 +9,7 @@
  * so it decides first, before RetroArch sets anything up:
  *
  *   --ps5-mode=retroarch   RetroArch, here (the picker chose it)
+ *   --ps5-mode=game        a game a frontend asked for, in RetroArch, here
  *   --ps5-mode=es-de       EmulationStation, /app0/es-de/es-de.bin
  *   --ps5-mode=picker      the picker, /app0/picker/picker.bin
  *   no mode                a launch from the home screen, or EmulationStation
@@ -17,11 +18,20 @@
  *                          stays RetroArch, as every test expects, unless a picker
  *                          test is armed (/app0/picker/picker-test.txt)
  *
+ * Game mode is the one way any frontend starts a game (src/ps5_game.h has the
+ * contract). Its request is taken here and checked. The core is the one RetroArch's
+ * playlists associate with the content, when they do, else the frontend's. A request
+ * that cannot
+ * run is refused back to its frontend, with the reason in the result. RetroArch then
+ * starts on the game (src/main.cpp adds -L, the content and Close Content quitting),
+ * and once it has quit, ps5_frontend_after_retroarch writes the result and restarts
+ * the title as the frontend.
+ *
  * Quitting a frontend goes back to the picker: EmulationStation restarts eboot.bin
  * with no mode (frontends/es-de/ps5/main_ps5.cpp), and RetroArch, when the picker
- * started it, does the same once it has quit and closed its drivers
- * (ps5_frontend_after_retroarch, from src/main.cpp). The picker's CIRCLE closes the
- * title. RetroArch started any other way (a test run) closes the title as before.
+ * started it, does the same once it has quit and closed its drivers. The picker's
+ * CIRCLE closes the title. RetroArch started any other way (a test run) closes the
+ * title as before.
  *
  * A title built without the picker, or without EmulationStation, runs RetroArch
  * as it always has. LoadExec, accepted, returns and the shell replaces the process a
@@ -33,6 +43,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <string>
 #include <unistd.h>
 
@@ -46,6 +57,10 @@ namespace
 {
 /* This launch's --ps5-mode, kept for the quit */
 std::string launch_mode;
+/* The game this launch runs, in game mode */
+struct ps5_game game;
+bool game_running = false;
+std::time_t game_started = 0;
 
 bool exists(const std::string &path)
 {
@@ -53,6 +68,86 @@ bool exists(const std::string &path)
     if (file)
         std::fclose(file);
     return file != nullptr;
+}
+
+/* Restarts the title as the image; it returns only when that did not happen. */
+void restart_as(const std::string &image, unsigned replaced_wait_seconds, const char *failure)
+{
+    const char *const arguments[] = {"", nullptr};
+    std::fflush(nullptr);
+    const int result = sceSystemServiceLoadExec(image.c_str(), arguments);
+    if (result >= 0)
+        for (unsigned waited = 0; waited < replaced_wait_seconds * 10; waited++)
+            usleep(100000);
+    ps5::debug::mark_value(failure, result);
+}
+
+/* A request refused: its frontend gets the reason, and the title goes back to it. */
+void refuse(const Paths &paths, struct ps5_game &request, unsigned replaced_wait_seconds)
+{
+    char line[400];
+    std::snprintf(line, sizeof line, "game mode: refused: %s", request.error);
+    ps5::debug::mark(line);
+    request.status = -1;
+    request.seconds = 0;
+    if (request.frontend[0] != '/' || !exists(request.frontend) ||
+        ps5_game_write(paths.result.c_str(), &request, 1) != 0)
+        return; /* nowhere to go back to: RetroArch runs */
+    restart_as(
+        request.frontend, replaced_wait_seconds,
+        "game mode: LoadExec of the frontend did not replace the process; RetroArch runs; result");
+}
+
+/* Takes the request: true when RetroArch is to run its game in this process. */
+bool take_game(const Paths &paths, unsigned replaced_wait_seconds)
+{
+    int kind = -1;
+    struct ps5_game request;
+    if (ps5_game_read(paths.request.c_str(), &request, &kind) != 0 || kind != 0)
+    {
+        ps5::debug::mark("game mode: no request; RetroArch runs");
+        return false;
+    }
+    std::remove(paths.request.c_str()); /* a request runs once */
+    if (ps5_game_check(&request) != 0)
+    {
+        refuse(paths, request, replaced_wait_seconds);
+        return false;
+    }
+    /* RetroArch's playlists decide first: a core they associate with this content is
+     * the one RetroArch would use, so it wins over the frontend's default for the
+     * system, if it is one of the title's cores. */
+    struct ps5_game associated = request;
+    if (ps5_game_playlist_core(paths.playlists.c_str(), request.content, associated.core,
+                               sizeof(associated.core)) &&
+        std::strcmp(associated.core, request.core) != 0)
+    {
+        if (ps5_game_check(&associated) == 0)
+        {
+            ps5::debug::mark(
+                "game mode: the core RetroArch's playlist associates with the content");
+            std::snprintf(request.core, sizeof(request.core), "%s", associated.core);
+        }
+        else
+            ps5::debug::mark(
+                "game mode: the playlist's core is not one of the title's; kept the frontend's");
+    }
+    if (!request.core[0])
+    {
+        std::snprintf(
+            request.error, sizeof(request.error),
+            "no core: neither the frontend nor RetroArch's playlists name one for this content");
+        refuse(paths, request, replaced_wait_seconds);
+        return false;
+    }
+    game = request;
+    game_running = true;
+    game_started = std::time(nullptr);
+    char line[PS5_GAME_PATH_MAX * 3 + 64];
+    std::snprintf(line, sizeof line, "game mode: %s with %s, for %s", game.content, game.core,
+                  game.frontend);
+    ps5::debug::mark(line);
+    return true;
 }
 } // namespace
 
@@ -67,6 +162,8 @@ std::string mode_argument(int argc, char **argv)
 
 Next decide(const Launch &launch)
 {
+    if (launch.mode == "game")
+        return Next::game;
     if (launch.mode == "es-de")
         return launch.es_de_present ? Next::es_de : Next::retroarch;
     if (launch.mode == "picker")
@@ -88,6 +185,8 @@ const char *name(Next next)
         return "picker";
     case Next::es_de:
         return "es-de";
+    case Next::game:
+        return "game";
     default:
         return "retroarch";
     }
@@ -109,45 +208,62 @@ void run(const Paths &paths, int argc, char **argv, unsigned replaced_wait_secon
                   launch.mode.c_str(), launch.test_run, launch.picker_test, launch.picker_present,
                   launch.es_de_present, name(next));
     ps5::debug::mark(line);
+    if (next == Next::game)
+    {
+        take_game(paths, replaced_wait_seconds);
+        return; /* RetroArch runs: the game, or as it always has */
+    }
     if (next == Next::retroarch)
         return;
-    const std::string &image = next == Next::picker ? paths.picker : paths.es_de;
-    const char *const arguments[] = {"", nullptr};
-    std::fflush(nullptr);
-    const int result = sceSystemServiceLoadExec(image.c_str(), arguments);
-    if (result >= 0)
-        for (unsigned waited = 0; waited < replaced_wait_seconds * 10; waited++)
-            usleep(100000);
-    /* Only a LoadExec that did not replace the process gets here. */
-    ps5::debug::mark_value("frontend: LoadExec did not replace the process; RetroArch runs; result",
-                           result);
+    restart_as(next == Next::picker ? paths.picker : paths.es_de, replaced_wait_seconds,
+               "frontend: LoadExec did not replace the process; RetroArch runs; result");
 }
+
+const struct ps5_game *running_game()
+{
+    return game_running ? &game : nullptr;
+}
+
 bool back_to_picker(const std::string &mode, bool picker_present)
 {
     return mode == "retroarch" && picker_present;
 }
 
-void after_retroarch(const Paths &paths, const std::string &mode, unsigned replaced_wait_seconds)
+void after_retroarch(const Paths &paths, const std::string &mode, int status,
+                     unsigned replaced_wait_seconds)
 {
+    if (game_running)
+    {
+        game_running = false;
+        game.status = status;
+        game.seconds = static_cast<long>(std::time(nullptr) - game_started);
+        game.error[0] = '\0';
+        char line[128];
+        std::snprintf(line, sizeof line,
+                      "game mode: RetroArch quit (status %d) after %ld s; back to the frontend",
+                      status, game.seconds);
+        ps5::debug::mark(line);
+        if (ps5_game_write(paths.result.c_str(), &game, 1) != 0)
+            ps5::debug::mark("game mode: the result could not be written");
+        restart_as(game.frontend, replaced_wait_seconds,
+                   "game mode: LoadExec of the frontend did not replace the process; the title "
+                   "closes; result");
+        return;
+    }
     if (!back_to_picker(mode, exists(paths.picker)))
         return;
     ps5::debug::mark("frontend: RetroArch quit; back to the picker");
-    const char *const arguments[] = {"", nullptr};
-    std::fflush(nullptr);
-    const int result = sceSystemServiceLoadExec(paths.eboot.c_str(), arguments);
-    if (result >= 0)
-        for (unsigned waited = 0; waited < replaced_wait_seconds * 10; waited++)
-            usleep(100000);
-    ps5::debug::mark_value(
-        "frontend: LoadExec did not replace the process; the title closes; result", result);
+    restart_as(paths.eboot, replaced_wait_seconds,
+               "frontend: LoadExec did not replace the process; the title closes; result");
 }
 } // namespace ps5::frontend_mode
 
 namespace
 {
-const ps5::frontend_mode::Paths title_paths{"/app0/picker/picker.bin", "/app0/es-de/es-de.bin",
-                                            "/app0/test-run.txt", "/app0/picker/picker-test.txt",
-                                            "/app0/eboot.bin"};
+const ps5::frontend_mode::Paths title_paths{
+    "/app0/picker/picker.bin",      "/app0/es-de/es-de.bin", "/app0/test-run.txt",
+    "/app0/picker/picker-test.txt", PS5_GAME_EBOOT,          PS5_GAME_REQUEST_PATH,
+    PS5_GAME_RESULT_PATH,           PS5_GAME_PLAYLISTS};
 }
 
 extern "C" void ps5_frontend_dispatch(int argc, char **argv)
@@ -155,7 +271,12 @@ extern "C" void ps5_frontend_dispatch(int argc, char **argv)
     ps5::frontend_mode::run(title_paths, argc, argv, 60);
 }
 
-extern "C" void ps5_frontend_after_retroarch(void)
+extern "C" const struct ps5_game *ps5_frontend_game(void)
 {
-    ps5::frontend_mode::after_retroarch(title_paths, ps5::frontend_mode::launch_mode, 60);
+    return ps5::frontend_mode::running_game();
+}
+
+extern "C" void ps5_frontend_after_retroarch(int status)
+{
+    ps5::frontend_mode::after_retroarch(title_paths, ps5::frontend_mode::launch_mode, status, 60);
 }

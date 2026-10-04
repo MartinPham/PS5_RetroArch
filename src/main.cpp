@@ -503,7 +503,27 @@ int main(int process_argc, char **process_argv)
         ps5::debug::mark_value("argv extras from /app0/args.txt", extra_count);
     }
 
-    char *argv_with_extras[sizeof(argv) / sizeof(argv[0]) + max_extra_args + 2];
+    /* Game mode (src/frontend_mode_ps5.cpp, src/ps5_game.h): the game a frontend asked
+     * for, started directly with its core. Close Content then quits RetroArch, since the
+     * content came from the command line (game-mode.cfg), and the title goes back to the
+     * frontend. */
+    const struct ps5_game *game = ps5_frontend_game();
+    static char game_core_flag[] = "-L";
+    static const char game_config[] = "/app0/config/game-mode.cfg";
+    if (game)
+    {
+        if (std::FILE *config = std::fopen(game_config, "w"))
+        {
+            std::fputs("# Written by eboot.bin for each game a frontend starts (src/main.cpp)\n"
+                       "quit_on_close_content = \"2\"\n",
+                       config);
+            std::fclose(config);
+        }
+        else
+            ps5::debug::mark("game mode: could not write /app0/config/game-mode.cfg");
+    }
+
+    char *argv_with_extras[sizeof(argv) / sizeof(argv[0]) + max_extra_args + 5];
     std::size_t base_count = sizeof(argv) / sizeof(argv[0]) - 1;
     for (std::size_t i = 0; i < base_count; i++)
         argv_with_extras[i] = argv[i];
@@ -511,7 +531,7 @@ int main(int process_argc, char **process_argv)
      * ("--menu was used, but content file was passed as well"), so it is left out
      * when the extras name a core or content: `-L core` and a path launch a game
      * directly, which is how a run measures a core without a person at the pad. */
-    bool extras_launch_content = false;
+    bool extras_launch_content = game != nullptr;
     for (int i = 0; i < extra_count; i++)
         if (std::strcmp(extra_storage[i], "-L") == 0 || extra_storage[i][0] != '-')
             extras_launch_content = true;
@@ -519,26 +539,41 @@ int main(int process_argc, char **process_argv)
         base_count--;
     for (int i = 0; i < extra_count; i++)
         argv_with_extras[base_count + i] = extra_storage[i];
+    const int file_extras = extra_count; /* the ones from /app0/args.txt */
+    if (game)
+    {
+        argv_with_extras[base_count + extra_count++] = game_core_flag;
+        argv_with_extras[base_count + extra_count++] = const_cast<char *>(game->core);
+        argv_with_extras[base_count + extra_count++] = const_cast<char *>(game->content);
+    }
     // Kept separate so RetroArch's normal config save cannot erase browser edits.
     static char webui_append[] = "--appendconfig";
     static char webui_config[] = "/app0/config/webui.cfg";
-    static char combined_configs[max_extra_arg_len + sizeof(webui_config) + 1];
-    if (std::FILE *saved_webui = std::fopen(webui_config, "rb"))
+    static char
+        combined_configs[max_extra_arg_len + sizeof(webui_config) + sizeof(game_config) + 2];
+    bool saved_webui = false;
+    if (std::FILE *webui = std::fopen(webui_config, "rb"))
     {
-        std::fclose(saved_webui);
+        std::fclose(webui);
+        saved_webui = true;
         ps5::debug::mark("webui: applying saved settings at startup");
+    }
+    if (saved_webui || game)
+    {
         // RetroArch uses only the last --appendconfig, with | separating files.
         // Explicit launch overrides still win over the browser's saved defaults.
         const char *explicit_config = nullptr;
-        for (int i = 0; i < extra_count; i++)
+        for (int i = 0; i < file_extras; i++)
         {
-            if (std::strcmp(extra_storage[i], "--appendconfig") == 0 && i + 1 < extra_count)
+            if (std::strcmp(extra_storage[i], "--appendconfig") == 0 && i + 1 < file_extras)
                 explicit_config = extra_storage[++i];
             else if (std::strncmp(extra_storage[i], "--appendconfig=", 15) == 0)
                 explicit_config = extra_storage[i] + 15;
         }
-        std::snprintf(combined_configs, sizeof(combined_configs), "%s%s%s", webui_config,
-                      explicit_config ? "|" : "", explicit_config ? explicit_config : "");
+        std::snprintf(combined_configs, sizeof(combined_configs), "%s%s%s%s%s",
+                      saved_webui ? webui_config : "", saved_webui && game ? "|" : "",
+                      game ? game_config : "", explicit_config ? "|" : "",
+                      explicit_config ? explicit_config : "");
         argv_with_extras[base_count + extra_count++] = webui_append;
         argv_with_extras[base_count + extra_count++] = combined_configs;
     }
@@ -590,8 +625,9 @@ extern "C" void catchReturnFromMain(int status)
     /* The output leaves in its default mode (a second release is a no-op). */
     if (ps5vk_display_retain != nullptr)
         ps5vk_display_retain(false);
-    /* RetroArch the picker started goes back to the picker (src/frontend_mode_ps5.cpp). */
-    ps5_frontend_after_retroarch();
+    /* A game mode game goes back to its frontend, and RetroArch the picker started to
+     * the picker (src/frontend_mode_ps5.cpp). */
+    ps5_frontend_after_retroarch(status);
     std::fflush(nullptr);
     const int result = sceSystemServiceLoadExec("exit", nullptr);
     ps5::debug::mark_value("native quit: system service result", result);

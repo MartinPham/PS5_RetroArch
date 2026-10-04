@@ -15,7 +15,12 @@
 #                                       hand over to EmulationStation, picture its frames at 20 and 40 s
 #                                       (--frontend-scroll: and press Right every 400 ms meanwhile;
 #                                       --frontend-profile: and sample the CPU, for tools/esde-profile.py;
-#                                       --frontend-quit: then quit it, back to eboot.bin)
+#                                       --frontend-quit: then quit it, back to eboot.bin;
+#                                       --frontend-launch: start its first game at 6-8 s, in game mode)
+#   tools/run-title.sh --relaunch-test=1 --relaunch-image=es-de/es-de.bin --frontend-capture=4,20 \
+#       --frontend-launch --retroarch-frames=600 --watch 75
+#                                       ES-DE starts a game in RetroArch (game mode), which quits
+#                                       after 600 frames: back in ES-DE, on that game
 #   tools/run-title.sh --picker-test=300:retroarch --retroarch-frames=600 --watch 60
 #                                       the picker chooses RetroArch, which quits after 600
 #                                       frames: the title goes back to the picker
@@ -81,9 +86,10 @@ while (( $# )); do
         --frontend-scroll) frontend_scroll=${frontend_scroll:+$frontend_scroll,}scroll ;;
         --frontend-profile) frontend_scroll=${frontend_scroll:+$frontend_scroll,}profile ;;
         --frontend-quit) frontend_scroll=${frontend_scroll:+$frontend_scroll,}quit ;;
+        --frontend-launch) frontend_scroll=${frontend_scroll:+$frontend_scroll,}launch ;;
         --picker-test=*) picker_test=${1#*=} ;;
         --retroarch-frames=*) retroarch_frames=${1#*=} ;;
-        *) echo "usage: ${0##*/} [--no-build] [--no-deploy] [--watch SECONDS] [--gpu-profile 1..60] [--audio-test] [--core-test[=fceumm|mgba|snes9x|fbneo|genesis_plus_gx|ppsspp]] [--relaunch-test[=1..20] [--relaunch-image=PATH]] [--display-modes-test[=frames]] [--frontend-capture=SECONDS[,SECONDS...] [--frontend-scroll] [--frontend-profile] [--frontend-quit]] [--picker-test=FRAMES:retroarch|es-de|none] [--retroarch-frames=N]" >&2; exit 2 ;;
+        *) echo "usage: ${0##*/} [--no-build] [--no-deploy] [--watch SECONDS] [--gpu-profile 1..60] [--audio-test] [--core-test[=fceumm|mgba|snes9x|fbneo|genesis_plus_gx|ppsspp]] [--relaunch-test[=1..20] [--relaunch-image=PATH]] [--display-modes-test[=frames]] [--frontend-capture=SECONDS[,SECONDS...] [--frontend-scroll] [--frontend-profile] [--frontend-quit] [--frontend-launch]] [--picker-test=FRAMES:retroarch|es-de|none] [--retroarch-frames=N]" >&2; exit 2 ;;
     esac
     shift
 done
@@ -291,7 +297,8 @@ with connect(**dt.load_settings()) as ftp:
         print(f"    armed frontend capture at {sys.argv[9]} s, run {sys.argv[10]}"
               f"{', pressing Right every 400 ms' if 'scroll' in sys.argv[11] else ''}"
               f"{', sampling the CPU every ms' if 'profile' in sys.argv[11] else ''}"
-              f"{', then quitting it' if 'quit' in sys.argv[11] else ''}")
+              f"{', then quitting it' if 'quit' in sys.argv[11] else ''}"
+              f"{', starting its first game at 6-8 s' if 'launch' in sys.argv[11] else ''}")
     control = f"/data/homebrew/{sys.argv[1]}/picker/picker-test.txt"
     remove_if_present(ftp, control)
     if sys.argv[12]:
@@ -462,7 +469,8 @@ with connect(**dt.load_settings()) as ftp:
                 local = local.with_suffix(".png")
             except ImportError:
                 pass
-        print(f"    frame {row['frame']} at {row['seconds']} s: {row['width']}x{row['height']}, "
+        print(f"    {'process ' + str(row['pid']) + ', ' if 'pid' in row else ''}"
+              f"frame {row['frame']} at {row['seconds']} s: {row['width']}x{row['height']}, "
               f"GL error {row['gl_error']}, {'saved to ' + str(local) if row['written'] else 'not written'}")
         if "interval_ms" in row:
             gap, swap = row["interval_ms"], row["swap_ms"]
@@ -472,10 +480,16 @@ with connect(**dt.load_settings()) as ftp:
             if row.get("slow"):
                 print(f"      frames over 100 ms (seconds:ms@presses): {' '.join(row['slow'])}")
     wanted = [int(value) for value in sys.argv[3].split(",")]
-    if [row["seconds"] for row in rows if row["written"] and row["gl_error"] == 0] == wanted:
-        print(f"    frontend capture PASS: {len(wanted)} pictures in {out}")
+    # Each ES-DE process (a game in between makes two) captures on its own clock; one
+    # of them must have taken every picture, and none may have failed.
+    by_process = {}
+    for row in rows:
+        by_process.setdefault(row.get("pid", 0), []).append(row["seconds"])
+    if rows and all(row["written"] and row["gl_error"] == 0 for row in rows) and \
+            any(seconds == wanted for seconds in by_process.values()):
+        print(f"    frontend capture PASS: {len(rows)} pictures from {len(by_process)} process(es) in {out}")
     else:
-        print(f"    frontend capture FAILED: wanted {wanted}, got {[row['seconds'] for row in rows]}")
+        print(f"    frontend capture FAILED: wanted {wanted} from one process, got {by_process}")
 PY
 fi
 
@@ -555,9 +569,12 @@ with connect(**dt.load_settings()) as ftp:
                 gaps = [(b["monotonic_ns"] - a["monotonic_ns"]) / 1e9 for a, b in zip(entries, entries[1:])]
                 if gaps:
                     print(f"    restart to restart: {min(gaps):.2f} to {max(gaps):.2f} s")
-                # A frontend image (es-de/...) is not eboot.bin: the chain ends when it starts.
+                # A frontend image (es-de/...) is not eboot.bin: the chain ends when it starts,
+                # and an eboot.bin it starts later (game mode) finds the test done.
                 if sys.argv[10].startswith("es-de/"):
-                    if events or [(row["generation"], row["action"]) for row in entries] != [(0, "restart")]:
+                    steps = [(row["generation"], row["action"]) for row in entries]
+                    if events or not steps or steps[0] != (0, "restart") or any(step != (1, "continue")
+                                                                               for step in steps[1:]):
                         raise SystemExit("Relaunch test failed: see the generations above")
                     print(f"    relaunch test PASS: handed over to /app0/{sys.argv[10]}")
                     print(f"    saved {name} to {target}")

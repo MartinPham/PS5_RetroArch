@@ -3,6 +3,8 @@
  * LoadExec each decision makes, against a LoadExec that replaces the process (a
  * thrown Replaced), refuses, or is accepted and ignored. argv[1] is a scratch
  * directory for the files the decision reads. */
+#include <sys/stat.h>
+
 #include <cassert>
 #include <cstdio>
 #include <string>
@@ -96,7 +98,9 @@ int main(int argc, char **argv)
             launch.es_de_present = state & 8;
             const Next next = decide(launch);
             const std::string m = mode;
-            if (m == "es-de")
+            if (m == "game")
+                assert(next == Next::game);
+            else if (m == "es-de")
                 assert(next == (launch.es_de_present ? Next::es_de : Next::retroarch));
             else if (m == "picker")
                 assert(next == (launch.picker_present ? Next::picker : Next::retroarch));
@@ -124,9 +128,10 @@ int main(int argc, char **argv)
     }
 
     /* The launches, against files in the scratch directory. */
-    const ps5::frontend_mode::Paths paths{dir + "/picker.bin", dir + "/es-de.bin",
-                                          dir + "/test-run.txt", dir + "/picker-test.txt",
-                                          dir + "/eboot.bin"};
+    const ps5::frontend_mode::Paths paths{dir + "/picker.bin",      dir + "/es-de.bin",
+                                          dir + "/test-run.txt",    dir + "/picker-test.txt",
+                                          dir + "/eboot.bin",       dir + "/game-request.txt",
+                                          dir + "/game-result.txt", dir + "/playlists"};
     touch(paths.picker, true);
     touch(paths.es_de, true);
     touch(paths.test_run, false);
@@ -169,7 +174,7 @@ int main(int argc, char **argv)
         exec_path.clear();
         try
         {
-            ps5::frontend_mode::after_retroarch(paths, mode, 0);
+            ps5::frontend_mode::after_retroarch(paths, mode, 0, 0);
             return std::string("closes");
         }
         catch (const Replaced &)
@@ -187,7 +192,97 @@ int main(int argc, char **argv)
     assert(quit("retroarch") == "closes" &&
            marks.back().rfind("frontend: LoadExec did not replace the process; the title closes",
                               0) == 0);
-    std::puts("frontend_mode_ps5: decisions, mode argument, LoadExec targets, test runs and "
-              "refused or ignored LoadExec PASS; back to the picker after RetroArch");
+    /* Game mode: the request taken once, its core from the request or the playlists,
+     * refused back to the frontend, and the result and the frontend after RetroArch. */
+    exec_mode = Exec::replace;
+    const std::string content = dir + "/game.zip",
+                      core = std::string(PS5_GAME_CORES) + "snes9x_libretro.so",
+                      frontend = paths.es_de;
+    touch(paths.es_de, true); /* the frontend to come back to */
+    mkdir(PS5_GAME_CORES, 0777);
+    touch(content, true);
+    touch(core, true);
+    const auto request = [&](const char *core_path, const char *content_path)
+    {
+        struct ps5_game game = {};
+        std::snprintf(game.core, sizeof(game.core), "%s", core_path);
+        std::snprintf(game.content, sizeof(game.content), "%s", content_path);
+        std::snprintf(game.frontend, sizeof(game.frontend), "%s", frontend.c_str());
+        std::snprintf(game.state, sizeof(game.state), "%s", "snes\tgame.zip");
+        assert(ps5_game_write(paths.request.c_str(), &game, 0) == 0);
+    };
+    const auto result = [&]()
+    {
+        struct ps5_game game;
+        int kind = -1;
+        assert(ps5_game_read(paths.result.c_str(), &game, &kind) == 0 && kind == 1);
+        std::remove(paths.result.c_str());
+        return game;
+    };
+    request(core.c_str(), content.c_str());
+    assert(launch(paths, {"--ps5-mode=game"}) == "retroarch");
+    const struct ps5_game *running = ps5::frontend_mode::running_game();
+    assert(running && core == running->core && content == running->content);
+    assert(!ps5::frontend_mode::exists(paths.request)); /* a request runs once */
+    assert(quit("") == frontend); /* RetroArch quit: back to the frontend, with the result */
+    struct ps5_game back = result();
+    assert(back.status == 0 && back.seconds >= 0 && core == back.core &&
+           std::string(back.state) == "snes\tgame.zip");
+    assert(!ps5::frontend_mode::running_game());
+
+    /* RetroArch's playlist association wins over the frontend's core, if it is the title's. */
+    const std::string other = std::string(PS5_GAME_CORES) + "bsnes_libretro.so";
+    touch(other, true);
+    request(core.c_str(), content.c_str());
+    mkdir(paths.playlists.c_str(), 0777);
+    std::FILE *associated = std::fopen((paths.playlists + "/SNES.lpl").c_str(), "w");
+    assert(associated);
+    std::fprintf(associated, "{\"items\":[{\"path\":\"%s\",\"core_path\":\"%s\"}]}",
+                 content.c_str(), other.c_str());
+    std::fclose(associated);
+    assert(launch(paths, {"--ps5-mode=game"}) == "retroarch" &&
+           other == ps5::frontend_mode::running_game()->core);
+    assert(quit("") == frontend);
+    result();
+    associated = std::fopen((paths.playlists + "/SNES.lpl").c_str(), "w");
+    std::fprintf(associated,
+                 "{\"items\":[{\"path\":\"%s\",\"core_path\":\"/elsewhere/x_libretro.so\"}]}",
+                 content.c_str());
+    std::fclose(associated);
+    request(core.c_str(), content.c_str());
+    assert(launch(paths, {"--ps5-mode=game"}) == "retroarch" &&
+           core == ps5::frontend_mode::running_game()->core);
+    assert(quit("") == frontend);
+    result();
+
+    request("", content.c_str()); /* no core: the playlists' */
+    std::FILE *playlist = std::fopen((paths.playlists + "/SNES.lpl").c_str(), "w");
+    assert(playlist);
+    std::fprintf(playlist, "{\"items\":[{\"path\":\"%s\",\"core_path\":\"%s\"}]}", content.c_str(),
+                 core.c_str());
+    std::fclose(playlist);
+    assert(launch(paths, {"--ps5-mode=game"}) == "retroarch" &&
+           ps5::frontend_mode::running_game() && core == ps5::frontend_mode::running_game()->core);
+    assert(quit("") == frontend);
+    result();
+
+    std::remove((paths.playlists + "/SNES.lpl").c_str());
+    request("", content.c_str()); /* no core anywhere: refused back to the frontend */
+    assert(launch(paths, {"--ps5-mode=game"}) == frontend && !ps5::frontend_mode::running_game());
+    back = result();
+    assert(back.status == -1 && std::string(back.error).find("no core") == 0);
+
+    request(core.c_str(), (dir + "/missing.zip").c_str()); /* content that is not there */
+    assert(launch(paths, {"--ps5-mode=game"}) == frontend);
+    assert(result().status == -1);
+
+    assert(launch(paths, {"--ps5-mode=game"}) == "retroarch" &&
+           !ps5::frontend_mode::running_game());
+    assert(marks.back() == "game mode: no request; RetroArch runs");
+
+    std::puts(
+        "frontend_mode_ps5: decisions, mode argument, LoadExec targets, test runs and "
+        "refused or ignored LoadExec PASS; back to the picker after RetroArch; game mode requests, "
+        "cores, refusals and results PASS");
     return 0;
 }
