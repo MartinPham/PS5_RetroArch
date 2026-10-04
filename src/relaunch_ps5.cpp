@@ -12,8 +12,9 @@
  * this title has only ever called LoadExec with "exit", so the restart is measured
  * before anything is built on it.
  *
- * /app0/relaunch-test.txt ("<count> <run id>", written by tools/run-title.sh
- * --relaunch-test) arms it. Each process the test starts appends one line to
+ * /app0/relaunch-test.txt ("<count> <run id> [image]", written by tools/run-title.sh
+ * --relaunch-test, with --relaunch-image naming another image of the title in /app0)
+ * arms it. Each process the test starts appends one line to
  * /app0/relaunch-test.jsonl: its generation, which is the number of this run's
  * lines already in the file (so a restart that lost its arguments still counts,
  * and cannot loop), the generation its arguments name, argc and argv, the
@@ -115,14 +116,21 @@ bool parse_arm(const std::string &text, Arm &arm)
 {
     unsigned count = 0;
     char run[48] = {};
-    if (std::sscanf(text.c_str(), "%u %47s", &count, run) != 2 || count == 0 || count > max_count)
+    char image[256] = {};
+    const int fields = std::sscanf(text.c_str(), "%u %47s %255s", &count, run, image);
+    if (fields < 2 || count == 0 || count > max_count)
         return false;
     for (const char *at = run; *at; at++)
         if (!((*at >= 'a' && *at <= 'z') || (*at >= 'A' && *at <= 'Z') ||
               (*at >= '0' && *at <= '9') || *at == '-' || *at == '_'))
             return false;
+    /* Another image of the title: a path in /app0, never one that climbs out. */
+    if (fields == 3 && (std::strncmp(image, "/app0/", 6) != 0 || std::strstr(image, "..") ||
+                        std::strpbrk(image, "\"\\")))
+        return false;
     arm.count = count;
     arm.run = run;
+    arm.image = fields == 3 ? image : "";
     return true;
 }
 
@@ -170,6 +178,11 @@ std::string entry_line(const Arm &arm, unsigned generation, int named, int argc,
 {
     std::string line = line_start(arm.run, generation);
     line += ",\"count\":" + std::to_string(arm.count);
+    if (!arm.image.empty())
+    {
+        line += ",\"image\":";
+        json_string(line, arm.image.c_str());
+    }
     line += ",\"argument_generation\":" + std::to_string(named);
     line += ",\"argc\":" + std::to_string(argc) + ",\"argv\":[";
     for (int i = 0; i < argc && argv && argv[i]; i++)
@@ -228,7 +241,8 @@ bool run_test(const Paths &paths, int argc, char **argv, unsigned replaced_wait_
     const std::string next = std::string(token) + std::to_string(current + 1);
     const char *const arguments[] = {next.c_str(), nullptr};
     std::fflush(nullptr);
-    const int result = sceSystemServiceLoadExec(paths.image.c_str(), arguments);
+    const std::string &image = arm.image.empty() ? paths.image : arm.image;
+    const int result = sceSystemServiceLoadExec(image.c_str(), arguments);
     std::string event = line_start(arm.run, current) +
                         ",\"event\":\"loadexec\",\"result\":" + std::to_string(result);
     if (result >= 0)

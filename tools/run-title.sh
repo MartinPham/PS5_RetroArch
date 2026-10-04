@@ -8,6 +8,8 @@
 #   tools/run-title.sh --audio-test --watch 45  native PCM tones and queue checks
 #   tools/run-title.sh --gpu-profile 60 --watch 80  buffered timing, then collect logs
 #   tools/run-title.sh --relaunch-test=5 --watch 60  restart the title 5 times, then RetroArch
+#   tools/run-title.sh --relaunch-test=1 --relaunch-image=probe/eboot-copy.bin --watch 45
+#                                       restart through a copy of eboot.bin at /app0/probe/...
 #   tools/run-title.sh --display-modes-test=180 --watch 60  every display size, then RetroArch
 #
 # Why this exists. Every earlier round of the console loop was four hand-driven
@@ -45,6 +47,7 @@ audio_test=0
 core_test=none
 relaunch_test=0
 display_modes_test=0
+relaunch_image=
 while (( $# )); do
     case "$1" in
         --no-build)  build=0 ;;
@@ -56,9 +59,10 @@ while (( $# )); do
         --gpu-profile) shift; profile=${1:?--gpu-profile needs seconds} ;;
         --relaunch-test) relaunch_test=5 ;;
         --relaunch-test=*) relaunch_test=${1#*=} ;;
+        --relaunch-image=*) relaunch_image=${1#*=} ;;
         --display-modes-test) display_modes_test=180 ;;
         --display-modes-test=*) display_modes_test=${1#*=} ;;
-        *) echo "usage: ${0##*/} [--no-build] [--no-deploy] [--watch SECONDS] [--gpu-profile 1..60] [--audio-test] [--core-test[=fceumm|mgba|snes9x|fbneo|genesis_plus_gx|ppsspp]] [--relaunch-test[=1..20]] [--display-modes-test[=frames]]" >&2; exit 2 ;;
+        *) echo "usage: ${0##*/} [--no-build] [--no-deploy] [--watch SECONDS] [--gpu-profile 1..60] [--audio-test] [--core-test[=fceumm|mgba|snes9x|fbneo|genesis_plus_gx|ppsspp]] [--relaunch-test[=1..20] [--relaunch-image=PATH]] [--display-modes-test[=frames]]" >&2; exit 2 ;;
     esac
     shift
 done
@@ -79,6 +83,12 @@ if (( relaunch_test && watch < 30 )); then
     exit 2
 fi
 relaunch_run=relaunch-$(date +%Y%m%d-%H%M%S)
+# Another image of the title, a path under /app0: a copy of this build's eboot.bin.
+if [[ -n $relaunch_image ]]; then
+    (( relaunch_test )) || { echo "--relaunch-image needs --relaunch-test" >&2; exit 2; }
+    [[ $relaunch_image =~ ^[A-Za-z0-9_][A-Za-z0-9_./-]*$ && $relaunch_image != *..* ]] ||
+        { echo "--relaunch-image takes a path under /app0 without '..'" >&2; exit 2; }
+fi
 # The display modes test (src/display_modes_ps5.cpp): frames a mode, every mode, then RetroArch.
 [[ $display_modes_test =~ ^[0-9]+$ ]] && (( display_modes_test <= 1200 )) ||
     { echo "--display-modes-test takes 1..1200 frames a mode" >&2; exit 2; }
@@ -177,7 +187,7 @@ fi
 # appeared. A run that does not ask for extras must not inherit them, so the file
 # is removed on every run - before the launch, because deleting it afterwards
 # would leave it for the next one if this run dies.
-python3 - "$title_id" "$profile" "$audio_test" "$core_test" "$relaunch_test" "$relaunch_run" "$display_modes_test" <<'PY'
+python3 - "$title_id" "$profile" "$audio_test" "$core_test" "$relaunch_test" "$relaunch_run" "$display_modes_test" "$relaunch_image" <<'PY'
 import importlib.util, sys
 spec = importlib.util.spec_from_file_location("dt", "tools/deploy-title.py")
 dt = importlib.util.module_from_spec(spec); spec.loader.exec_module(dt)
@@ -212,8 +222,15 @@ with connect(**dt.load_settings()) as ftp:
     remove_if_present(ftp, control)
     if int(sys.argv[5]):
         remove_if_present(ftp, f"/data/homebrew/{sys.argv[1]}/relaunch-test.jsonl")
-        ftp.storbinary(f"STOR {control}", io.BytesIO(f"{sys.argv[5]} {sys.argv[6]}\n".encode()))
-        print(f"    armed relaunch test: {sys.argv[5]} restarts, run {sys.argv[6]}")
+        image = ""
+        if sys.argv[8]:
+            from pathlib import Path
+            from ps5_ftp import upload_atomic
+            upload_atomic(ftp, Path(f"dist/{sys.argv[1]}/eboot.bin"), f"/data/homebrew/{sys.argv[1]}/{sys.argv[8]}")
+            image = f" /app0/{sys.argv[8]}"
+            print(f"    uploaded a copy of this build's eboot.bin to /app0/{sys.argv[8]}")
+        ftp.storbinary(f"STOR {control}", io.BytesIO(f"{sys.argv[5]} {sys.argv[6]}{image}\n".encode()))
+        print(f"    armed relaunch test: {sys.argv[5]} restarts, run {sys.argv[6]}{image}")
     control = f"/data/homebrew/{sys.argv[1]}/display-modes-test.txt"
     remove_if_present(ftp, control)
     if int(sys.argv[7]):
@@ -280,7 +297,7 @@ except Exception as error:
 PY
 
 # --- preserve development logs and optional buffered timing ------------------
-python3 - "$title_id" "$profile" "$stamp" "$audio_test" "$expected_identity" "$core_test" "$relaunch_test" "$relaunch_run" "$display_modes_test" <<'PY'
+python3 - "$title_id" "$profile" "$stamp" "$audio_test" "$expected_identity" "$core_test" "$relaunch_test" "$relaunch_run" "$display_modes_test" "$relaunch_image" <<'PY'
 import importlib.util, json, sys
 from pathlib import Path
 sys.path.insert(0, "tools")
@@ -293,6 +310,8 @@ with connect(**dt.load_settings()) as ftp:
     remove_if_present(ftp, f"/data/homebrew/{sys.argv[1]}/core-loader-test.txt")
     remove_if_present(ftp, f"/data/homebrew/{sys.argv[1]}/relaunch-test.txt")
     remove_if_present(ftp, f"/data/homebrew/{sys.argv[1]}/display-modes-test.txt")
+    if sys.argv[10]:
+        remove_if_present(ftp, f"/data/homebrew/{sys.argv[1]}/{sys.argv[10]}")
     names = ["retroarch.log"]
     if int(sys.argv[7]):
         names.append("relaunch-test.jsonl")

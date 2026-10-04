@@ -11,12 +11,14 @@
 
 namespace ps5::relaunch
 {
-/* "<count> <run id>": restart the title <count> times (1 to 20) under one run id
- * (letters, digits, '-' and '_'). */
+/* "<count> <run id> [image]": restart the title <count> times (1 to 20) under one
+ * run id (letters, digits, '-' and '_'), through the image named, a path in /app0,
+ * or the title's own eboot.bin when none is. */
 struct Arm
 {
     unsigned count = 0;
     std::string run;
+    std::string image;
 };
 
 struct Paths

@@ -163,6 +163,23 @@ int main(int argc, char **argv)
     assert(text.find("\"run\":\"ignored\",\"generation\":0,\"event\":\"loadexec\",\"result\":0,"
                      "\"still_running_after_s\":0}") != std::string::npos);
 
+    // Another image in /app0: LoadExec is asked for it, and it is in the record.
+    exec_mode = Exec::replace;
+    arm(paths, "1 other-image /app0/probe/eboot-copy.bin\n");
+    assert(launch(paths, {""}, continued) && exec_path == "/app0/probe/eboot-copy.bin");
+    assert(!launch(paths, {"--ps5-relaunch=1"}, continued) && !continued);
+    text = slurp(paths.results);
+    assert(text.find("\"run\":\"other-image\",\"generation\":0,\"count\":1,"
+                     "\"image\":\"/app0/probe/eboot-copy.bin\"") != std::string::npos);
+    // Images outside /app0, or climbing out of it, are refused and start nothing.
+    const int before_bad_images = exec_calls;
+    for (const char *bad : {"1 r /data/x.bin", "1 r /app0/../x.bin", "1 r app0/x.bin"})
+    {
+        arm(paths, bad);
+        assert(!launch(paths, {""}, continued) && !continued && !exists(paths.arm));
+    }
+    assert(exec_calls == before_bad_images);
+
     // Arguments are escaped: the file stays JSON whatever the shell passes.
     exec_mode = Exec::replace;
     arm(paths, "1 escaped\n");
