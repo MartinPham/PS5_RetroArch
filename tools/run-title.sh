@@ -14,7 +14,14 @@
 #   tools/run-title.sh --relaunch-test=1 --relaunch-image=es-de/es-de.bin --frontend-capture=20,40 --watch 60
 #                                       hand over to EmulationStation, picture its frames at 20 and 40 s
 #                                       (--frontend-scroll: and press Right every 400 ms meanwhile;
-#                                       --frontend-profile: and sample the CPU, for tools/esde-profile.py)
+#                                       --frontend-profile: and sample the CPU, for tools/esde-profile.py;
+#                                       --frontend-quit: then quit it, back to eboot.bin)
+#   tools/run-title.sh --picker-test=300:retroarch --retroarch-frames=600 --watch 60
+#                                       the picker chooses RetroArch, which quits after 600
+#                                       frames: the title goes back to the picker
+#   tools/run-title.sh --picker-test=300:es-de --frontend-capture=20 --watch 60
+#                                       the picker, as the home screen starts it: 300 frames, a
+#                                       picture of the last, then it chooses EmulationStation
 #
 # Why this exists. Every earlier round of the console loop was four hand-driven
 # steps that needed a person: build, upload, launch, read. Two things went wrong
@@ -54,6 +61,8 @@ display_modes_test=0
 relaunch_image=
 frontend_capture=
 frontend_scroll=
+picker_test=
+retroarch_frames=0
 while (( $# )); do
     case "$1" in
         --no-build)  build=0 ;;
@@ -71,7 +80,10 @@ while (( $# )); do
         --frontend-capture=*) frontend_capture=${1#*=} ;;
         --frontend-scroll) frontend_scroll=${frontend_scroll:+$frontend_scroll,}scroll ;;
         --frontend-profile) frontend_scroll=${frontend_scroll:+$frontend_scroll,}profile ;;
-        *) echo "usage: ${0##*/} [--no-build] [--no-deploy] [--watch SECONDS] [--gpu-profile 1..60] [--audio-test] [--core-test[=fceumm|mgba|snes9x|fbneo|genesis_plus_gx|ppsspp]] [--relaunch-test[=1..20] [--relaunch-image=PATH]] [--display-modes-test[=frames]] [--frontend-capture=SECONDS[,SECONDS...] [--frontend-scroll] [--frontend-profile]]" >&2; exit 2 ;;
+        --frontend-quit) frontend_scroll=${frontend_scroll:+$frontend_scroll,}quit ;;
+        --picker-test=*) picker_test=${1#*=} ;;
+        --retroarch-frames=*) retroarch_frames=${1#*=} ;;
+        *) echo "usage: ${0##*/} [--no-build] [--no-deploy] [--watch SECONDS] [--gpu-profile 1..60] [--audio-test] [--core-test[=fceumm|mgba|snes9x|fbneo|genesis_plus_gx|ppsspp]] [--relaunch-test[=1..20] [--relaunch-image=PATH]] [--display-modes-test[=frames]] [--frontend-capture=SECONDS[,SECONDS...] [--frontend-scroll] [--frontend-profile] [--frontend-quit]] [--picker-test=FRAMES:retroarch|es-de|none] [--retroarch-frames=N]" >&2; exit 2 ;;
     esac
     shift
 done
@@ -115,6 +127,18 @@ if [[ -n $frontend_capture ]]; then
     (( ${frontend_capture##*,} + 15 <= watch )) ||
         { echo "--watch must allow the last capture plus 15 seconds" >&2; exit 2; }
 fi
+
+# The picker test (frontends/picker/picker.cpp): the frontend picker, as a launch from
+# the home screen starts it, draws FRAMES frames without the pad and chooses.
+if [[ -n $picker_test ]]; then
+    [[ $picker_test =~ ^[0-9]+:(retroarch|es-de|none)$ ]] ||
+        { echo "--picker-test takes FRAMES:retroarch, FRAMES:es-de or FRAMES:none" >&2; exit 2; }
+    (( ${picker_test%%:*} >= 10 && ${picker_test%%:*} <= 36000 )) ||
+        { echo "--picker-test takes 10..36000 frames" >&2; exit 2; }
+fi
+
+[[ $retroarch_frames =~ ^[0-9]+$ ]] && (( retroarch_frames <= 100000 )) ||
+    { echo "--retroarch-frames takes 1..100000 frames" >&2; exit 2; }
 
 if (( audio_test && watch < 20 )); then
     echo "--audio-test requires --watch of at least 20 seconds" >&2
@@ -206,7 +230,7 @@ fi
 # appeared. A run that does not ask for extras must not inherit them, so the file
 # is removed on every run - before the launch, because deleting it afterwards
 # would leave it for the next one if this run dies.
-python3 - "$title_id" "$profile" "$audio_test" "$core_test" "$relaunch_test" "$relaunch_run" "$display_modes_test" "$relaunch_image" "$frontend_capture" "$capture_run" "$frontend_scroll" <<'PY'
+python3 - "$title_id" "$profile" "$audio_test" "$core_test" "$relaunch_test" "$relaunch_run" "$display_modes_test" "$relaunch_image" "$frontend_capture" "$capture_run" "$frontend_scroll" "$picker_test" "$retroarch_frames" <<'PY'
 import importlib.util, sys
 spec = importlib.util.spec_from_file_location("dt", "tools/deploy-title.py")
 dt = importlib.util.module_from_spec(spec); spec.loader.exec_module(dt)
@@ -266,7 +290,26 @@ with connect(**dt.load_settings()) as ftp:
         ftp.storbinary(f"STOR {control}", io.BytesIO(f"{sys.argv[9]} {sys.argv[10]} {sys.argv[11]}\n".encode()))
         print(f"    armed frontend capture at {sys.argv[9]} s, run {sys.argv[10]}"
               f"{', pressing Right every 400 ms' if 'scroll' in sys.argv[11] else ''}"
-              f"{', sampling the CPU every ms' if 'profile' in sys.argv[11] else ''}")
+              f"{', sampling the CPU every ms' if 'profile' in sys.argv[11] else ''}"
+              f"{', then quitting it' if 'quit' in sys.argv[11] else ''}")
+    control = f"/data/homebrew/{sys.argv[1]}/picker/picker-test.txt"
+    remove_if_present(ftp, control)
+    if sys.argv[12]:
+        frames, choice = sys.argv[12].split(":")
+        remove_if_present(ftp, f"/data/homebrew/{sys.argv[1]}/picker/picker-test.jsonl")
+        remove_if_present(ftp, f"/data/homebrew/{sys.argv[1]}/picker/screenshots/picker.ppm")
+        ftp.storbinary(f"STOR {control}", io.BytesIO(f"{frames} {choice}\n".encode()))
+        print(f"    armed picker test: {frames} frames, then {choice}")
+    # RetroArch quits by itself after that many frames (its --max-frames), from
+    # /app0/args.txt, which a test run's launch keeps.
+    if int(sys.argv[13]):
+        ftp.storbinary(f"STOR /data/homebrew/{sys.argv[1]}/args.txt",
+                       io.BytesIO(f"--max-frames={sys.argv[13]}\n".encode()))
+        print(f"    RetroArch quits after {sys.argv[13]} frames")
+    # The launch is a test run's (src/main.cpp): it keeps the test files this run
+    # armed, and starts RetroArch rather than the frontend picker
+    # (src/frontend_mode_ps5.cpp) unless a picker test is armed.
+    ftp.storbinary(f"STOR /data/homebrew/{sys.argv[1]}/test-run.txt", io.BytesIO(b"tools/run-title.sh\n"))
 PY
 
 # --- listen first, then launch ----------------------------------------------
@@ -325,6 +368,57 @@ except Exception as error:
     print(f"    unreadable: {error}")
     raise SystemExit(1)
 PY
+
+# --- the picker's record and picture -----------------------------------------
+if [[ -n $picker_test ]]; then
+python3 - "$title_id" "$picker_test" "$stamp" <<'PY'
+import importlib.util, json, sys
+from pathlib import Path
+sys.path.insert(0, "tools")
+from ps5_ftp import connect, remove_if_present
+spec = importlib.util.spec_from_file_location("dt", "tools/deploy-title.py")
+dt = importlib.util.module_from_spec(spec); spec.loader.exec_module(dt)
+base = f"/data/homebrew/{sys.argv[1]}/picker"
+frames, choice = sys.argv[2].split(":")
+out = Path("klog") / f"picker-{sys.argv[3]}"
+out.mkdir(parents=True, exist_ok=True)
+expected = {"retroarch": "/app0/eboot.bin", "es-de": "/app0/es-de/es-de.bin", "none": ""}[choice]
+with connect(**dt.load_settings()) as ftp:
+    remove_if_present(ftp, f"{base}/picker-test.txt")
+    rows = []
+    for name in ("picker-test.jsonl", "screenshots/picker.ppm"):
+        target = out / Path(name).name
+        try:
+            with target.open("wb") as stream:
+                ftp.retrbinary(f"RETR {base}/{name}", stream.write)
+            print(f"    saved picker/{name} to {target}")
+        except Exception as error:
+            target.unlink(missing_ok=True)
+            print(f"    could not retrieve picker/{name}: {type(error).__name__}")
+records = out / "picker-test.jsonl"
+if records.exists():
+    for line in records.read_text().splitlines():
+        try:
+            rows.append(json.loads(line))
+        except ValueError:
+            print(f"    picker: a record line that is not JSON: {line!r}")
+picture = out / "picker.ppm"
+if picture.exists():
+    try:
+        from PIL import Image
+        Image.open(picture).save(picture.with_suffix(".png"))
+        picture.unlink()
+        picture = picture.with_suffix(".png")
+    except ImportError:
+        pass
+for row in rows:
+    print(f"    picker: {row['frames']} frames, chose {row['choice']}, next '{row['next']}'")
+if rows and rows[-1] == {"frames": int(frames), "choice": choice, "next": expected} and picture.exists():
+    print(f"    picker test PASS: {frames} frames, a picture of the last ({picture}), then {choice}")
+else:
+    print(f"    picker test FAILED: wanted {frames} frames then {choice} ({expected!r}), got {rows}")
+PY
+fi
 
 # --- the frontend's pictures and logs ----------------------------------------
 # Collected before RetroArch's logs, whose checks stop the script on a failure.
@@ -386,7 +480,7 @@ PY
 fi
 
 # --- preserve development logs and optional buffered timing ------------------
-python3 - "$title_id" "$profile" "$stamp" "$audio_test" "$expected_identity" "$core_test" "$relaunch_test" "$relaunch_run" "$display_modes_test" "$relaunch_image" <<'PY'
+python3 - "$title_id" "$profile" "$stamp" "$audio_test" "$expected_identity" "$core_test" "$relaunch_test" "$relaunch_run" "$display_modes_test" "$relaunch_image" "$picker_test" <<'PY'
 import importlib.util, json, sys
 from pathlib import Path
 sys.path.insert(0, "tools")
@@ -419,7 +513,9 @@ with connect(**dt.load_settings()) as ftp:
             with target.open("wb") as out:
                 ftp.retrbinary(f"RETR /data/homebrew/{sys.argv[1]}/{name}", out.write)
             expected = sys.argv[5]
-            if name == "retroarch.log":
+            # A picker test that chooses EmulationStation, or nothing, never starts RetroArch.
+            retroarch_runs = not sys.argv[11] or sys.argv[11].endswith(":retroarch")
+            if name == "retroarch.log" and retroarch_runs:
                 if f"build identity: {expected}" not in target.read_text(errors="replace"):
                     raise SystemExit("RetroArch log is stale or logging failed: current build identity absent")
             if name in ("core-loader-test.json", "core-recovery-test.json"):

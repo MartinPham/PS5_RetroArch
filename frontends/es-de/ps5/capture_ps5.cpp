@@ -5,7 +5,7 @@
  *
  * Armed by /app0/es-de/capture-test.txt (tools/run-title.sh --frontend-capture):
  *
- *     <seconds>[,<seconds>...] <run id> [scroll][,profile]
+ *     <seconds>[,<seconds>...] <run id> [scroll][,profile][,quit]
  *
  * ES-DE presents each frame with SDL_GL_SwapWindow, which the link wraps
  * (frontends/es-de/link.sh). When a frame is presented that many seconds after
@@ -20,7 +20,9 @@
  * process is sampled every millisecond of CPU time (an ITIMER_PROF timer): each
  * sample is the interrupted instruction and up to eight return addresses from its
  * frame-pointer chain, written to /app0/es-de/profile-<run id>.txt at the last
- * capture, one sample a line, in hex, for symbolizing against the linked ELF.
+ * capture, one sample a line, in hex, for symbolizing against the linked ELF. With
+ * "quit", ES-DE is sent SDL_QUIT after the last capture, as its Quit entry does,
+ * so it returns to eboot.bin (main_ps5.cpp).
  * Unarmed, this costs one failed open, once.
  */
 #include <SDL.h>
@@ -56,6 +58,7 @@ struct Capture
     size_t next = 0;
     bool scroll = false;
     bool profile = false;
+    bool quit = false;
     unsigned long long frames = 0;
     std::chrono::steady_clock::time_point first, last_swap, last_press;
     std::vector<float> intervals_ms, swaps_ms; // since the last record
@@ -88,6 +91,7 @@ void read_arm()
         return;
     state.scroll = fields == 3 && std::strstr(mode, "scroll") != nullptr;
     state.profile = fields == 3 && std::strstr(mode, "profile") != nullptr;
+    state.quit = fields == 3 && std::strstr(mode, "quit") != nullptr;
     unsigned last = 0;
     for (char *token = std::strtok(list, ","); token; token = std::strtok(nullptr, ","))
     {
@@ -303,6 +307,12 @@ extern "C" void __wrap_SDL_GL_SwapWindow(SDL_Window *window)
             state.next++;
             if (state.profile && state.next == state.seconds.size())
                 write_profile();
+            if (state.quit && state.next == state.seconds.size())
+            {
+                SDL_Event event{};
+                event.type = SDL_QUIT;
+                SDL_PushEvent(&event);
+            }
         }
     }
     const auto before = std::chrono::steady_clock::now();

@@ -429,7 +429,12 @@ python3 "$root/tools/video-assets.py" stage "$dist"
 if [[ -n ${PS5_FRONTENDS:-} ]]; then
     read -r -a frontends <<< "$PS5_FRONTENDS"
     for frontend in "${frontends[@]}"; do
-        bash "$root/tools/build-frontend.sh" "$frontend"
+        # The picker is a program of ../PS5_VulkanTemplate's UI module, built its way.
+        if [[ $frontend == picker ]]; then
+            bash "$root/tools/build-picker.sh"
+        else
+            bash "$root/tools/build-frontend.sh" "$frontend"
+        fi
     done
 fi
 

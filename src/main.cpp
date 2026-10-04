@@ -54,6 +54,7 @@
 #include "title_threads.hpp"
 #include "display_modes_ps5.h"
 #include "relaunch_ps5.h"
+#include "frontend_mode_ps5.h"
 #include "webui_ps5.h"
 #include "webui_update.h"
 
@@ -386,6 +387,10 @@ int main(int process_argc, char **process_argv)
     /* An armed display modes test (src/display_modes_ps5.cpp) presents every size the
      * driver's display offers, on a device of its own, before RetroArch makes one. */
     ps5_display_modes_test_if_requested();
+    /* Which frontend this launch is for (src/frontend_mode_ps5.cpp): from the home
+     * screen the picker, which restarts the title as RetroArch or EmulationStation;
+     * those two are their own executables, started through LoadExec. */
+    ps5_frontend_dispatch(process_argc, process_argv);
 
     /* argv must be writable and NULL-terminated: RetroArch's option parsing
      * walks it the way the C runtime would have. */
@@ -585,6 +590,8 @@ extern "C" void catchReturnFromMain(int status)
     /* The output leaves in its default mode (a second release is a no-op). */
     if (ps5vk_display_retain != nullptr)
         ps5vk_display_retain(false);
+    /* RetroArch the picker started goes back to the picker (src/frontend_mode_ps5.cpp). */
+    ps5_frontend_after_retroarch();
     std::fflush(nullptr);
     const int result = sceSystemServiceLoadExec("exit", nullptr);
     ps5::debug::mark_value("native quit: system service result", result);
