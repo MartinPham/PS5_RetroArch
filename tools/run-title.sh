@@ -7,6 +7,7 @@
 #   tools/run-title.sh --watch 90      how long to let it run (default 30)
 #   tools/run-title.sh --audio-test --watch 45  native PCM tones and queue checks
 #   tools/run-title.sh --gpu-profile 60 --watch 80  buffered timing, then collect logs
+#   tools/run-title.sh --relaunch-test=5 --watch 60  restart the title 5 times, then RetroArch
 #
 # Why this exists. Every earlier round of the console loop was four hand-driven
 # steps that needed a person: build, upload, launch, read. Two things went wrong
@@ -41,6 +42,7 @@ watch=30
 profile=0
 audio_test=0
 core_test=none
+relaunch_test=0
 while (( $# )); do
     case "$1" in
         --no-build)  build=0 ;;
@@ -50,7 +52,9 @@ while (( $# )); do
         --core-test) core_test=fceumm ;;
         --core-test=*) core_test=${1#*=} ;;
         --gpu-profile) shift; profile=${1:?--gpu-profile needs seconds} ;;
-        *) echo "usage: ${0##*/} [--no-build] [--no-deploy] [--watch SECONDS] [--gpu-profile 1..60] [--audio-test] [--core-test[=fceumm|mgba|snes9x|fbneo|genesis_plus_gx|ppsspp]]" >&2; exit 2 ;;
+        --relaunch-test) relaunch_test=5 ;;
+        --relaunch-test=*) relaunch_test=${1#*=} ;;
+        *) echo "usage: ${0##*/} [--no-build] [--no-deploy] [--watch SECONDS] [--gpu-profile 1..60] [--audio-test] [--core-test[=fceumm|mgba|snes9x|fbneo|genesis_plus_gx|ppsspp]] [--relaunch-test[=1..20]]" >&2; exit 2 ;;
     esac
     shift
 done
@@ -62,6 +66,15 @@ if (( profile > 0 && watch < profile + 15 )); then
     echo "--watch must allow the profile duration plus 15 seconds for startup/reporting" >&2
     exit 2
 fi
+
+# The relaunch test (src/relaunch_ps5.cpp) restarts the title, then RetroArch starts.
+[[ $relaunch_test =~ ^[0-9]+$ ]] && (( relaunch_test <= 20 )) ||
+    { echo "--relaunch-test takes 1..20 restarts" >&2; exit 2; }
+if (( relaunch_test && watch < 30 )); then
+    echo "--relaunch-test requires --watch of at least 30 seconds" >&2
+    exit 2
+fi
+relaunch_run=relaunch-$(date +%Y%m%d-%H%M%S)
 
 if (( audio_test && watch < 20 )); then
     echo "--audio-test requires --watch of at least 20 seconds" >&2
@@ -153,7 +166,7 @@ fi
 # appeared. A run that does not ask for extras must not inherit them, so the file
 # is removed on every run - before the launch, because deleting it afterwards
 # would leave it for the next one if this run dies.
-python3 - "$title_id" "$profile" "$audio_test" "$core_test" <<'PY'
+python3 - "$title_id" "$profile" "$audio_test" "$core_test" "$relaunch_test" "$relaunch_run" <<'PY'
 import importlib.util, sys
 spec = importlib.util.spec_from_file_location("dt", "tools/deploy-title.py")
 dt = importlib.util.module_from_spec(spec); spec.loader.exec_module(dt)
@@ -184,6 +197,12 @@ with connect(**dt.load_settings()) as ftp:
         remove_if_present(ftp, f"/data/homebrew/{sys.argv[1]}/audio-test.json")
         ftp.storbinary(f"STOR {control}", io.BytesIO(b"native PCM test\n"))
         print("    armed audio test: left 440 Hz / right 660 Hz, repeated, 12.5% peak")
+    control = f"/data/homebrew/{sys.argv[1]}/relaunch-test.txt"
+    remove_if_present(ftp, control)
+    if int(sys.argv[5]):
+        remove_if_present(ftp, f"/data/homebrew/{sys.argv[1]}/relaunch-test.jsonl")
+        ftp.storbinary(f"STOR {control}", io.BytesIO(f"{sys.argv[5]} {sys.argv[6]}\n".encode()))
+        print(f"    armed relaunch test: {sys.argv[5]} restarts, run {sys.argv[6]}")
 PY
 
 # --- listen first, then launch ----------------------------------------------
@@ -244,7 +263,7 @@ except Exception as error:
 PY
 
 # --- preserve development logs and optional buffered timing ------------------
-python3 - "$title_id" "$profile" "$stamp" "$audio_test" "$expected_identity" "$core_test" <<'PY'
+python3 - "$title_id" "$profile" "$stamp" "$audio_test" "$expected_identity" "$core_test" "$relaunch_test" "$relaunch_run" <<'PY'
 import importlib.util, json, sys
 from pathlib import Path
 sys.path.insert(0, "tools")
@@ -255,7 +274,10 @@ with connect(**dt.load_settings()) as ftp:
     remove_if_present(ftp, f"/data/homebrew/{sys.argv[1]}/gpu-profile.txt")
     remove_if_present(ftp, f"/data/homebrew/{sys.argv[1]}/audio-test.txt")
     remove_if_present(ftp, f"/data/homebrew/{sys.argv[1]}/core-loader-test.txt")
+    remove_if_present(ftp, f"/data/homebrew/{sys.argv[1]}/relaunch-test.txt")
     names = ["retroarch.log"]
+    if int(sys.argv[7]):
+        names.append("relaunch-test.jsonl")
     if sys.argv[6] != "none":
         names.extend(["core-loader-test.json", "core-recovery-test.json"])
     if int(sys.argv[4]):
@@ -294,6 +316,32 @@ with connect(**dt.load_settings()) as ftp:
                 if not all(checks):
                     raise SystemExit("Native audio test failed or belongs to another build")
                 print("    native audio playback/buffering report PASS; audible confirmation still required")
+            if name == "relaunch-test.jsonl":
+                count, run = int(sys.argv[7]), sys.argv[8]
+                rows = [json.loads(line) for line in target.read_text().splitlines() if line.strip()]
+                rows = [row for row in rows if row.get("run") == run]
+                events = [row for row in rows if "event" in row]
+                entries = [row for row in rows if "event" not in row]
+                for row in events:
+                    print(f"    generation {row['generation']}: LoadExec did not replace the process: {row}")
+                for row in entries:
+                    print(f"    generation {row['generation']}: arguments name {row['argument_generation']}, "
+                          f"{row['flexible_free'] / 1048576:.1f} MiB flexible free, pid {row['pid']}, {row['action']}")
+                gaps = [(b["monotonic_ns"] - a["monotonic_ns"]) / 1e9 for a, b in zip(entries, entries[1:])]
+                if gaps:
+                    print(f"    restart to restart: {min(gaps):.2f} to {max(gaps):.2f} s")
+                checks = (
+                    not events,
+                    [row["generation"] for row in entries] == list(range(count + 1)),
+                    all(row["argument_generation"] == row["generation"] for row in entries[1:]),
+                    [row["action"] for row in entries] == ["restart"] * count + ["continue"],
+                    # A restart starts as a cold launch does: no memory kept from the one before.
+                    entries and all(abs(row["flexible_free"] - entries[0]["flexible_free"]) <= 16 << 20
+                                    for row in entries),
+                )
+                if not all(checks):
+                    raise SystemExit("Relaunch test failed: see the generations above")
+                print(f"    relaunch test PASS: {count} restarts, every one with its arguments")
             print(f"    saved {name} to {target}")
         except Exception as error:
             print(f"    could not retrieve {name}: {type(error).__name__}")

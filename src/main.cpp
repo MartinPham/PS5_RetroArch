@@ -52,6 +52,7 @@
 #include "memory_status.h"
 #include "../build/title_build_identity.h"
 #include "title_threads.hpp"
+#include "relaunch_ps5.h"
 #include "webui_ps5.h"
 #include "webui_update.h"
 
@@ -316,7 +317,7 @@ void on_terminate()
 }
 } // namespace
 
-int main()
+int main(int process_argc, char **process_argv)
 {
     /* First thing: prove that control reached this function at all, before
      * anything that could fail. */
@@ -376,6 +377,11 @@ int main()
      * enters that code. This is title startup work for either video driver. */
     ps5::debug::mark_value("startup: sceSystemServiceHideSplashScreen",
                            sceSystemServiceHideSplashScreen());
+
+    /* The frontend handover restarts the title (src/relaunch_ps5.cpp): an armed
+     * test restarts it here, before anything that a restart would have to undo,
+     * and its last generation continues into RetroArch. */
+    ps5_relaunch_test_if_requested(process_argc, process_argv);
 
     /* argv must be writable and NULL-terminated: RetroArch's option parsing
      * walks it the way the C runtime would have. */
