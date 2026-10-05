@@ -14,14 +14,19 @@ Native Vulkan rendering · Fifteen release cores · A local WebUI
 
 <p align="center"><strong>WebUI Overview</strong> · Open <code>http://&lt;PS5-IP&gt;:6769</code> while RetroArch is running.<br><sub>Replace &lt;PS5-IP&gt; with your console’s local address. Use a browser on the same network.</sub></p>
 
+![The pre-screen: choose RetroArch or EmulationStation when the title starts](assets/readme/pre-screen.png)
+
+<p align="center"><strong>Choose a frontend</strong> · RetroArch’s XMB or EmulationStation, both playing every game through RetroArch.<br><sub>Square remembers your choice. Hold L1 while the title starts to come back to this screen.</sub></p>
+
 A native RetroArch homebrew title for jailbroken PlayStation 5 consoles, made by
 [Mihawk](https://github.com/mihawk-99). Play through XMB on your TV, then upload
 content, browse your library and adjust settings from your phone or computer.
 The purple WebUI starts with RetroArch and closes with it.
 
-**v0.6.0-alpha.6** brings the WebUI, guided settings, offline video effects and
-recent stability fixes together. This is an alpha release; compatibility varies
-by core and workload. See the [release notes](https://github.com/mihawk-99/PS5_RetroArch/releases/tag/v0.6.0-alpha.6) for the tested scope.
+**v0.6.7-alpha.6** opens on a pre-screen that starts RetroArch or
+EmulationStation, adds up to four controllers and verified updates from the WebUI,
+and fixes the Manual Scan crash. This is an alpha release; compatibility varies
+by core and workload. See the [release notes](https://github.com/mihawk-99/PS5_RetroArch/releases/tag/v0.6.7-alpha.6) for the tested scope.
 
 ## Get started
 
@@ -29,8 +34,11 @@ by core and workload. See the [release notes](https://github.com/mihawk-99/PS5_R
    `PPSA99169` folder to the location used by your homebrew launcher. The tested
    location is `/data/homebrew/PPSA99169/`. A source build produces the same
    folder in `dist/`. A compatible jailbreak and launcher must already be set up.
-2. **Open RetroArch.** It creates its writable folders and initial configuration.
-   Existing settings are preserved. XMB is the default menu; RGUI is also available.
+2. **Open the title and choose a frontend.** The pre-screen starts RetroArch or
+   EmulationStation; with Remember (Square) on, the title opens on your choice from
+   then on, and the WebUI's **Start with** setting changes it. RetroArch creates its
+   writable folders and initial configuration; existing settings are preserved. XMB
+   is the default menu; RGUI is also available.
 3. **Open the WebUI.** Visit `http://<PS5-IP>:6769` on the same network.
    Choose a destination and drop your content into **Upload content**, or use FTP.
 4. **Load content on the console.** Select the matching core and your file.
