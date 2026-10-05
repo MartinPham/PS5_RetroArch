@@ -55,3 +55,9 @@ config.h
 
 # Published release notes are part of the versioned release.
 !releases/*.md
+
+# RPCS3 is discontinued (owner, 2026-10): its build scripts and toolchain stay on
+# the development machine only.
+tools/build-rpcs3.sh
+tools/build-llvm.sh
+tooling/rpcs3/
