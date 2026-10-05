@@ -16,6 +16,16 @@
  * same offsets, including `connected` at 0x4c and the timestamp at 0x50. The static
  * assertions are what keeps a wrong layout from compiling quietly.
  *
+ * Up to four controllers, as ../PS5_ProsperoEden connects them: the console pairs
+ * each controller with a signed-in user, and scePadOpen opens a user's controller.
+ * Port 0 (player 1) is the user who started the title, and stays theirs. About once
+ * a second the signed-in users are read again (sceUserServiceGetLoginUserIdList): a
+ * new user's controller takes the first free port, 1 to 3, and a port is let go when
+ * its user signs out. Each port is announced to RetroArch, rumbles and streams its
+ * own haptics, as the first one always has. A test run can trace each port's buttons
+ * as they change (/app0/pad-monitor.txt), which is how two controllers are told apart
+ * in a log.
+ *
  * A run without a person at the pad can script it: /app0/pad-script.txt, when
  * present, holds one press a line, `<seconds> <BUTTON>[+<BUTTON>...] [<held
  * seconds>]`, timed from the first poll, with RetroPad names (B Y SELECT START
@@ -114,7 +124,16 @@ extern "C"
     std::int32_t scePadSetVibrationMode(std::int32_t handle, std::int32_t mode);
     std::int32_t sceUserServiceInitialize(const void *params);
     std::int32_t sceUserServiceGetInitialUser(std::int32_t *user_id);
+    /* The signed-in users, at most four; unused entries are -1 (the shape
+     * ../PS5_ProsperoEden reads them with on the console). */
+    struct SceUserServiceLoginUserIdList
+    {
+        std::int32_t user_id[4];
+    };
+    std::int32_t sceUserServiceGetLoginUserIdList(SceUserServiceLoginUserIdList *list);
     std::int32_t sceUserServiceTerminate();
+    /* The handle this process already holds for a user's controller. */
+    std::int32_t scePadGetHandle(std::int32_t user_id, std::int32_t port_type, std::int32_t index);
     std::int32_t sceKernelUsleep(std::uint32_t microseconds);
     /* The audio service. The same declarations and call shape as
      * src/audio_ps5.cpp, which follows ProsperoLight's moonlight_stream.cpp.
@@ -177,6 +196,12 @@ static_assert(offsetof(PadSample, timestamp_us) == 0x50, "the timestamp sits at 
 constexpr int sample_capacity = 64;
 constexpr std::int32_t pad_open_attempts = 10;
 constexpr std::uint32_t pad_open_retry_microseconds = 100000;
+/* A console signs in at most four users, each with one controller. */
+constexpr unsigned max_pads = 4;
+/* How often the signed-in users are read again. */
+constexpr auto user_scan_interval = std::chrono::seconds(1);
+/* The pad monitor's budget of trace lines for a run. */
+constexpr unsigned monitor_line_budget = 600;
 /* The stick bytes run 0..255 with 128 centred. */
 constexpr int stick_centre = 128;
 
@@ -192,6 +217,8 @@ namespace
 {
 struct PadState
 {
+    std::int32_t user_id = -1;
+    unsigned port = 0;
     std::int32_t handle = -1;
     PadSample samples[sample_capacity];
     /* How many entries of `samples` the last read actually filled. A read returns
@@ -214,11 +241,28 @@ struct PadState
     pthread_t haptic_thread{};
     bool haptic_thread_started = false;
     std::atomic<bool> haptic_stop{false};
-    bool owns_user_service = false;
     bool announced = false;
+    /* The button word the pad monitor last traced for this port. */
+    std::uint32_t monitored_buttons = 0;
 };
 
-PadState *active_pad = nullptr;
+/* The controller on each port, or null. */
+PadState *pads[max_pads] = {};
+/* The joypad driver's handle for RetroArch: the driver stays registered with no
+ * controller at all, and reports nothing until one comes. */
+int joypad_cookie;
+bool joypad_ready = false;
+bool owns_user_service = false;
+/* scePadInit answered, so controllers can be opened. */
+bool pad_service_ready = false;
+std::chrono::steady_clock::time_point next_user_scan{};
+/* The signed-in users the last scan read, traced when they change. */
+std::int32_t known_users[4] = {-1, -1, -1, -1};
+/* A user whose controller would not open, traced once rather than every scan. */
+std::int32_t unopened_user = -1;
+/* /app0/pad-monitor.txt: trace each port's buttons as they change. */
+bool pad_monitor = false;
+unsigned monitor_lines = 0;
 
 /* The pad script (see the top of this file). */
 struct ScriptPress
@@ -604,46 +648,51 @@ void *haptic_worker(void *opaque) noexcept
     return nullptr;
 }
 
-void *open_pad() noexcept
+/* Opens a user's controller on a port: the pad, its vibration port and haptic
+ * stream. Null when the pad would not open. */
+PadState *open_pad(std::int32_t user_id, unsigned port, std::int32_t attempts) noexcept
 {
     auto *state = new (std::nothrow) PadState();
     if (state == nullptr)
     {
-        ps5_input_trace("input: the driver state could not be allocated");
+        ps5_input_trace("input: the pad state could not be allocated");
         return nullptr;
     }
-
-    state->owns_user_service = sceUserServiceInitialize(nullptr) == 0;
-
-    std::int32_t user_id = -1;
-    if (sceUserServiceGetInitialUser(&user_id) < 0)
-    {
-        ps5_input_trace("input: sceUserServiceGetInitialUser found no user; no pad will be read");
-        return state; /* the driver stays alive and reports nothing */
-    }
-    if (scePadInit() < 0)
-    {
-        ps5_input_trace("input: scePadInit failed; no pad will be read");
-        return state;
-    }
+    state->user_id = user_id;
+    state->port = port;
     /* The pad is not always there the first time it is asked for - a title started
      * from the shell can arrive before the pad service has published the device -
-     * so the open is retried, as ../ProsperoLight retries it. */
-    for (std::int32_t attempt = 0; attempt < pad_open_attempts; ++attempt)
+     * so the first controller's open is retried, as ../ProsperoLight retries it. */
+    for (std::int32_t attempt = 0; attempt < attempts; ++attempt)
     {
         state->handle = scePadOpen(user_id, 0, 0, nullptr);
-        if (state->handle >= 0)
+        if (state->handle >= 0 || attempt + 1 == attempts)
             break;
         (void)sceKernelUsleep(pad_open_retry_microseconds);
     }
+    /* A handle this process already holds for the user is reused. */
     if (state->handle < 0)
     {
-        char line[176];
-        std::snprintf(line, sizeof(line),
-                      "input: scePadOpen failed after %d attempts, handle=%d; no input this run",
-                      static_cast<int>(pad_open_attempts), state->handle);
-        ps5_input_trace(line);
-        return state;
+        const std::int32_t held = scePadGetHandle(user_id, 0, 0);
+        if (held >= 0)
+            state->handle = held;
+    }
+    if (state->handle < 0)
+    {
+        if (user_id != unopened_user)
+        {
+            char line[176];
+            std::snprintf(line, sizeof(line),
+                          "input: port %u: scePadOpen for user %d failed after %d attempts, "
+                          "handle=%d",
+                          port, static_cast<int>(user_id), static_cast<int>(attempts),
+                          state->handle);
+            ps5_input_trace(line);
+            unopened_user = user_id;
+        }
+        pthread_mutex_destroy(&state->rumble_mutex);
+        delete state;
+        return nullptr;
     }
     /* Try the vibration audio port. When it opens, the pad goes to advanced
      * mode (1), where the actuators follow the PCM stream the worker feeds -
@@ -685,9 +734,9 @@ void *open_pad() noexcept
     {
         char line[256];
         std::snprintf(line, sizeof(line),
-                      "input: pad opened, user=%d handle=%d haptic_port=%d haptic_thread=%d "
-                      "vibration_mode=%d format=%s thread_result=%d",
-                      static_cast<int>(user_id), state->handle, state->haptic_port,
+                      "input: pad opened, port=%u user=%d handle=%d haptic_port=%d "
+                      "haptic_thread=%d vibration_mode=%d format=%s thread_result=%d",
+                      port, static_cast<int>(user_id), state->handle, state->haptic_port,
                       state->haptic_thread_started ? 1 : 0, mode_result,
                       state->haptic_float ? "f32" : "s16", thread_result);
         ps5_input_trace(line);
@@ -741,32 +790,115 @@ void close_pad(void *data) noexcept
         (void)scePadClose(state->handle);
         state->handle = -1;
     }
-    if (state->owns_user_service)
-    {
-        (void)sceUserServiceTerminate();
-        state->owns_user_service = false;
-    }
     pthread_mutex_destroy(&state->rumble_mutex);
     delete state;
 }
 
+/* Lets a port's controller go: RetroArch is told it left, then it is closed. */
+void release_port(unsigned port, const char *why) noexcept
+{
+    PadState *state = pads[port];
+    if (state == nullptr)
+        return;
+    if (state->announced)
+        input_autoconfigure_disconnect(port, "PS5 Controller");
+    char line[128];
+    std::snprintf(line, sizeof(line), "input: port %u: user %d's controller let go (%s)", port,
+                  static_cast<int>(state->user_id), why);
+    ps5_input_trace(line);
+    pads[port] = nullptr;
+    close_pad(state);
+}
+
+/* Reads the signed-in users again: a port is let go when its user signed out
+ * (port 0 stays with the user who started the title), and a new user's
+ * controller takes the first free port. */
+void scan_users() noexcept
+{
+    SceUserServiceLoginUserIdList list{{-1, -1, -1, -1}};
+    if (!pad_service_ready || sceUserServiceGetLoginUserIdList(&list) < 0)
+        return;
+    if (std::memcmp(list.user_id, known_users, sizeof(known_users)) != 0)
+    {
+        std::memcpy(known_users, list.user_id, sizeof(known_users));
+        char line[128];
+        std::snprintf(line, sizeof(line), "input: signed-in users %d %d %d %d",
+                      static_cast<int>(list.user_id[0]), static_cast<int>(list.user_id[1]),
+                      static_cast<int>(list.user_id[2]), static_cast<int>(list.user_id[3]));
+        ps5_input_trace(line);
+    }
+    const auto signed_in = [&list](std::int32_t user)
+    {
+        for (const std::int32_t id : list.user_id)
+            if (id >= 0 && id == user)
+                return true;
+        return false;
+    };
+    for (unsigned port = 1; port < max_pads; ++port)
+        if (pads[port] != nullptr && !signed_in(pads[port]->user_id))
+            release_port(port, "signed out");
+    for (const std::int32_t user : list.user_id)
+    {
+        if (user < 0)
+            continue;
+        bool known = false;
+        for (const PadState *state : pads)
+            known |= state != nullptr && state->user_id == user;
+        if (known)
+            continue;
+        for (unsigned port = 0; port < max_pads; ++port)
+            if (pads[port] == nullptr)
+            {
+                pads[port] = open_pad(user, port, 1);
+                break;
+            }
+    }
+}
+
 void *joypad_init(void *) noexcept
 {
-    if (!active_pad)
+    if (!joypad_ready)
     {
-        active_pad = state_of(open_pad());
-        if (active_pad && script_count == 0)
+        joypad_ready = true;
+        owns_user_service = sceUserServiceInitialize(nullptr) == 0;
+        std::int32_t user_id = -1;
+        if (sceUserServiceGetInitialUser(&user_id) < 0)
+            ps5_input_trace("input: sceUserServiceGetInitialUser found no user");
+        pad_service_ready = scePadInit() >= 0;
+        if (!pad_service_ready)
+            ps5_input_trace("input: scePadInit failed; no pad will be read");
+        else if (user_id >= 0)
+            pads[0] = open_pad(user_id, 0, pad_open_attempts);
+        unopened_user = -1;
+        scan_users();
+        next_user_scan = std::chrono::steady_clock::now() + user_scan_interval;
+        if (script_count == 0)
             load_script();
+        std::FILE *monitor = std::fopen("/app0/pad-monitor.txt", "rb");
+        pad_monitor = monitor != nullptr;
+        monitor_lines = 0;
+        if (monitor != nullptr)
+            std::fclose(monitor);
     }
-    if (active_pad)
-        ps5_input_trace("input: ps5 joypad registered (16 buttons, 6 axes)");
-    return active_pad;
+    ps5_input_trace("input: ps5 joypad registered (4 ports, 16 buttons, 6 axes)");
+    return &joypad_cookie;
 }
 
 void joypad_destroy() noexcept
 {
-    close_pad(active_pad);
-    active_pad = nullptr;
+    for (PadState *&state : pads)
+    {
+        close_pad(state);
+        state = nullptr;
+    }
+    if (owns_user_service)
+    {
+        (void)sceUserServiceTerminate();
+        owns_user_service = false;
+    }
+    joypad_ready = false;
+    pad_service_ready = false;
+    std::memset(known_users, 0xff, sizeof(known_users));
 }
 
 /* The core and content /app0/args.txt names: the line after -L, and the first
@@ -1040,40 +1172,76 @@ void run_script_actions() noexcept
     }
 }
 
+/* The controller on a port, or null. */
+PadState *pad_at(unsigned port) noexcept
+{
+    return port < max_pads ? pads[port] : nullptr;
+}
+
 void joypad_poll() noexcept
 {
     run_script_actions();
-    poll_pad(active_pad);
-    if (!active_pad)
-        return;
-    // Do not announce a disconnect while the shell temporarily intercepts input.
-    bool connected = false;
-    const PadSample *latest = nullptr;
-    for (int i = 0; i < active_pad->sample_count; ++i)
-        if (!latest || active_pad->samples[i].timestamp_us > latest->timestamp_us)
-            latest = &active_pad->samples[i];
-    connected = (latest && latest->connected) || script_count != 0;
-    if (connected != active_pad->announced)
+    if (pad_service_ready && std::chrono::steady_clock::now() >= next_user_scan)
     {
-        active_pad->announced = connected;
-        if (connected)
-            input_autoconfigure_connect("PS5 Controller", nullptr, nullptr, "ps5", 0, 0, 0);
-        else
-            input_autoconfigure_disconnect(0, "PS5 Controller");
+        scan_users();
+        next_user_scan = std::chrono::steady_clock::now() + user_scan_interval;
+    }
+    for (unsigned port = 0; port < max_pads; ++port)
+    {
+        PadState *state = pads[port];
+        if (state == nullptr)
+            continue;
+        poll_pad(state);
+        // Do not announce a disconnect while the shell temporarily intercepts input.
+        const PadSample *latest = nullptr;
+        for (int i = 0; i < state->sample_count; ++i)
+            if (!latest || state->samples[i].timestamp_us > latest->timestamp_us)
+                latest = &state->samples[i];
+        const bool connected = (latest && latest->connected) || (port == 0 && script_count != 0);
+        if (connected != state->announced)
+        {
+            state->announced = connected;
+            if (connected)
+                input_autoconfigure_connect("PS5 Controller", nullptr, nullptr, "ps5", port, 0, 0);
+            else
+                input_autoconfigure_disconnect(port, "PS5 Controller");
+            char line[96];
+            std::snprintf(line, sizeof(line), "input: port %u: user %d's controller %s", port,
+                          static_cast<int>(state->user_id),
+                          connected ? "connected" : "disconnected");
+            ps5_input_trace(line);
+        }
+        // The monitor traces the newest sample's whole button word, the bit that
+        // says the system has the controller (its menus, a sign-in) included.
+        if (pad_monitor && latest != nullptr && latest->buttons != state->monitored_buttons &&
+            monitor_lines < monitor_line_budget)
+        {
+            state->monitored_buttons = latest->buttons;
+            ++monitor_lines;
+            char line[128];
+            std::snprintf(
+                line, sizeof(line), "input: monitor port %u user %d buttons 0x%08x%s", port,
+                static_cast<int>(state->user_id), static_cast<unsigned>(latest->buttons),
+                (latest->buttons & pad_button_intercepted) != 0 ? " (the system has it)" : "");
+            ps5_input_trace(line);
+        }
     }
 }
 
 bool joypad_query(unsigned port) noexcept
 {
-    return port == 0 && active_pad && active_pad->announced;
+    const PadState *state = pad_at(port);
+    return state != nullptr && state->announced;
 }
 
 std::uint32_t joypad_buttons(unsigned port) noexcept
 {
-    if (port != 0 || !active_pad)
+    PadState *state = pad_at(port);
+    if (state == nullptr)
         return 0;
-    const std::uint32_t scripted = script_buttons() & 0xffff;
-    const PadSample *sample = newest_sample(*active_pad);
+    // The pad script plays the first controller.
+    const std::uint32_t scripted = port == 0 ? script_buttons() & 0xffff : 0;
+    const PadSample *sample = newest_sample(*state);
     if (!sample)
         return scripted;
     auto mask = pad_buttons_to_retropad(sample->buttons) | scripted;
@@ -1097,12 +1265,13 @@ void joypad_get_buttons(unsigned port, input_bits_t *bits) noexcept
 
 std::int16_t joypad_axis(unsigned port, std::uint32_t axis) noexcept
 {
-    if (port != 0 || !active_pad || axis == AXIS_NONE)
+    PadState *state = pad_at(port);
+    if (state == nullptr || axis == AXIS_NONE)
         return 0;
     bool negative = AXIS_NEG_GET(axis) < 6;
     unsigned index = negative ? AXIS_NEG_GET(axis) : AXIS_POS_GET(axis);
-    int value = script_axis(index);
-    const PadSample *sample = newest_sample(*active_pad);
+    int value = port == 0 ? script_axis(index) : 0;
+    const PadSample *sample = newest_sample(*state);
     if (value != 0)
         ;
     else if (!sample)
@@ -1158,7 +1327,7 @@ std::int16_t joypad_state(rarch_joypad_info_t *info, const retro_keybind *binds,
 
 const char *joypad_name(unsigned port) noexcept
 {
-    return port == 0 ? "PS5 Controller" : nullptr;
+    return port == 0 || pad_at(port) != nullptr ? "PS5 Controller" : nullptr;
 }
 
 /* RetroArch hands rumble in 0..65535 per effect; the pad wants 0..255 per
@@ -1167,29 +1336,29 @@ const char *joypad_name(unsigned port) noexcept
 bool joypad_set_rumble(unsigned joypad, enum retro_rumble_effect effect,
                        std::uint16_t strength) noexcept
 {
-    if (joypad != 0 || !active_pad || active_pad->handle < 0)
+    PadState *pad = pad_at(joypad);
+    if (pad == nullptr || pad->handle < 0)
         return false;
     if (effect != RETRO_RUMBLE_STRONG && effect != RETRO_RUMBLE_WEAK)
         return false;
-    pthread_mutex_lock(&active_pad->rumble_mutex);
+    pthread_mutex_lock(&pad->rumble_mutex);
     const std::uint8_t level = static_cast<std::uint8_t>(strength >> 8);
     switch (effect)
     {
     case RETRO_RUMBLE_STRONG:
-        active_pad->rumble_large.store(level, std::memory_order_relaxed);
+        pad->rumble_large.store(level, std::memory_order_relaxed);
         break;
     case RETRO_RUMBLE_WEAK:
-        active_pad->rumble_small.store(level, std::memory_order_relaxed);
+        pad->rumble_small.store(level, std::memory_order_relaxed);
         break;
     default:
         break;
     }
-    const ScePadVibrationParam param{active_pad->rumble_large.load(std::memory_order_relaxed),
-                                     active_pad->rumble_small.load(std::memory_order_relaxed)};
+    const ScePadVibrationParam param{pad->rumble_large.load(std::memory_order_relaxed),
+                                     pad->rumble_small.load(std::memory_order_relaxed)};
     // Advanced mode consumes the levels through PCM, not scePadSetVibration.
-    const bool result =
-        active_pad->haptic_active || scePadSetVibration(active_pad->handle, &param) == 0;
-    pthread_mutex_unlock(&active_pad->rumble_mutex);
+    const bool result = pad->haptic_active || scePadSetVibration(pad->handle, &param) == 0;
+    pthread_mutex_unlock(&pad->rumble_mutex);
     return result;
 }
 
@@ -1278,8 +1447,9 @@ extern "C" input_driver_t input_ps5 = {
 // Reannounce once on the next poll, after all default settings have been applied.
 extern "C" void ps5_input_reset_autoconfig() noexcept
 {
-    if (active_pad)
-        active_pad->announced = false;
+    for (PadState *state : pads)
+        if (state != nullptr)
+            state->announced = false;
 }
 
 extern "C" input_device_driver_t ps5_joypad = {

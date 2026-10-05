@@ -426,6 +426,7 @@ int main(int process_argc, char **process_argv)
         static const char *const test_files[] = {
             "/app0/args.txt",
             "/app0/pad-script.txt",
+            "/app0/pad-monitor.txt",
             "/app0/ps5vk-no-retain.txt",
             "/app0/ppsspp-options.txt",
             "/app0/ps5vk-ab.txt",

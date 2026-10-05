@@ -30,6 +30,9 @@
 #   tools/run-title.sh --pad-script=tests/pad/manual-scan-reentry.txt --watch 40
 #                                       RetroArch with the pad scripted (src/input_ps5.cpp says
 #                                       how); its SCREENSHOT pictures are collected afterwards
+#   tools/run-title.sh --pad-monitor --watch 120
+#                                       trace each controller port's buttons as they change, to
+#                                       tell several controllers apart in the trace
 #
 # Why this exists. Every earlier round of the console loop was four hand-driven
 # steps that needed a person: build, upload, launch, read. Two things went wrong
@@ -72,6 +75,7 @@ frontend_scroll=
 picker_test=
 retroarch_frames=0
 pad_script=
+pad_monitor=0
 while (( $# )); do
     case "$1" in
         --no-build)  build=0 ;;
@@ -94,7 +98,8 @@ while (( $# )); do
         --picker-test=*) picker_test=${1#*=} ;;
         --retroarch-frames=*) retroarch_frames=${1#*=} ;;
         --pad-script=*) pad_script=${1#*=} ;;
-        *) echo "usage: ${0##*/} [--no-build] [--no-deploy] [--watch SECONDS] [--gpu-profile 1..60] [--audio-test] [--core-test[=fceumm|mgba|snes9x|fbneo|genesis_plus_gx|ppsspp]] [--relaunch-test[=1..20] [--relaunch-image=PATH]] [--display-modes-test[=frames]] [--frontend-capture=SECONDS[,SECONDS...] [--frontend-scroll] [--frontend-profile] [--frontend-quit] [--frontend-launch]] [--picker-test=FRAMES:retroarch|es-de|none] [--retroarch-frames=N] [--pad-script=FILE]" >&2; exit 2 ;;
+        --pad-monitor) pad_monitor=1 ;;
+        *) echo "usage: ${0##*/} [--no-build] [--no-deploy] [--watch SECONDS] [--gpu-profile 1..60] [--audio-test] [--core-test[=fceumm|mgba|snes9x|fbneo|genesis_plus_gx|ppsspp]] [--relaunch-test[=1..20] [--relaunch-image=PATH]] [--display-modes-test[=frames]] [--frontend-capture=SECONDS[,SECONDS...] [--frontend-scroll] [--frontend-profile] [--frontend-quit] [--frontend-launch]] [--picker-test=FRAMES:retroarch|es-de|none] [--retroarch-frames=N] [--pad-script=FILE] [--pad-monitor]" >&2; exit 2 ;;
     esac
     shift
 done
@@ -249,7 +254,7 @@ fi
 # appeared. A run that does not ask for extras must not inherit them, so the file
 # is removed on every run - before the launch, because deleting it afterwards
 # would leave it for the next one if this run dies.
-python3 - "$title_id" "$profile" "$audio_test" "$core_test" "$relaunch_test" "$relaunch_run" "$display_modes_test" "$relaunch_image" "$frontend_capture" "$capture_run" "$frontend_scroll" "$picker_test" "$retroarch_frames" "$pad_script" <<'PY'
+python3 - "$title_id" "$profile" "$audio_test" "$core_test" "$relaunch_test" "$relaunch_run" "$display_modes_test" "$relaunch_image" "$frontend_capture" "$capture_run" "$frontend_scroll" "$picker_test" "$retroarch_frames" "$pad_script" "$pad_monitor" <<'PY'
 import importlib.util, sys
 spec = importlib.util.spec_from_file_location("dt", "tools/deploy-title.py")
 dt = importlib.util.module_from_spec(spec); spec.loader.exec_module(dt)
@@ -337,6 +342,11 @@ with connect(**dt.load_settings()) as ftp:
         with open(sys.argv[14], "rb") as script:
             ftp.storbinary(f"STOR /data/homebrew/{sys.argv[1]}/pad-script.txt", script)
         print(f"    armed pad script {sys.argv[14]}")
+    # The pad monitor (src/input_ps5.cpp): each controller port's buttons traced.
+    remove_if_present(ftp, f"/data/homebrew/{sys.argv[1]}/pad-monitor.txt")
+    if int(sys.argv[15]):
+        ftp.storbinary(f"STOR /data/homebrew/{sys.argv[1]}/pad-monitor.txt", io.BytesIO(b"pad monitor\n"))
+        print("    armed the pad monitor: each controller port's buttons go to the trace")
     # The launch is a test run's (src/main.cpp): it keeps the test files this run
     # armed, and starts RetroArch rather than the frontend picker
     # (src/frontend_mode_ps5.cpp) unless a picker test is armed.
