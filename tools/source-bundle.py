@@ -207,7 +207,9 @@ def main(argv=None):
     (args.out / "SOURCES.txt").write_text(
         "archive\tpart\tpublished at\n" + "\n".join(index) + "\n", encoding="utf-8")
     with open(args.out / "SHA256SUMS", "w", encoding="utf-8") as sums:
-        for path in sorted(args.out.glob("*.tar*")):
+        # Every archive, whatever it is packed as: ICU's sources are a .tgz and a .zip.
+        for path in sorted(p for p in args.out.iterdir()
+                           if p.is_file() and p.name not in ("SHA256SUMS", "SOURCES.txt")):
             sums.write(f"{sha256(path)}  {path.name}\n")
     print(f"==> [source] {len(written)} archives in {args.out}")
     return 0
