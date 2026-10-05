@@ -2,7 +2,9 @@
  * (frontends/es-de/ps5/library_ps5.cpp), on the host: ES-DE's names, full names and
  * themes for the platforms it knows, a system of its own for one it does not, game
  * mode's commands, and game lists that keep what ES-DE knows of a game, add new games
- * and drop the ones no playlist has. argv[1] is a scratch folder. */
+ * and drop the ones no playlist has, and what RetroArch remembers of play merged in:
+ * favourites from either frontend, last played times and counts, and the collections
+ * enabled once. argv[1] is a scratch folder. */
 #include <cassert>
 #include <cstdio>
 #include <cstring>
@@ -38,14 +40,15 @@ int main(int argc, char **argv)
 {
     assert(argc == 2);
     const std::string dir = argv[1];
-    for (const char *folder :
-         {"/cores", "/info", "/playlists", "/data", "/data/gamelists", "/data/gamelists/snes"})
+    for (const char *folder : {"/cores", "/info", "/playlists", "/playlists/builtin",
+                               "/playlists/logs", "/playlists/logs/Snes9x", "/data",
+                               "/data/gamelists", "/data/gamelists/snes", "/data/settings"})
         mkdir((dir + folder).c_str(), 0777);
     write_text(dir + "/cores/snes9x_libretro.so", "");
-    write_text(
-        dir + "/info/snes9x_libretro.info",
-        "display_name = \"Snes9x\"\ndatabase = \"Nintendo - Super Nintendo Entertainment System\"\n"
-        "supported_extensions = \"smc|sfc\"\n");
+    write_text(dir + "/info/snes9x_libretro.info",
+               "display_name = \"Snes9x\"\ncorename = \"Snes9x\"\n"
+               "database = \"Nintendo - Super Nintendo Entertainment System\"\n"
+               "supported_extensions = \"smc|sfc\"\n");
     write_text(dir + "/reference.xml",
                "<?xml version=\"1.0\"?>\n<systemList>\n"
                "<system><name>snes</name><fullname>Nintendo SNES (Super Nintendo)</fullname>"
@@ -74,6 +77,20 @@ int main(int argc, char **argv)
         "<playcount>3</playcount><favorite>true</favorite></game>\n"
         "<game><path>./Gone (USA).zip</path><name>Gone</name><playcount>9</playcount></game>\n"
         "</gameList>\n");
+
+    /* What RetroArch remembers: a favourite, the history, a runtime log; and ES-DE's
+     * settings from before the collections default. */
+    const std::string luigi = snes + "/Hacks/Mario & Luigi.sfc";
+    write_text(dir + "/playlists/builtin/content_favorites.lpl",
+               "{\"items\": [{\"path\": \"" + luigi + "\"}]}");
+    write_text(dir + "/playlists/builtin/content_history.lpl",
+               "{\"items\": [{\"path\": \"/app0/content/Homebrew/demo.bin\"}]}");
+    write_text(dir + "/playlists/logs/Snes9x/Donkey Kong 2 (USA).lrtl",
+               "{\"version\": \"1.0\", \"runtime\": \"0:02:05\", \"last_played\": "
+               "\"2026-10-02 08:30:00\", \"play_count\": \"5\"}");
+    write_text(dir + "/data/settings/es_settings.xml",
+               "<?xml version=\"1.0\"?>\n<bool name=\"Other\" value=\"true\" />\n"
+               "<string name=\"CollectionSystemsAuto\" value=\"\" />\n");
 
     const std::string playlists = dir + "/playlists", info = dir + "/info", cores = dir + "/cores",
                       reference = dir + "/reference.xml", data = dir + "/data";
@@ -109,12 +126,16 @@ int main(int argc, char **argv)
     {
         count++;
         const std::string path = game.child_value("path");
-        if (path == "./Donkey Kong 2 (USA).zip")
+        if (path == "./Donkey Kong 2 (USA).zip") /* ES-DE's favourite kept; RetroArch's play */
             kept = std::string(game.child_value("name")) == "DKC 2 (renamed in ES-DE)" &&
-                   std::string(game.child_value("playcount")) == "3" &&
+                   std::string(game.child_value("playcount")) == "5" &&
+                   std::string(game.child_value("playtime")) == "125" &&
+                   std::string(game.child_value("lastplayed")) == "20261002T083000" &&
                    std::string(game.child_value("favorite")) == "true";
-        if (path == "./Hacks/Mario & Luigi.sfc")
-            added = std::string(game.child_value("name")) == "Mario & Luigi";
+        if (path == "./Hacks/Mario & Luigi.sfc") /* RetroArch's favourite */
+            added = std::string(game.child_value("name")) == "Mario & Luigi" &&
+                    std::string(game.child_value("favorite")) == "true" &&
+                    !game.child("lastplayed");
         assert(path != "./Gone (USA).zip");
     }
     assert(count == 2 && kept && added);
@@ -122,10 +143,60 @@ int main(int argc, char **argv)
     assert(homebrew.load_file((data + "/gamelists/homebrew/gamelist.xml").c_str()));
     assert(std::string(homebrew.child("gameList").child("game").child_value("path")) ==
            "./demo.bin");
+    /* In the history only: a time from its place. */
+    assert(std::strlen(homebrew.child("gameList").child("game").child_value("lastplayed")) == 15);
+    assert(std::string(summary).find("2 favourites, 2 played") != std::string::npos);
+    /* The collections, enabled once, beside the other settings. */
+    pugi::xml_document settings;
+    assert(settings.load_file((data + "/settings/es_settings.xml").c_str()));
+    assert(std::string(settings.find_child_by_attribute("string", "name", "CollectionSystemsAuto")
+                           .attribute("value")
+                           .value()) == "favorites,recent");
+    assert(settings.find_child_by_attribute("bool", "name", "Other"));
 
     /* Again: the same files. */
     assert(ps5_esde_write_library_to(&paths, summary, sizeof(summary)) == 2);
     assert(std::string(summary).find("2 systems, 3 games (3 with ES-DE's details kept)") == 0);
-    std::puts("esde_library: systems, full names, themes, commands and merged game lists PASS");
+
+    /* Favourites in both frontends: in ES-DE the user takes DKC 2's away and Mario &
+     * Luigi's too; RetroArch did not change either since, so ES-DE's choice stands. */
+    const auto favourite = [&](const char *path)
+    {
+        pugi::xml_document list;
+        assert(list.load_file((data + "/gamelists/snes/gamelist.xml").c_str()));
+        for (pugi::xml_node game : list.child("gameList").children("game"))
+            if (std::strcmp(game.child_value("path"), path) == 0)
+                return std::strcmp(game.child_value("favorite"), "true") == 0;
+        assert(!"a game the list should have");
+        return false;
+    };
+    assert(favourite("./Donkey Kong 2 (USA).zip") && favourite("./Hacks/Mario & Luigi.sfc"));
+    const auto unfavourite_in_esde = [&]()
+    {
+        pugi::xml_document list;
+        assert(list.load_file((data + "/gamelists/snes/gamelist.xml").c_str()));
+        for (pugi::xml_node game : list.child("gameList").children("game"))
+            game.remove_child("favorite");
+        list.save_file((data + "/gamelists/snes/gamelist.xml").c_str());
+    };
+    unfavourite_in_esde();
+    assert(ps5_esde_write_library_to(&paths, summary, sizeof(summary)) == 2);
+    assert(!favourite("./Donkey Kong 2 (USA).zip") && !favourite("./Hacks/Mario & Luigi.sfc"));
+    /* RetroArch takes Mario & Luigi out and puts DKC 2 in: ES-DE follows. */
+    write_text(dir + "/playlists/builtin/content_favorites.lpl",
+               "{\"items\": [{\"path\": \"" + snes + "/Donkey Kong 2 (USA).zip\"}]}");
+    assert(ps5_esde_write_library_to(&paths, summary, sizeof(summary)) == 2);
+    assert(favourite("./Donkey Kong 2 (USA).zip") && !favourite("./Hacks/Mario & Luigi.sfc"));
+    /* A later choice of the user's about the collections is kept. */
+    write_text(dir + "/data/settings/es_settings.xml",
+               "<?xml version=\"1.0\"?>\n<string name=\"CollectionSystemsAuto\" value=\"\" />\n");
+    assert(ps5_esde_write_library_to(&paths, summary, sizeof(summary)) == 2);
+    assert(settings.load_file((data + "/settings/es_settings.xml").c_str()));
+    assert(std::string(settings.find_child_by_attribute("string", "name", "CollectionSystemsAuto")
+                           .attribute("value")
+                           .value())
+               .empty());
+    std::puts("esde_library: systems, full names, themes, commands, merged game lists, favourites "
+              "from both frontends, RetroArch's play records and the collections PASS");
     return 0;
 }

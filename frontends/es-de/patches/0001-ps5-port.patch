@@ -281,7 +281,7 @@ index a9af826..f911a41 100644
      // the system view or the gamelist view.
      std::string requestedSystem {Settings::getInstance()->getString("StartupSystem")};
 diff --git a/es-core/src/Settings.cpp b/es-core/src/Settings.cpp
-index d0c8264..c5a4ee5 100644
+index d0c8264..cfeadd0 100644
 --- a/es-core/src/Settings.cpp
 +++ b/es-core/src/Settings.cpp
 @@ -161,7 +161,12 @@ void Settings::setDefaults()
@@ -297,6 +297,20 @@ index d0c8264..c5a4ee5 100644
      mStringMap["ThemeVariant"] = {"", ""};
      mStringMap["ThemeColorScheme"] = {"", ""};
      mStringMap["ThemeFontSize"] = {"", ""};
+@@ -256,7 +261,13 @@ void Settings::setDefaults()
+     mBoolMap["InputDeviceNotifications"] = {true, true};
+ 
+     // Game collection settings.
++#if defined(__PROSPERO__)
++    // PS5: RetroArch's favourites and last played games, which the port writes into the
++    // game lists (frontends/es-de/ps5/library_ps5.cpp), as collections from the start.
++    mStringMap["CollectionSystemsAuto"] = {"favorites,recent", "favorites,recent"};
++#else
+     mStringMap["CollectionSystemsAuto"] = {"", ""};
++#endif
+     mStringMap["CollectionSystemsCustom"] = {"", ""};
+     mStringMap["CollectionCustomGrouping"] = {"unthemed", "unthemed"};
+     mBoolMap["FavFirstCustom"] = {false, false};
 diff --git a/es-core/src/renderers/RendererOpenGL.cpp b/es-core/src/renderers/RendererOpenGL.cpp
 index 6e78440..3216de8 100644
 --- a/es-core/src/renderers/RendererOpenGL.cpp

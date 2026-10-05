@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 
 #include "../src/ps5_game.h"
 #include "../src/ps5_library.h"
@@ -35,9 +36,9 @@ static void core(const char *dir, const char *name, const char *database, const 
     write_text(path, "");
     snprintf(path, sizeof(path), "%s/info/%s_libretro.info", dir, name);
     snprintf(text, sizeof(text),
-             "display_name = \"%s\"\ndatabase_match_archive_member = \"false\"\ndatabase = \"%s\"\n"
-             "supported_extensions = \"%s\"\n",
-             name, database, extensions);
+             "display_name = \"%s\"\ncorename = \"%s\"\ndatabase_match_archive_member = \"false\"\n"
+             "database = \"%s\"\nsupported_extensions = \"%s\"\n",
+             name, name, database, extensions);
     write_text(path, text);
 }
 
@@ -139,6 +140,30 @@ int main(int argc, char **argv)
     write_text(path, "{\"items\": [{\"path\": \"/app0/content/elsewhere/history.zip\", "
                      "\"core_path\": \"DETECT\"}]}");
 
+    /* What RetroArch remembers of play: favourites and history in builtin/, and a
+     * runtime log per core and game. */
+    snprintf(path, sizeof(path), "%s/playlists/builtin", dir);
+    mkdir(path, 0777);
+    snprintf(path, sizeof(path), "%s/playlists/builtin/content_favorites.lpl", dir);
+    write_text(path, "{\"items\": [{\"path\": \"/app0/content/Nintendo - Super Nintendo "
+                     "Entertainment System/It's Mario (USA).sfc\", \"core_path\": \"DETECT\"},"
+                     "{\"path\": \"/app0/content/not/in/the/library.zip\"}]}");
+    char history[2048];
+    snprintf(history, sizeof(history), "%s/playlists/builtin/content_history.lpl", dir);
+    write_text(history, "{\"items\": [{\"path\": \"/app0/content/PS2/Okami (USA).iso\"},"
+                        "{\"path\": \"/app0/content/PS1/Crash (USA).cue\"},"
+                        "{\"path\": \"/app0/content/Nintendo - Super Nintendo Entertainment "
+                        "System/It's Mario (USA).sfc\"},"
+                        "{\"path\": \"/app0/content/PS2/Okami (USA).iso\"}]}");
+    snprintf(path, sizeof(path), "%s/playlists/logs", dir);
+    mkdir(path, 0777);
+    snprintf(path, sizeof(path), "%s/playlists/logs/snes9x", dir);
+    mkdir(path, 0777);
+    snprintf(path, sizeof(path), "%s/playlists/logs/snes9x/It's Mario (USA).lrtl", dir);
+    write_text(path,
+               "{\n  \"version\": \"1.0\",\n  \"runtime\": \"1:05:07\",\n  \"last_played\": "
+               "\"2026-10-01 10:00:00\",\n  \"play_count\": \"3\",\n  \"state_slot\": \"0\"\n}\n");
+
     char playlists[1024], info[1024], cores[1024];
     snprintf(playlists, sizeof(playlists), "%s/playlists", dir);
     snprintf(info, sizeof(info), "%s/info", dir);
@@ -187,6 +212,34 @@ int main(int argc, char **argv)
     assert(homebrew && !homebrew->known && strcmp(homebrew->name, "Homebrew") == 0 &&
            !homebrew->core[0]);
 
+    /* What RetroArch remembers of play, with each game. */
+    {
+        const struct ps5_library_game *mario = &library.games[snes->first_game + 1];
+        assert(mario->favorite && mario->history == 3 && mario->play_count == 3 &&
+               mario->play_seconds == 3907 &&
+               strcmp(mario->last_played, "2026-10-01 10:00:00") == 0);
+        const struct ps5_library_game *dkc2 = &library.games[snes->first_game];
+        assert(!dkc2->favorite && !dkc2->history && !dkc2->last_played[0] && !dkc2->play_count);
+        /* No runtime log: a time from the place in the history, a minute a place. */
+        struct stat written;
+        assert(stat(history, &written) == 0);
+        const struct ps5_library_game *okami = &library.games[ps2->first_game + 1];
+        const struct ps5_library_game *crash = NULL;
+        for (size_t i = 0; i < library.game_count; i++)
+            if (strcmp(library.games[i].path, "/app0/content/PS1/Crash (USA).cue") == 0)
+                crash = &library.games[i];
+        assert(strcmp(okami->label, "Okami") == 0 && okami->history == 1 && crash &&
+               crash->history == 2);
+        char expected[20];
+        struct tm local;
+        time_t when = written.st_mtime;
+        strftime(expected, sizeof(expected), "%Y-%m-%d %H:%M:%S", localtime_r(&when, &local));
+        assert(strcmp(okami->last_played, expected) == 0);
+        when -= 60;
+        strftime(expected, sizeof(expected), "%Y-%m-%d %H:%M:%S", localtime_r(&when, &local));
+        assert(strcmp(crash->last_played, expected) == 0);
+    }
+
     /* Game mode's commands, parsed back. */
     char command[4096];
     struct ps5_game parsed;
@@ -204,7 +257,7 @@ int main(int argc, char **argv)
     assert(ps5_library_load(&library, "/nonexistent", "/nonexistent", "/nonexistent") == 0 &&
            library.system_count == 0 && library.game_count == 0);
     ps5_library_free(&library);
-    puts("ps5_library: platforms, playlists, systems, cores, folders, labels and game mode "
-         "commands PASS");
+    puts("ps5_library: platforms, playlists, systems, cores, folders, labels, favourites, history, "
+         "runtime logs and game mode commands PASS");
     return 0;
 }

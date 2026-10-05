@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 
 /* --- the JSON RetroArch writes its playlists in ----------------------------------- */
 
@@ -729,6 +730,7 @@ static void load_cores(struct ps5_library *library, const char *info, const char
             while (fgets(line, sizeof(line), file))
             {
                 info_value(line, "display_name", core->name, sizeof(core->name));
+                info_value(line, "corename", core->core_name, sizeof(core->core_name));
                 info_value(line, "database", core->databases, sizeof(core->databases));
                 info_value(line, "supported_extensions", core->extensions,
                            sizeof(core->extensions));
@@ -863,6 +865,114 @@ static void finish_systems(struct ps5_library *library)
     }
 }
 
+/* --- what RetroArch remembers of play ---------------------------------------------- */
+
+static struct ps5_library_game *game_by_path(struct ps5_library *library, const char *path)
+{
+    for (size_t i = 0; i < library->game_count; i++)
+        if (strcmp(library->games[i].path, path) == 0)
+            return &library->games[i];
+    return NULL;
+}
+
+struct marking
+{
+    struct ps5_library *library;
+    int history; /* 0: the favourites, 1: the history */
+    unsigned place;
+};
+
+static void mark_entry(void *context, const struct ps5_playlist_entry *entry)
+{
+    struct marking *marking = (struct marking *)context;
+    marking->place++;
+    struct ps5_library_game *game = game_by_path(marking->library, entry->path);
+    if (!game)
+        return;
+    if (!marking->history)
+        game->favorite = 1;
+    else if (!game->history)
+        game->history = marking->place;
+}
+
+/* A builtin playlist, from builtin/ (where RetroArch keeps them) or beside the others;
+ * its file's time in *written. */
+static void read_builtin(struct ps5_library *library, const char *playlists, const char *name,
+                         int history, time_t *written)
+{
+    static const char *const places[] = {"builtin/", ""};
+    for (size_t i = 0; i < sizeof(places) / sizeof(places[0]); i++)
+    {
+        char path[PS5_LIBRARY_PATH_MAX + 256];
+        snprintf(path, sizeof(path), "%s/%s%s", playlists, places[i], name);
+        struct marking marking = {library, history, 0};
+        if (ps5_playlist_read(path, NULL, 0, mark_entry, &marking) >= 0)
+        {
+            struct stat status;
+            if (written && stat(path, &status) == 0)
+                *written = status.st_mtime;
+            return;
+        }
+    }
+}
+
+/* A game's runtime log, as RetroArch names it: logs/<core name>/<the content's file
+ * name without its extension>.lrtl, under the playlists folder. */
+static void read_runtime(struct ps5_library *library, struct ps5_library_game *game,
+                         const char *playlists)
+{
+    const char *core_path = game->core[0] ? game->core : library->systems[game->system].core;
+    const struct ps5_library_core *core = core_by_path(library, core_path);
+    if (!core || !core->core_name[0])
+        return;
+    const char *slash = strrchr(game->path, '/');
+    const char *file = slash ? slash + 1 : game->path;
+    const char *dot = strrchr(file, '.');
+    char path[PS5_LIBRARY_PATH_MAX + 512];
+    snprintf(path, sizeof(path), "%s/logs/%s/%.*s.lrtl", playlists, core->core_name,
+             (int)(dot ? (size_t)(dot - file) : strlen(file)), file);
+    FILE *input = fopen(path, "rb");
+    if (!input)
+        return;
+    char text[1024];
+    const size_t length = fread(text, 1, sizeof(text), input);
+    fclose(input);
+    char last[32], count[16], runtime[32];
+    struct member wanted[] = {{"last_played", last, sizeof(last)},
+                              {"play_count", count, sizeof(count)},
+                              {"runtime", runtime, sizeof(runtime)}};
+    struct json json = {text, text + length};
+    if (json_object(&json, wanted, 3, NULL, NULL) != 0)
+        return;
+    int year, month, day, hour, minute, second;
+    if (sscanf(last, "%4d-%2d-%2d %2d:%2d:%2d", &year, &month, &day, &hour, &minute, &second) == 6)
+        snprintf(game->last_played, sizeof(game->last_played), "%04d-%02d-%02d %02d:%02d:%02d",
+                 year, month, day, hour, minute, second);
+    game->play_count = (unsigned)strtoul(count, NULL, 10);
+    unsigned hours = 0, minutes = 0, seconds = 0;
+    if (sscanf(runtime, "%u:%u:%u", &hours, &minutes, &seconds) == 3)
+        game->play_seconds = hours * 3600UL + minutes * 60UL + seconds;
+}
+
+static void read_play(struct ps5_library *library, const char *playlists)
+{
+    time_t history_written = 0;
+    read_builtin(library, playlists, "content_favorites.lpl", 0, NULL);
+    read_builtin(library, playlists, "content_history.lpl", 1, &history_written);
+    for (size_t i = 0; i < library->game_count; i++)
+    {
+        struct ps5_library_game *game = &library->games[i];
+        read_runtime(library, game, playlists);
+        if (!game->last_played[0] && game->history && history_written)
+        {
+            const time_t when = history_written - (time_t)(game->history - 1) * 60;
+            struct tm local;
+            if (localtime_r(&when, &local))
+                strftime(game->last_played, sizeof(game->last_played), "%Y-%m-%d %H:%M:%S", &local);
+        }
+    }
+}
+
 int ps5_library_load(struct ps5_library *library, const char *playlists, const char *info,
                      const char *cores)
 {
@@ -884,6 +994,7 @@ int ps5_library_load(struct ps5_library *library, const char *playlists, const c
     if (loading.failed)
         return -1;
     finish_systems(library);
+    read_play(library, playlists);
     return 0;
 }
 

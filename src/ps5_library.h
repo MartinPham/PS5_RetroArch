@@ -22,7 +22,14 @@
  *     cores the title carries; a game's own playlist core still wins when it is
  *     launched (game mode);
  *   - a system's folder is the deepest folder all its games are in, and its
- *     extensions those of its games and of its core.
+ *     extensions those of its games and of its core;
+ *   - what RetroArch remembers of play goes with each game: whether it is in the
+ *     favourites (builtin/content_favorites.lpl), its place in the history
+ *     (builtin/content_history.lpl), and its runtime log
+ *     (logs/<core name>/<content name>.lrtl): when it was last played, how often and
+ *     for how long. A game in the history with no runtime log is given a time from
+ *     its place: the history file's, a minute earlier for each place below the top,
+ *     so the order holds.
  *
  * A frontend writes its own files from this (frontends/es-de/ps5/library_ps5.cpp
  * writes ES-DE's systems file and game lists) and launches every game through game
@@ -48,6 +55,7 @@ extern "C"
     {
         char path[PS5_LIBRARY_PATH_MAX]; /* /app0/cores/<name>_libretro.so */
         char name[128];                  /* its display_name */
+        char core_name[128];             /* its corename: its runtime logs' folder */
         char databases[1024];            /* RetroArch databases, '|'-separated */
         char extensions[512];            /* supported extensions, '|'-separated */
     };
@@ -71,6 +79,11 @@ extern "C"
         char crc32[32];
         char playlist[256]; /* the playlist's file name */
         size_t system;
+        int favorite;               /* in RetroArch's favourites */
+        unsigned history;           /* its place in RetroArch's history, 1 the newest, or 0 */
+        char last_played[20];       /* "YYYY-MM-DD HH:MM:SS", local time, or "" */
+        unsigned play_count;        /* from its runtime log */
+        unsigned long play_seconds; /* from its runtime log */
     };
 
     struct ps5_library
