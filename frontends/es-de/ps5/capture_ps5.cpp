@@ -12,7 +12,8 @@
  * the first, its back buffer is read and written as
  * /app0/es-de/capture-<run id>-<pid>-<seconds>.ppm (binary RGB, top row first), and a
  * line is added to /app0/es-de/capture-test.jsonl with the frame's number, size,
- * the OpenGL error state and the frame times since the line before: how far
+ * the sound driver SDL chose and how many of its devices are playing, the OpenGL
+ * error state and the frame times since the line before: how far
  * apart the swaps were and how long the swap itself took (it waits for the GPU
  * to finish the frame and for the flip). With "scroll", a Right key is pressed
  * every 400 ms from the fifth second on, as a person browsing the systems would,
@@ -82,7 +83,8 @@ bool valid_run(const std::string &run)
     if (run.empty() || run.size() > 64)
         return false;
     for (char c : run)
-        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_'))
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+              c == '-' || c == '_'))
             return false;
     return true;
 }
@@ -101,7 +103,8 @@ void read_arm()
     state.scroll = fields == 3 && std::strstr(mode, "scroll") != nullptr;
     state.profile = fields == 3 && std::strstr(mode, "profile") != nullptr;
     state.quit = fields == 3 && std::strstr(mode, "quit") != nullptr;
-    state.launch = fields == 3 && std::strstr(mode, "launch") != nullptr && !ps5_esde_started_from_game();
+    state.launch =
+        fields == 3 && std::strstr(mode, "launch") != nullptr && !ps5_esde_started_from_game();
     unsigned last = 0;
     for (char *token = std::strtok(list, ","); token; token = std::strtok(nullptr, ","))
     {
@@ -175,7 +178,8 @@ void write_profile()
         for (unsigned index = 0; index < count; index++)
         {
             for (unsigned depth = 0; depth < sample_depth; depth++)
-                std::fprintf(out, depth ? " %lx" : "%lx", static_cast<unsigned long>(samples[index][depth]));
+                std::fprintf(out, depth ? " %lx" : "%lx",
+                             static_cast<unsigned long>(samples[index][depth]));
             std::fputc('\n', out);
         }
         std::fclose(out);
@@ -199,23 +203,33 @@ float mean(const std::vector<float> &values)
     return values.empty() ? 0.0f : sum / float(values.size());
 }
 
-void record(unsigned seconds, int width, int height, const std::string &file, unsigned error, bool written)
+void record(unsigned seconds, int width, int height, const std::string &file, unsigned error,
+            bool written)
 {
     const auto &gaps = state.intervals_ms;
-    const long slow = std::count_if(gaps.begin(), gaps.end(), [](float gap) { return gap > 25.0f; });
+    const long slow =
+        std::count_if(gaps.begin(), gaps.end(), [](float gap) { return gap > 25.0f; });
+    /* Sound: the driver SDL chose and the devices playing now (ES-DE opens one). */
+    const char *audio_driver = SDL_GetCurrentAudioDriver();
+    int audio_playing = 0;
+    for (SDL_AudioDeviceID device = 1; device <= 8; device++)
+        audio_playing += SDL_GetAudioDeviceStatus(device) == SDL_AUDIO_PLAYING;
     if (std::FILE *out = std::fopen(record_file, "a"))
     {
-        std::fprintf(out,
-                     "{\"run\":\"%s\",\"pid\":%d,\"seconds\":%u,\"frame\":%llu,\"width\":%d,\"height\":%d,"
-                     "\"file\":\"%s\",\"gl_error\":%u,\"written\":%s,\"interval_frames\":%zu,"
-                     "\"interval_ms\":{\"mean\":%.2f,\"p50\":%.2f,\"p95\":%.2f,\"max\":%.2f,\"over_25\":%ld},"
-                     "\"swap_ms\":{\"mean\":%.2f,\"p95\":%.2f,\"max\":%.2f},\"presses\":%u,\"slow\":[%s]}\n",
-                     state.run.c_str(), static_cast<int>(getpid()), seconds, state.frames, width, height,
-                     file.c_str(), error,
-                     written ? "true" : "false", gaps.size(), mean(gaps), percentile(gaps, 0.5f),
-                     percentile(gaps, 0.95f), percentile(gaps, 1.0f), slow, mean(state.swaps_ms),
-                     percentile(state.swaps_ms, 0.95f), percentile(state.swaps_ms, 1.0f), state.presses,
-                     state.slow.c_str());
+        std::fprintf(
+            out,
+            "{\"run\":\"%s\",\"pid\":%d,\"seconds\":%u,\"frame\":%llu,\"width\":%d,\"height\":%d,"
+            "\"audio_driver\":\"%s\",\"audio_playing\":%d,"
+            "\"file\":\"%s\",\"gl_error\":%u,\"written\":%s,\"interval_frames\":%zu,"
+            "\"interval_ms\":{\"mean\":%.2f,\"p50\":%.2f,\"p95\":%.2f,\"max\":%.2f,\"over_25\":%ld}"
+            ","
+            "\"swap_ms\":{\"mean\":%.2f,\"p95\":%.2f,\"max\":%.2f},\"presses\":%u,\"slow\":[%s]}\n",
+            state.run.c_str(), static_cast<int>(getpid()), seconds, state.frames, width, height,
+            audio_driver ? audio_driver : "", audio_playing, file.c_str(), error,
+            written ? "true" : "false", gaps.size(), mean(gaps), percentile(gaps, 0.5f),
+            percentile(gaps, 0.95f), percentile(gaps, 1.0f), slow, mean(state.swaps_ms),
+            percentile(state.swaps_ms, 0.95f), percentile(state.swaps_ms, 1.0f), state.presses,
+            state.slow.c_str());
         std::fclose(out);
     }
     state.slow.clear();
@@ -248,8 +262,8 @@ void capture(SDL_Window *window, unsigned seconds)
 {
     int width = 0, height = 0;
     SDL_GL_GetDrawableSize(window, &width, &height);
-    const std::string file = "/app0/es-de/capture-" + state.run + "-" + std::to_string(getpid()) + "-" +
-                             std::to_string(seconds) + ".ppm";
+    const std::string file = "/app0/es-de/capture-" + state.run + "-" + std::to_string(getpid()) +
+                             "-" + std::to_string(seconds) + ".ppm";
     if (width <= 0 || height <= 0 || width > 8192 || height > 8192)
     {
         record(seconds, width, height, file, 0, false);
@@ -302,7 +316,8 @@ extern "C" void __wrap_SDL_GL_SwapWindow(SDL_Window *window)
         {
             char entry[64];
             std::snprintf(entry, sizeof(entry), "%s\"%.2f:%.0f@%u\"", state.slow.empty() ? "" : ",",
-                          std::chrono::duration<float>(now - state.first).count(), gap, state.presses_total);
+                          std::chrono::duration<float>(now - state.first).count(), gap,
+                          state.presses_total);
             state.slow += entry;
         }
     }
@@ -314,7 +329,8 @@ extern "C" void __wrap_SDL_GL_SwapWindow(SDL_Window *window)
         press(SDL_SCANCODE_RETURN, SDLK_RETURN);
         state.launch_presses++;
     }
-    if (state.scroll && state.next < state.seconds.size() && now - state.first >= std::chrono::seconds(5) &&
+    if (state.scroll && state.next < state.seconds.size() &&
+        now - state.first >= std::chrono::seconds(5) &&
         now - state.last_press >= std::chrono::milliseconds(400))
     {
         press_right();
@@ -342,5 +358,6 @@ extern "C" void __wrap_SDL_GL_SwapWindow(SDL_Window *window)
     __real_SDL_GL_SwapWindow(window);
     if (!state.seconds.empty())
         state.swaps_ms.push_back(
-            std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - before).count());
+            std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - before)
+                .count());
 }

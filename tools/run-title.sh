@@ -555,7 +555,8 @@ with connect(**dt.load_settings()) as ftp:
                 pass
         print(f"    {'process ' + str(row['pid']) + ', ' if 'pid' in row else ''}"
               f"frame {row['frame']} at {row['seconds']} s: {row['width']}x{row['height']}, "
-              f"GL error {row['gl_error']}, {'saved to ' + str(local) if row['written'] else 'not written'}")
+              f"GL error {row['gl_error']}, sound {row.get('audio_driver') or 'none'} "
+              f"({row.get('audio_playing', 0)} playing), {'saved to ' + str(local) if row['written'] else 'not written'}")
         if "interval_ms" in row:
             gap, swap = row["interval_ms"], row["swap_ms"]
             print(f"      {row['interval_frames']} frames before it ({row['presses']} presses): between swaps "
