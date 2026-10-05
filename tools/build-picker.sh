@@ -56,6 +56,9 @@ if [[ ! -f $generated/.picker-template || $(<"$generated/.picker-template") != "
 fi
 
 cp "$root/frontends/picker/picker.cpp" "$generated/examples/$program/$program.cpp"
+# The remembered frontend's file (config/frontend.cfg) is read and written with the
+# same header-only code as eboot.bin's dispatch and the WebUI.
+cp "$root/src/ps5_frontend_choice.h" "$generated/examples/$program/ps5_frontend_choice.h"
 rm -rf -- "$generated/examples/$program/kit"
 python3 - "$generated" <<'PY'
 import sys

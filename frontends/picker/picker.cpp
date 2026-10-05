@@ -16,19 +16,27 @@
  * RIGHT move, CROSS starts the frontend, CIRCLE closes the title. Both frontends
  * play every game through RetroArch, with its cores, saves, shaders and settings.
  *
+ * SQUARE switches Remember: with it on, the frontend started is written to
+ * /app0/config/frontend.cfg (src/ps5_frontend_choice.h, copied beside this file by
+ * the build), and the title starts it straight away from then on; holding L1 while
+ * the title starts comes back here, which shows the switch on and that frontend
+ * chosen. With it off, the file says "ask" and this screen opens every time.
+ *
  * Choosing ends the program, so its device and display are released, and then
  * ps5_title_next (called by the title's main once the program is gone) restarts
  * the title as the frontend: eboot.bin with --ps5-mode=retroarch, or
  * /app0/es-de/es-de.bin.
  *
- * Armed by /app0/picker/picker-test.txt ("<frames> <retroarch|es-de|none>",
- * tools/run-title.sh --picker-test), the picker draws that many frames without the
- * pad, moves to the card named, saves its last frame as
+ * Armed by /app0/picker/picker-test.txt ("<frames> <retroarch|es-de|none>
+ * [remember|forget]", tools/run-title.sh --picker-test), the picker draws that many
+ * frames without the pad, sets Remember when the third word asks, moves to the card
+ * named, saves its last frame as
  * /app0/picker/screenshots/picker.ppm, chooses it, and records what it chose in
  * /app0/picker/picker-test.jsonl. The file is removed when read: it arms one launch.
  */
 
 #include "kit.hpp"
+#include "ps5_frontend_choice.h"
 
 extern "C" int sceSystemServiceLoadExec(const char *path, const char *const *argv);
 extern "C" int sceKernelUsleep(uint32_t microseconds);
@@ -62,6 +70,8 @@ const Frontend frontends[cardCount] = {
 
 // What runs once the program has ended: -1 for nothing (the title closes)
 int nextFrontend = -1;
+// Remember's state when the program ended: the frontend chosen is written, or "ask"
+bool rememberChoice = false;
 std::string testLine;
 
 const hui::ui::Theme &glossTheme()
@@ -112,6 +122,8 @@ public:
 	hui::ui::Feedback feedback;
 	float clock{ 0.0f };
 	int testChoice{ -2 }; // armed: the frontend to choose, or -1 for none
+	int testRemember{ -1 }; // armed: 1 remember, 0 forget, -1 leave the switch
+	bool remember{ false };
 
 	VulkanExample() : KitExample()
 	{
@@ -129,12 +141,15 @@ public:
 			return;
 		}
 		unsigned frames = 0;
-		char choice[16] = {};
-		const int fields = std::fscanf(file, "%u %15s", &frames, choice);
+		char choice[16] = {}, switchWord[16] = {};
+		const int fields = std::fscanf(file, "%u %15s %15s", &frames, choice, switchWord);
 		std::fclose(file);
 		std::remove(testPath);
-		if (fields != 2 || frames < 10 || frames > 36000) {
+		if (fields < 2 || frames < 10 || frames > 36000) {
 			return;
+		}
+		if (fields == 3) {
+			testRemember = std::strcmp(switchWord, "remember") == 0 ? 1 : std::strcmp(switchWord, "forget") == 0 ? 0 : -1;
 		}
 		testChoice = -1;
 		for (int i = 0; i < cardCount; i++) {
@@ -146,14 +161,24 @@ public:
 		ps5.frameBudget = frames;
 		mkdir(PS5_APP_ROOT "/screenshots", 0777);
 		ps5.screenshotPath = screenshotPath;
-		char line[64];
-		std::snprintf(line, sizeof(line), "\"frames\":%u,\"choice\":\"%s\"", frames, choice);
+		char line[96];
+		std::snprintf(line, sizeof(line), "\"frames\":%u,\"choice\":\"%s\",\"remember\":%d", frames, choice,
+			testRemember);
 		testLine = line;
 	}
 
 	void prepare() override
 	{
 		VulkanExampleBase::prepare();
+		// A frontend remembered (this screen came back because L1 was held): the switch
+		// is on and that frontend's card is the one chosen
+		const char *remembered = ps5_frontend_choice_read(PS5_FRONTEND_CHOICE_PATH);
+		for (int i = 0; i < cardCount; i++) {
+			if (std::strcmp(remembered, frontends[i].id) == 0) {
+				remember = true;
+				focus = i;
+			}
+		}
 		readTest();
 		prepareKit({ .music = false, .covers = false });
 		for (int i = 0; i < cardCount; i++) {
@@ -189,6 +214,9 @@ public:
 			if (testChoice >= 0 && ps5.framesDrawn == ps5.frameBudget / 3) {
 				move(testChoice);
 			}
+			if (testRemember >= 0 && ps5.framesDrawn == ps5.frameBudget / 2) {
+				remember = testRemember == 1;
+			}
 			if (ps5.framesDrawn + 1 == ps5.frameBudget) {
 				chosen = testChoice;
 			}
@@ -206,6 +234,9 @@ public:
 			chosen = focus;
 		} else if (input.is_pressed(hui::Action::back)) {
 			chosen = -1;
+		} else if (input.is_pressed(hui::Action::west)) {
+			remember = !remember;
+			feedback.play(hui::audio::Cue::toggle);
 		}
 		for (int i = 0; i < cardCount; i++) {
 			shown[i].target = i == focus ? 1.0f : 0.0f;
@@ -234,6 +265,10 @@ public:
 		painter.heading("Choose a frontend", 196.0f, 236.0f, 84.0f, painter.page_text());
 		painter.body("Both play every game through RetroArch, with the same cores, saves, shaders and settings",
 			200.0f, 292.0f, 26.0f, painter.page_text_muted());
+		if (remember) {
+			painter.body("Remember is on: the title starts this frontend straight away. Hold L1 while it starts to come back here.",
+				200.0f, 940.0f, 24.0f, painter.page_text_muted());
+		}
 		scene.pop_transform();
 		scene.pop_opacity();
 
@@ -269,6 +304,7 @@ public:
 		scene.push_opacity(foot);
 		ps5ui::draw_hints(scene, kit.fonts, theme,
 			{ { hui::ui::Button::dpad, "Move" }, { hui::ui::Button::cross, "Start" },
+				{ hui::ui::Button::square, remember ? "Remember: on" : "Remember: off" },
 				{ hui::ui::Button::circle, "Close" } },
 			960.0f, 1010.0f, 0);
 		scene.pop_opacity();
@@ -293,6 +329,7 @@ public:
 		submitFrame();
 		if (chosen != -2) {
 			nextFrontend = chosen;
+			rememberChoice = remember;
 			quit = true;
 		}
 	}
@@ -312,6 +349,11 @@ public:
 extern "C" void ps5_title_next(void)
 {
 	const Frontend *next = nextFrontend >= 0 && nextFrontend < cardCount ? &frontends[nextFrontend] : nullptr;
+	// Starting a frontend records Remember: that frontend, or "ask"; closing leaves it
+	if (next) {
+		const int written = ps5_frontend_choice_write(PS5_FRONTEND_CHOICE_PATH, rememberChoice ? next->id : "ask");
+		say("picker: remember %s (write %d)", rememberChoice ? next->id : "ask", written);
+	}
 	if (!testLine.empty()) {
 		if (FILE *record = std::fopen(testRecord, "a")) {
 			std::fprintf(record, "{%s,\"next\":\"%s\"}\n", testLine.c_str(), next ? next->next : "");

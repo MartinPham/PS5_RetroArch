@@ -26,6 +26,35 @@ Exec exec_mode = Exec::replace;
 int exec_calls = 0;
 std::string exec_path, exec_argument;
 std::vector<std::string> marks;
+bool l1_held = false;
+int l1_reads = 0;
+bool read_l1()
+{
+    l1_reads++;
+    return l1_held;
+}
+
+std::string read_file(const std::string &path)
+{
+    std::string text;
+    if (std::FILE *file = std::fopen(path.c_str(), "rb"))
+    {
+        char buffer[256];
+        size_t n;
+        while ((n = std::fread(buffer, 1, sizeof(buffer), file)) > 0)
+            text.append(buffer, n);
+        std::fclose(file);
+    }
+    return text;
+}
+
+void write_file(const std::string &path, const std::string &text)
+{
+    std::FILE *file = std::fopen(path.c_str(), "wb");
+    assert(file);
+    std::fputs(text.c_str(), file);
+    std::fclose(file);
+}
 
 void touch(const std::string &path, bool present)
 {
@@ -62,10 +91,17 @@ extern "C" int sceSystemServiceLoadExec(const char *path, const char *const *arg
     exec_calls++;
     exec_path = path;
     exec_argument = argv && argv[0] ? argv[0] : "(none)";
-    assert(argv && argv[0] && !argv[1]);
+    /* "exit" closes the title, with no arguments; a restart has exactly one. */
+    assert(std::string(path) == "exit" ? !argv : argv && argv[0] && !argv[1]);
     if (exec_mode == Exec::replace)
         throw Replaced{};
     return exec_mode == Exec::refuse ? -1 : 0;
+}
+
+/* The title's pad read (src/frontend_hold_ps5.cpp); the launches here use read_l1. */
+extern "C" bool ps5_frontend_reopen_held(void)
+{
+    return false;
 }
 
 void ps5::debug::mark(const char *step) noexcept
@@ -86,32 +122,43 @@ int main(int argc, char **argv)
     const std::string dir = argv[1];
 
     /* The decision, for every launch. */
-    for (unsigned state = 0; state < 64; state++)
+    for (unsigned state = 0; state < 32; state++)
     {
-        for (const char *mode : {"", "retroarch", "es-de", "picker", "game"})
-        {
-            Launch launch;
-            launch.mode = mode;
-            launch.test_run = state & 1;
-            launch.picker_test = state & 2;
-            launch.picker_present = state & 4;
-            launch.es_de_present = state & 8;
-            const Next next = decide(launch);
-            const std::string m = mode;
-            if (m == "game")
-                assert(next == Next::game);
-            else if (m == "es-de")
-                assert(next == (launch.es_de_present ? Next::es_de : Next::retroarch));
-            else if (m == "picker")
-                assert(next == (launch.picker_present ? Next::picker : Next::retroarch));
-            else if (!m.empty())
-                assert(next == Next::retroarch);
-            else if (!launch.picker_present)
-                assert(next == Next::retroarch);
-            else
-                assert(next ==
-                       (launch.picker_test || !launch.test_run ? Next::picker : Next::retroarch));
-        }
+        for (const char *mode : {"", "retroarch", "es-de", "picker", "game", "quit", "other"})
+            for (const char *choice : {"ask", "retroarch", "es-de"})
+            {
+                Launch launch;
+                launch.mode = mode;
+                launch.test_run = state & 1;
+                launch.picker_test = state & 2;
+                launch.picker_present = state & 4;
+                launch.es_de_present = state & 8;
+                launch.reopen_held = state & 16;
+                launch.choice = choice;
+                const Next next = decide(launch);
+                const std::string m = mode, c = choice;
+                if (m == "game")
+                    assert(next == Next::game);
+                else if (m == "es-de")
+                    assert(next == (launch.es_de_present ? Next::es_de : Next::retroarch));
+                else if (m == "picker")
+                    assert(next == (launch.picker_present ? Next::picker : Next::retroarch));
+                else if (m == "quit") /* a frontend quit: the picker, or closed when remembered */
+                    assert(next ==
+                           (c == "ask" && launch.picker_present ? Next::picker : Next::close));
+                else if (!m.empty())
+                    assert(next == Next::retroarch);
+                else if (launch.picker_test && launch.picker_present)
+                    assert(next == Next::picker);
+                else if (launch.test_run)
+                    assert(next == Next::retroarch);
+                else if (!launch.reopen_held && c == "retroarch")
+                    assert(next == Next::retroarch);
+                else if (!launch.reopen_held && c == "es-de" && launch.es_de_present)
+                    assert(next == Next::es_de);
+                else
+                    assert(next == (launch.picker_present ? Next::picker : Next::retroarch));
+            }
     }
 
     /* The mode argument, as the console gives argv: no program name, and an empty
@@ -125,20 +172,35 @@ int main(int argc, char **argv)
         assert(ps5::frontend_mode::mode_argument(1, chosen) == "retroarch");
         assert(ps5::frontend_mode::mode_argument(2, both) == "retroarch");
         assert(ps5::frontend_mode::mode_argument(0, nullptr).empty());
+        /* A session starts with no argument of this port: the home screen, a test run. */
+        assert(ps5::frontend_mode::session_start(1, home) &&
+               ps5::frontend_mode::session_start(0, nullptr));
+        assert(!ps5::frontend_mode::session_start(1, chosen) &&
+               !ps5::frontend_mode::session_start(2, both));
     }
 
     /* The launches, against files in the scratch directory. */
-    const ps5::frontend_mode::Paths paths{dir + "/picker.bin",      dir + "/es-de.bin",
-                                          dir + "/test-run.txt",    dir + "/picker-test.txt",
-                                          dir + "/eboot.bin",       dir + "/game-request.txt",
-                                          dir + "/game-result.txt", dir + "/playlists"};
+    const ps5::frontend_mode::Paths paths{dir + "/picker.bin",
+                                          dir + "/es-de.bin",
+                                          dir + "/test-run.txt",
+                                          dir + "/picker-test.txt",
+                                          dir + "/eboot.bin",
+                                          dir + "/game-request.txt",
+                                          dir + "/game-result.txt",
+                                          dir + "/playlists",
+                                          dir + "/frontend.cfg",
+                                          dir + "/trace.txt",
+                                          dir + "/retroarch.log",
+                                          dir + "/retroarch-game.log",
+                                          read_l1};
     touch(paths.picker, true);
     touch(paths.es_de, true);
     touch(paths.test_run, false);
     touch(paths.picker_test, false);
     assert(launch(paths, {""}) == paths.picker && exec_argument.empty()); /* the home screen */
-    assert(marks.back() ==
-           "frontend: mode '', test run 0, picker test 0, picker 1, es-de 1 -> picker");
+    assert(marks.back() == "frontend: mode '', test run 0, picker test 0, picker 1, es-de 1, "
+                           "remembered ask, L1 0 -> picker");
+    assert(l1_reads == 0); /* nothing remembered: the pad is not read */
     assert(launch(paths, {"--ps5-mode=retroarch"}) == "retroarch");
     assert(launch(paths, {"--ps5-mode=es-de"}) == paths.es_de);
     touch(paths.test_run, true);
@@ -164,6 +226,59 @@ int main(int argc, char **argv)
                    "frontend: LoadExec did not replace the process; RetroArch runs; result", 0) ==
                0);
     }
+    /* A frontend remembered (config/frontend.cfg): a launch from the home screen starts
+     * it, unless L1 is held; a frontend quitting then closes the title. */
+    touch(paths.test_run, false);
+    touch(paths.picker_test, false);
+    touch(paths.es_de, true);
+    exec_mode = Exec::replace;
+    assert(ps5_frontend_choice_write(paths.choice.c_str(), "es-de") == 0);
+    assert(read_file(paths.choice) == "frontend_start = \"es-de\"\n");
+    assert(launch(paths, {""}) == paths.es_de && l1_reads == 1);
+    l1_held = true;
+    assert(launch(paths, {""}) == paths.picker && l1_reads == 2); /* L1: the picker anyway */
+    l1_held = false;
+    assert(launch(paths, {"--ps5-mode=quit"}) == "exit" && exec_argument == "(none)");
+    assert(launch(paths, {"--ps5-mode=es-de"}) == paths.es_de); /* a mode is not overridden */
+    assert(ps5_frontend_choice_write(paths.choice.c_str(), "retroarch") == 0);
+    assert(launch(paths, {""}) == "retroarch");
+    touch(paths.test_run, true);
+    const int reads_before = l1_reads;
+    assert(launch(paths, {""}) == "retroarch" && l1_reads == reads_before); /* a test run */
+    touch(paths.test_run, false);
+    assert(ps5_frontend_choice_write(paths.choice.c_str(), "ask") == 0);
+    assert(launch(paths, {"--ps5-mode=quit"}) == paths.picker);
+    /* A file that says anything else is "ask"; an invalid choice is not written. */
+    write_file(paths.choice, "frontend_start = \"evil\"\nother = \"1\"\n");
+    assert(std::string(ps5_frontend_choice_read(paths.choice.c_str())) == "ask");
+    assert(ps5_frontend_choice_write(paths.choice.c_str(), "evil") != 0);
+    std::remove(paths.choice.c_str());
+    assert(std::string(ps5_frontend_choice_read(paths.choice.c_str())) == "ask");
+    /* The shell refusing to close the title leaves RetroArch to run. */
+    assert(ps5_frontend_choice_write(paths.choice.c_str(), "es-de") == 0);
+    exec_mode = Exec::refuse;
+    assert(launch(paths, {"--ps5-mode=quit"}) == "retroarch" &&
+           marks.back().rfind("frontend: the shell did not close the title", 0) == 0);
+    exec_mode = Exec::replace;
+    std::remove(paths.choice.c_str());
+
+    /* Each session's trace is kept once, at its start only; RetroArch's log by mode. */
+    write_file(paths.trace, "last session\n");
+    {
+        char handover[] = "--ps5-mode=quit", empty[] = "";
+        char *carried[] = {handover, nullptr};
+        char *home[] = {empty, nullptr};
+        ps5::frontend_mode::start_session_logs(paths, 1, carried);
+        assert(read_file(paths.trace) == "last session\n");
+        ps5::frontend_mode::start_session_logs(paths, 1, home);
+        assert(!ps5::frontend_mode::exists(paths.trace) &&
+               read_file(dir + "/trace.1.txt") == "last session\n");
+    }
+    write_file(paths.retroarch_log, "retroarch\n");
+    assert(ps5::frontend_mode::retroarch_log(paths) == paths.retroarch_log);
+    assert(!ps5::frontend_mode::exists(paths.retroarch_log) &&
+           read_file(dir + "/retroarch.1.log") == "retroarch\n");
+
     /* After RetroArch quits: back to the picker only when the picker started it. */
     for (const char *mode : {"", "retroarch", "es-de", "picker"})
         for (bool present : {false, true})
@@ -174,7 +289,7 @@ int main(int argc, char **argv)
         exec_path.clear();
         try
         {
-            ps5::frontend_mode::after_retroarch(paths, mode, 0, 0);
+            ps5::frontend_mode::after_retroarch(paths, mode, 0, 0, false);
             return std::string("closes");
         }
         catch (const Replaced &)
@@ -183,7 +298,7 @@ int main(int argc, char **argv)
         }
     };
     exec_mode = Exec::replace;
-    assert(quit("retroarch") == paths.eboot && exec_argument.empty());
+    assert(quit("retroarch") == paths.eboot && exec_argument == "--ps5-mode=quit");
     assert(quit("") == "closes"); /* a test run's RetroArch closes the title */
     touch(paths.picker, false);
     assert(quit("retroarch") == "closes");
@@ -224,11 +339,25 @@ int main(int argc, char **argv)
     const struct ps5_game *running = ps5::frontend_mode::running_game();
     assert(running && core == running->core && content == running->content);
     assert(!ps5::frontend_mode::exists(paths.request)); /* a request runs once */
+    /* A game's RetroArch logs apart from RetroArch's own. */
+    write_file(paths.game_log, "last game\n");
+    assert(ps5::frontend_mode::retroarch_log(paths) == paths.game_log &&
+           read_file(dir + "/retroarch-game.1.log") == "last game\n");
     assert(quit("") == frontend); /* RetroArch quit: back to the frontend, with the result */
     struct ps5_game back = result();
     assert(back.status == 0 && back.seconds >= 0 && core == back.core &&
            std::string(back.state) == "snes\tgame.zip");
     assert(!ps5::frontend_mode::running_game());
+
+    /* An update installed as RetroArch quit: no handover, in game mode or from the picker. */
+    request(core.c_str(), content.c_str());
+    assert(launch(paths, {"--ps5-mode=game"}) == "retroarch" && ps5::frontend_mode::running_game());
+    exec_path.clear();
+    ps5::frontend_mode::after_retroarch(paths, "game", 0, 0, true);
+    assert(exec_path.empty() && !ps5::frontend_mode::running_game() &&
+           marks.back() == "frontend: an update was installed; the title closes, no handover");
+    ps5::frontend_mode::after_retroarch(paths, "retroarch", 0, 0, true);
+    assert(exec_path.empty());
 
     /* RetroArch's playlist association wins over the frontend's core, if it is the title's. */
     const std::string other = std::string(PS5_GAME_CORES) + "bsnes_libretro.so";
@@ -282,7 +411,8 @@ int main(int argc, char **argv)
 
     std::puts(
         "frontend_mode_ps5: decisions, mode argument, LoadExec targets, test runs and "
-        "refused or ignored LoadExec PASS; back to the picker after RetroArch; game mode requests, "
-        "cores, refusals and results PASS");
+        "refused or ignored LoadExec PASS; the remembered frontend, L1, quit and closing PASS; "
+        "session and per-mode logs PASS; back to the picker after RetroArch, no handover after "
+        "an update; game mode requests, cores, refusals and results PASS");
     return 0;
 }

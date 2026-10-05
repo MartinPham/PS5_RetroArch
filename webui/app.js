@@ -43,8 +43,8 @@ function setConnection(ok) {
   $('#connection').classList.toggle('offline', !ok);
   $('#connection span:last-child').textContent = ok ? 'RetroArch is running' : 'Console disconnected';
   $('#connection-notice').hidden = ok;
-  for (const id of ['destination', 'dropzone', 'browse-files', 'upload-here', 'folder-name', 'quick-volume', 'quick-rumble', 'settings-fields', 'save-settings']) {
-    $('#' + id).disabled = !ok || (['settings-fields', 'save-settings'].includes(id) && !editorRevision) || (['quick-volume', 'quick-rumble', 'settings-fields', 'save-settings'].includes(id) && !Object.keys(settingsValues).length);
+  for (const id of ['destination', 'dropzone', 'browse-files', 'upload-here', 'folder-name', 'quick-volume', 'quick-rumble', 'quick-frontend', 'settings-fields', 'save-settings']) {
+    $('#' + id).disabled = !ok || (['settings-fields', 'save-settings'].includes(id) && !editorRevision) || (['quick-volume', 'quick-rumble', 'quick-frontend', 'settings-fields', 'save-settings'].includes(id) && !Object.keys(settingsValues).length);
   }
   $('#folder-form button').disabled = !ok;
   updateButton();
@@ -262,6 +262,8 @@ function updateQuick() {
   for (const [id, key, unit] of [['quick-volume', 'audio_volume', ' dB'], ['quick-rumble', 'input_rumble_gain', '%']]) {
     $('#' + id).value = settingsValues[key]; $(`output[for="${id}"]`).textContent = Number(settingsValues[key]) + unit;
   }
+  // The frontend the title opens on: the picker every time, or one straight away.
+  if (settingsValues.frontend_start) $('#quick-frontend').value = settingsValues.frontend_start;
 }
 let editorSettings = [], editorValues = {}, editorDraft = {}, editorRevision = '', editorPage = 0, editorRequest = 0;
 let editorProfile = '', editorKind = 'core-options', editorMode = 'guided', editorCategory = '';
@@ -439,6 +441,12 @@ for (const [id, key, unit] of [['quick-volume', 'audio_volume', ' dB'], ['quick-
   });
 }
 try { if (localStorage.getItem('retroarch-theme') === 'dark') { document.documentElement.dataset.theme = 'dark'; $('#theme').value = 'dark'; } } catch { /* Browser storage may be disabled. */ }
+$('#quick-frontend').addEventListener('change', async event => {
+  const input = event.target; input.disabled = true;
+  try { await saveSettings({ frontend_start: input.value }); }
+  catch (error) { announce(error.message, true); updateQuick(); }
+  finally { input.disabled = !connected; }
+});
 $('#theme').addEventListener('change', event => { document.documentElement.dataset.theme = event.target.value; try { localStorage.setItem('retroarch-theme', event.target.value); } catch { /* Theme still works for this visit. */ } });
 // Numeric identifiers and prerelease ordering follow SemVer; alphas are published releases too.
 function compareVersions(left, right) {

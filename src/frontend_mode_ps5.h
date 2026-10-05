@@ -18,7 +18,8 @@ enum class Next
     retroarch, /* RetroArch, in this process */
     game,      /* a frontend's game, in RetroArch in this process (src/ps5_game.h) */
     picker,    /* the frontend picker, /app0/picker/picker.bin */
-    es_de      /* EmulationStation, /app0/es-de/es-de.bin */
+    es_de,     /* EmulationStation, /app0/es-de/es-de.bin */
+    close      /* nothing: the title closes (a frontend quit, and one is remembered) */
 };
 
 struct Launch
@@ -28,17 +29,35 @@ struct Launch
     bool picker_test = false;    /* an armed picker test (/app0/picker/picker-test.txt) */
     bool picker_present = false; /* the title carries the picker */
     bool es_de_present = false;  /* the title carries EmulationStation */
+    std::string choice = "ask";  /* the frontend remembered (src/ps5_frontend_choice.h) */
+    bool reopen_held = false;    /* L1 held as the title started: the picker anyway */
 };
 
 struct Paths
 {
     std::string picker, es_de, test_run, picker_test, eboot;
     std::string request, result, playlists; /* game mode's (src/ps5_game.h) */
+    std::string choice;                     /* config/frontend.cfg */
+    std::string trace, retroarch_log, game_log;
+    /* Reads the pad as the title starts: true when L1 is held. Asked only when a
+     * frontend is remembered and the launch is the home screen's. */
+    bool (*reopen_held)();
 };
 
 /* The mode the process arguments name with --ps5-mode=, from argv[0] on (LoadExec's
  * arguments are the whole argv), or an empty string. */
 std::string mode_argument(int argc, char **argv);
+/* A launch that starts a session: no --ps5- argument at all, as from the home screen
+ * or a test run. Every handover names a mode, and a test's restarts their generation. */
+bool session_start(int argc, char **argv);
+/* Keeps a log's last copy as previous (one), so the next run does not overwrite it. */
+void rotate(const std::string &path, const std::string &previous);
+/* The logs a launch keeps apart (docs/FRONTENDS.md): at a session start the trace's last
+ * session becomes trace.1.txt. */
+void start_session_logs(const Paths &paths, int argc, char **argv);
+/* RetroArch's log for this process, its previous copy kept: a game's (game mode) apart
+ * from RetroArch's own. */
+std::string retroarch_log(const Paths &paths);
 Next decide(const Launch &launch);
 const char *name(Next next);
 /* Starts what this launch is for. It returns only when RetroArch runs in this
@@ -51,21 +70,31 @@ const struct ps5_game *running_game();
  * closing, which it does when the picker started RetroArch (--ps5-mode=retroarch). */
 bool back_to_picker(const std::string &mode, bool picker_present);
 /* After RetroArch has quit with status: in game mode, the result for the frontend and
- * a restart as it; else the picker, when back_to_picker says so. It returns only when
- * neither applies, or when LoadExec did not replace the process. */
+ * a restart as it; else, when back_to_picker says so, a restart as a frontend that
+ * quit (the picker, or the title closes when a frontend is remembered). After an
+ * update was installed, neither: the title closes, so no frontend of the old build
+ * starts beside the new. It returns only when the title is to close, or when LoadExec
+ * did not replace the process. */
 void after_retroarch(const Paths &paths, const std::string &mode, int status,
-                     unsigned replaced_wait_seconds);
+                     unsigned replaced_wait_seconds, bool update_installed);
 } // namespace ps5::frontend_mode
 
 extern "C"
 {
 #endif
 
+    /* First thing in main: at a session start the trace's last session is kept. */
+    void ps5_frontend_session_logs(int argc, char **argv);
     void ps5_frontend_dispatch(int argc, char **argv);
     /* In game mode, the game RetroArch runs (its core and content); NULL otherwise. */
     const struct ps5_game *ps5_frontend_game(void);
-    /* Called once RetroArch has quit with status, before the title closes. */
-    void ps5_frontend_after_retroarch(int status);
+    /* RetroArch's log for this launch (after the dispatch), the previous one kept. */
+    const char *ps5_frontend_retroarch_log(void);
+    /* Called once RetroArch has quit with status, before the title closes;
+     * update_installed when an update was installed as it quit. */
+    void ps5_frontend_after_retroarch(int status, int update_installed);
+    /* src/frontend_hold_ps5.cpp: L1 held on the first user's pad as the title starts. */
+    bool ps5_frontend_reopen_held(void);
 
 #ifdef __cplusplus
 }

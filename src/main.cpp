@@ -321,6 +321,10 @@ void on_terminate()
 
 int main(int process_argc, char **process_argv)
 {
+    /* A session's trace is its own (src/frontend_mode_ps5.cpp): a launch from the home
+     * screen keeps the last session's as trace.1.txt before this one writes a line. */
+    ps5_frontend_session_logs(process_argc, process_argv);
+
     /* First thing: prove that control reached this function at all, before
      * anything that could fail. */
     {
@@ -407,7 +411,10 @@ int main(int process_argc, char **process_argv)
      * records what happens during startup - which is exactly where the Vulkan
      * path dies silently. A failure that says nothing is the one thing a console
      * run cannot diagnose, and this is how the frontend is made to speak. */
-    char arg_log[] = "--log-file=/app0/retroarch.log";
+    /* Named by mode, its previous copy kept: a game's log (game mode) does not
+     * overwrite RetroArch's own, nor the next game's the last one's. */
+    char arg_log[96];
+    std::snprintf(arg_log, sizeof(arg_log), "--log-file=%s", ps5_frontend_retroarch_log());
     char *argv[] = {
         arg0, arg_fullscreen, arg_config, arg_config_path, arg_verbose, arg_log, arg_menu, nullptr,
     };
@@ -628,7 +635,7 @@ extern "C" void catchReturnFromMain(int status)
         ps5vk_display_retain(false);
     /* A game mode game goes back to its frontend, and RetroArch the picker started to
      * the picker (src/frontend_mode_ps5.cpp). */
-    ps5_frontend_after_retroarch(status);
+    ps5_frontend_after_retroarch(status, ps5_update::exit_requested() ? 1 : 0);
     std::fflush(nullptr);
     const int result = sceSystemServiceLoadExec("exit", nullptr);
     ps5::debug::mark_value("native quit: system service result", result);

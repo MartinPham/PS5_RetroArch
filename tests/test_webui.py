@@ -234,6 +234,30 @@ class WebUI(unittest.TestCase):
         conn.close()
         self.assertEqual((self.root / 'config/webui.cfg').read_bytes(), saved)
 
+    def test_frontend_start_lives_in_its_own_file(self):
+        # The frontend the title starts with (src/ps5_frontend_choice.h): "ask" until one is
+        # chosen, kept in config/frontend.cfg and never in RetroArch's webui.cfg.
+        webui_cfg = self.root / 'config/webui.cfg'
+        before = webui_cfg.read_bytes() if webui_cfg.exists() else None
+        self.addCleanup(lambda: webui_cfg.write_bytes(before) if before is not None else webui_cfg.unlink(missing_ok=True))
+        self.addCleanup(lambda: (self.root / 'config/frontend.cfg').unlink(missing_ok=True))
+        fields = {s['key']: s for s in json.loads(self.request('GET', '/api/settings')[2])['settings']}
+        self.assertEqual((fields['frontend_start']['value'], fields['frontend_start']['kind']), ('ask', 'frontend'))
+        self.assertEqual(self.request('POST', '/api/settings', b'frontend_start=es-de')[0], 200)
+        self.assertEqual((self.root / 'config/frontend.cfg').read_text(), 'frontend_start = "es-de"\n')
+        self.assertEqual(webui_cfg.read_bytes() if webui_cfg.exists() else None, before)
+        fields = {s['key']: s['value'] for s in json.loads(self.request('GET', '/api/settings')[2])['settings']}
+        self.assertEqual(fields['frontend_start'], 'es-de')
+        for bad in (b'frontend_start=evil', b'frontend_start=', b'frontend_start=es-de"\ninjected=1'):
+            self.assertEqual(self.request('POST', '/api/settings', bad)[0], 400)
+        self.assertEqual((self.root / 'config/frontend.cfg').read_text(), 'frontend_start = "es-de"\n')
+        # With a RetroArch setting in the same request, both files take their part.
+        self.assertEqual(self.request('POST', '/api/settings', b'frontend_start=ask\naudio_volume=-3')[0], 200)
+        self.assertEqual((self.root / 'config/frontend.cfg').read_text(), 'frontend_start = "ask"\n')
+        webui = (self.root / 'config/webui.cfg').read_bytes()
+        self.assertIn(b'audio_volume = "-3"', webui)
+        self.assertNotIn(b'frontend_start', webui)
+
     def test_advanced_global_and_per_core_persistence(self):
         # Full saved profiles, including values not in the quick-settings list.
         (self.root / 'retroarch.cfg').write_text('video_rotation = "0"\nvideo_vsync = "true"\n')

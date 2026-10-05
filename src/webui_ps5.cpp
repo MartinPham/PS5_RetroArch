@@ -4,6 +4,7 @@
  */
 #include "webui_ps5.h"
 #include "webui_update.h"
+#include "ps5_frontend_choice.h"
 #include "../vendor/retroarch/libretro-common/include/libretro.h"
 #include <microhttpd.h>
 #include <algorithm>
@@ -665,6 +666,12 @@ MHD_Result get_settings(MHD_Connection *c)
                ",\"kind\":" + quote(s.kind) + ",\"value\":" + quote(values[s.key]) +
                ",\"min\":" + std::to_string(s.min) + ",\"max\":" + std::to_string(s.max) + '}';
     }
+    // The frontend the title starts with is the title's, not RetroArch's: it lives in
+    // config/frontend.cfg (src/ps5_frontend_choice.h), never in webui.cfg.
+    out +=
+        ",{\"key\":\"frontend_start\",\"label\":\"Start with\",\"kind\":\"frontend\",\"value\":" +
+        quote(ps5_frontend_choice_read((root_path + "/config/frontend.cfg").c_str())) +
+        ",\"min\":0,\"max\":0}";
     return respond(c, 200, out + "],\"apply\":\"next_launch\"}");
 }
 MHD_Result save_settings(MHD_Connection *c, const std::string &body)
@@ -673,6 +680,7 @@ MHD_Result save_settings(MHD_Connection *c, const std::string &body)
     auto values = config_values(true);
     size_t start = 0;
     unsigned changed = 0;
+    const char *frontend = nullptr;
     while (start < body.size())
     {
         auto end = body.find('\n', start);
@@ -681,6 +689,17 @@ MHD_Result save_settings(MHD_Connection *c, const std::string &body)
         if (eq == std::string::npos)
             return error(c, 400, "Invalid settings. Reload the page and try again.");
         auto key = line.substr(0, eq), value = line.substr(eq + 1);
+        if (key == "frontend_start")
+        {
+            frontend = ps5_frontend_choice_name(value.c_str());
+            if (!frontend)
+                return error(c, 400, "A setting is outside its supported range.");
+            ++changed;
+            if (end == std::string::npos)
+                break;
+            start = end + 1;
+            continue;
+        }
         const Setting *setting = nullptr;
         for (auto &s : settings)
             if (key == s.key)
@@ -709,6 +728,11 @@ MHD_Result save_settings(MHD_Connection *c, const std::string &body)
     }
     if (!changed)
         return error(c, 400, "No settings were provided.");
+    if (frontend &&
+        ps5_frontend_choice_write((root_path + "/config/frontend.cfg").c_str(), frontend) != 0)
+        return error(c, 500, "Settings could not be saved. Check console storage.");
+    if (frontend && changed == 1)
+        return respond(c, 200, "{\"saved\":true,\"apply\":\"next_launch\"}");
     // Keep advanced global overrides when updating a quick setting.
     return write_config(root_path + "/config/webui.cfg", values)
                ? respond(c, 200, "{\"saved\":true,\"apply\":\"next_launch\"}")

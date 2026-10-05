@@ -20,7 +20,9 @@
  *    against it.
  *
  * The OpenGL driver's own reports (its printf lines: presentation, batching,
- * glthread) go to /app0/es-de/stdout.txt, a line at a time. /app0/es-de/env.txt,
+ * glthread) go to /app0/es-de/stdout.txt, a line at a time; the last start's is kept
+ * as stdout.1.txt, so a game in between does not lose it, and this port's own log,
+ * es-de-ps5.log, starts again as es-de-ps5.1.log past 512 KiB. /app0/es-de/env.txt,
  * when present, sets environment variables before ES-DE starts, one NAME=VALUE a
  * line: the driver's switches (PS5_GLTHREAD=1 runs Mesa's GL thread) can be tried
  * on the console without a new build.
@@ -28,12 +30,14 @@
  * A game ES-DE starts runs in RetroArch through the title's game mode, and the title
  * comes back here when it is closed (game_ps5.cpp says how).
  *
- * When ES-DE returns (Quit in its menu), the title goes back to eboot.bin, with
- * the arguments of this port that this run was given (a relaunch test's, so the
- * test sees its next generation).
+ * When ES-DE returns (Quit in its menu), the title goes back to eboot.bin with
+ * --ps5-mode=quit, which shows the picker or, when a frontend is remembered, closes
+ * the title (src/frontend_mode_ps5.cpp), and with the arguments of this port that
+ * this run was given (a relaunch test's, so the test sees its next generation).
  */
 #include <cerrno>
 #include <cstdio>
+#include <sys/stat.h>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
@@ -61,6 +65,17 @@ namespace
 constexpr const char *program = "/app0/es-de/es-de.bin";
 constexpr const char *home = "/app0/es-de";
 constexpr const char *start_log = "/app0/es-de/es-de-ps5.log";
+constexpr long start_log_limit = 512 * 1024;
+
+/* Keeps a log's last copy as previous. */
+void keep_previous(const char *path, const char *previous)
+{
+    struct stat status;
+    if (stat(path, &status) != 0)
+        return;
+    std::remove(previous);
+    std::rename(path, previous);
+}
 
 void note(const char *what, int value)
 {
@@ -74,6 +89,10 @@ void note(const char *what, int value)
 
 int main(int argc, char **argv)
 {
+    struct stat log_status;
+    if (stat(start_log, &log_status) == 0 && log_status.st_size > start_log_limit)
+        keep_previous(start_log, "/app0/es-de/es-de-ps5.1.log");
+    keep_previous("/app0/es-de/stdout.txt", "/app0/es-de/stdout.1.txt");
     note("start: hide splash", sceSystemServiceHideSplashScreen());
     if (std::freopen("/app0/es-de/stdout.txt", "w", stdout))
         std::setvbuf(stdout, nullptr, _IOLBF, 0);
@@ -127,10 +146,14 @@ int main(int argc, char **argv)
     note("ES-DE returned", status);
 
     std::vector<const char *> back;
+    bool mode = false;
     for (const std::string &argument : port_arguments)
+    {
         back.push_back(argument.c_str());
-    if (back.empty())
-        back.push_back("");
+        mode |= argument.rfind("--ps5-mode=", 0) == 0;
+    }
+    if (!mode)
+        back.push_back("--ps5-mode=quit");
     back.push_back(nullptr);
     note("back to eboot.bin: LoadExec", sceSystemServiceLoadExec("/app0/eboot.bin", back.data()));
     for (;;)
