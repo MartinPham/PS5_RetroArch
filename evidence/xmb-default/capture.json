@@ -4,7 +4,7 @@
   "command": "tools/run-title.sh --no-build --watch 45",
   "raw_capture": "klog/xmb-final-run.log",
   "raw_lines": 6936,
-  "revision": "d46495d + XMB default changes",
+  "revision": "62d0a47 + XMB default changes",
   "build_identity": "2df0e277df59faf661a37920988d1b804394c8ffe509c2b57296270f3dcaf7b3",
   "lines": [
     "XMB default: compiled and installed; RGUI and video_ps5 retained.",

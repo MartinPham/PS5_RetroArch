@@ -2,7 +2,7 @@
   "step": "output-120hz",
   "recorded": "2026-09-23T23:38:35Z",
   "console_run": "not read this run",
-  "revision": "driver ../PS5_Vulkan 8577153 (R51 output mode); port 2502dd0 + patches 0084/0085, attribute3 0x80040",
+  "revision": "driver ../PS5_Vulkan 8577153 (R51 output mode); port 355fe9a + patches 0084/0085, attribute3 0x80040",
   "command": "args.txt: -L /app0/cores/fceumm_libretro.so <1943 (USA).zip> --max-frames=1800; driver profile armed",
   "raw_capture": "klog/r52-ra-120-evidence.txt",
   "raw_lines": 148,

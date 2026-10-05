@@ -2,7 +2,7 @@
   "step": "child-processes",
   "recorded": "2026-10-04T22:33:23Z",
   "console_run": "base PS5 13.40, runs 182727 and 183131",
-  "revision": "c559dfa + child probe",
+  "revision": "26c003b + child probe",
   "command": "PS5_FRONTENDS='es-de picker child-probe' tools/build-title.sh; tools/run-title.sh --no-build --relaunch-test=1 --relaunch-image=es-de/child-probe.bin --watch 120 (and with es-de/child-probe-mode.txt = nogpu)",
   "raw_capture": "klog/child-processes-summary.txt",
   "raw_lines": 11,

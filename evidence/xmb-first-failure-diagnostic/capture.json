@@ -1,7 +1,7 @@
 {
   "step": "xmb-first-failure-diagnostic",
   "recorded": "2026-09-19",
-  "revision": "7019dae plus this diagnostic step",
+  "revision": "ef2068a plus this diagnostic step",
   "command": "PS5_MEMORY_DIAGNOSTICS=1 bash tools/verify.sh; python3 tools/check-memory-diagnostics.py",
   "raw_capture": "klog/xmb-first-failure-verify-final.log",
   "lines": [

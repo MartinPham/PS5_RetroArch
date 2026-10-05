@@ -1,7 +1,7 @@
 {
   "step": "xmb-memory-diagnostic",
   "recorded": "2026-09-19",
-  "revision": "a18cec6 + allocation diagnostics",
+  "revision": "b58c315 + allocation diagnostics",
   "command": "PS5_MEMORY_DIAGNOSTICS=1 bash tools/verify.sh; bash tools/verify.sh format unit; python3 tools/check-memory-diagnostics.py",
   "console_run": null,
   "raw_capture": "klog/xmb-memory-verify.log",

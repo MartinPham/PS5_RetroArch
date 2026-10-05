@@ -20,7 +20,7 @@ core_stamp_skip mupen64plus \
     -- "$root/tools/build-mupen64plus.sh" "$root/tools/core-fork.sh" "$root/tools/host-nasm.sh"
 [[ $# == 0 ]] || { echo "usage: ${0##*/}" >&2; exit 2; }
 
-revision=763e7f55e2b6e1b414fd645869d2bd7f3876ac45  # ../PS5_Mupen64Plus main
+revision=7cd4414a9d38b10307439f3b23ab2491c46a15d1  # ../PS5_Mupen64Plus main
 core_fork_setup
 core_fork_checkout PS5_Mupen64Plus "$revision"
 core_fork_info mupen64plus_next_libretro.info 8d1fcd13a17310e233be4ff247bf1032f8f786fe685e24cef5ed4ea474ccdfb6

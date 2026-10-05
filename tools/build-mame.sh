@@ -24,7 +24,7 @@ core_stamp_skip mame \
     -- "$root/tools/build-mame.sh" "$root/tools/core-fork.sh"
 [[ $# == 0 ]] || { echo "usage: ${0##*/}" >&2; exit 2; }
 
-revision=fa592b0e100036be87c0cf2af75e325885020eec  # ../PS5_MAME main
+revision=8f90a8135ef402e04042160537b76cf6b17bcfa5  # ../PS5_MAME main
 core_fork_setup
 core_fork_checkout PS5_MAME "$revision" "" build/
 core_fork_info mame_libretro.info c3a2f1e0d816debfd06e76d427c46fccbce6a7d5fd9b0199754f046348e55509

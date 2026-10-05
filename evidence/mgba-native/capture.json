@@ -1,7 +1,7 @@
 {
   "step": "mgba-native",
   "recorded": "2026-09-19",
-  "revision": "016a47d + mGBA native core and content lifecycle fixes",
+  "revision": "63a4404 + mGBA native core and content lifecycle fixes",
   "command": "bash tools/verify.sh; bash tools/run-title.sh --no-build --core-test=mgba --watch 180 (owner loads archives and closes content manually)",
   "raw_capture": "klog/mgba-uv-crop-run.log",
   "raw_lines": 10189,

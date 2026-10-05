@@ -2,7 +2,7 @@
   "step": "capture-readback-size",
   "recorded": "2026-10-04T18:37:43Z",
   "console_run": "base PS5 13.40, 2026-10-04 14:39",
-  "revision": "d996579 + patch 0031 size fix (build 10a24fa1)",
+  "revision": "d200efa + patch 0031 size fix (build 10a24fa1)",
   "command": "args.txt: --ps5-capture=600 --ps5-capture-path=/app0/xmb-preview.ppm --appendconfig /app0/config/xmb-capture.cfg",
   "raw_capture": "klog/capture-readback-summary.txt",
   "raw_lines": 8,

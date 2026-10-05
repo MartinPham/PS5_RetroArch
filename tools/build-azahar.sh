@@ -19,7 +19,7 @@ core_stamp_skip azahar \
     -- "$root/tools/build-azahar.sh" "$root/tools/core-fork.sh" "$root/tooling/azahar"
 [[ $# == 0 ]] || { echo "usage: ${0##*/}" >&2; exit 2; }
 
-revision=4598458e115f108a6e2211eb0763eb22ab383d4c  # ../PS5_Azahar main
+revision=4aef900a1a903d0aa6ea86fdb1e18236fb0d5907  # ../PS5_Azahar main
 core_fork_setup
 core_fork_checkout PS5_Azahar "$revision" submodules
 core_fork_info azahar_libretro.info c5bff8202e7ed32bce79ef0ab34dbeabde0637a298ef19a9e9c0ff5ea363aac3

@@ -1,7 +1,7 @@
 {
   "step": "vulkan-build-identity",
   "command": "bash tools/verify.sh; bash tools/run-title.sh --no-build --watch 30",
-  "revision": "38564b8 + identity changes and pending RGBA upload correction",
+  "revision": "1bc79fb + identity changes and pending RGBA upload correction",
   "raw_capture": "klog/gpu-identity-latest-trace.txt",
   "raw_lines": 365,
   "eboot_sha256": "71363a0f57b4779c8590520bdb1b1afd018af45a0aeac864de0c27abf46f4fff",

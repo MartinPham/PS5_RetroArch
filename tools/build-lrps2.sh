@@ -31,7 +31,7 @@ sdk="$root/.deps/native/ps5-payload-sdk"
 export PS5_PAYLOAD_SDK="$sdk"
 export PS5_CLANG=/usr/bin/clang
 
-revision=9c2eea4cbd76ad6a4fb2340c95a354eb9a63500f  # ../PS5_LRPS2 main, 2026-09-26
+revision=6189bf195308ddf48eb1638fe089d06d2dc8d32b  # ../PS5_LRPS2 main, 2026-09-26
 info_revision=5a74858ab2f7a50cebb5a6330895bc38899531c0
 info_sha=b263ac17902eb36be08e90a939b1699178e4abe32505d032b96b50f7db2d9fec
 cache="$root/.deps/downloads"

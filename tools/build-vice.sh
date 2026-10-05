@@ -18,7 +18,7 @@ core_stamp_skip vice \
     -- "$root/tools/build-vice.sh" "$root/tools/core-fork.sh"
 [[ $# == 0 ]] || { echo "usage: ${0##*/}" >&2; exit 2; }
 
-revision=2b4b5e3e539019f517f04c21ca87983ad53bafbe  # ../PS5_VICE main
+revision=983b9882e8606975646dda07d6331d51df5d43ac  # ../PS5_VICE main
 core_fork_setup
 core_fork_checkout PS5_VICE "$revision"
 core_fork_info vice_x64sc_libretro.info 944370dcfe24e575a3ecf2d21b9324284b885e32311bce9d1c28492e036cf4fb

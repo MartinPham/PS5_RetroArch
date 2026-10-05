@@ -2,7 +2,7 @@
   "step": "core-recheck-current-driver",
   "recorded": "2026-09-24T01:05:36Z",
   "console_run": "",
-  "revision": "driver ../PS5_Vulkan 49679c9 (R53); port e425dbe + retention, crash report, patch 0086",
+  "revision": "driver ../PS5_Vulkan 49679c9 (R53); port bfc2bf9 + retention, crash report, patch 0086",
   "command": "args.txt per core: -L /app0/cores/<core>_libretro.so <content> --max-frames=1200 --max-frames-ss --max-frames-ss-path=/app0/savefiles/ss-<core>.png (screenshot fetched and removed; state snapshotted and restored)",
   "raw_capture": "klog/r53-core-recheck-evidence.txt",
   "raw_lines": 75,

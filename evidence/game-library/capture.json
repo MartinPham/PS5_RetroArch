@@ -2,7 +2,7 @@
   "step": "game-library",
   "recorded": "2026-10-04T22:52:02Z",
   "console_run": "base PS5 13.40, run frontend-20261004-184900",
-  "revision": "012dc68 + game library",
+  "revision": "e98cca4 + game library",
   "command": "PS5_FRONTENDS='es-de picker' tools/build-title.sh; tools/run-title.sh --no-build --relaunch-test=1 --relaunch-image=es-de/es-de.bin --frontend-capture=4,20 --frontend-launch --retroarch-frames=600 --watch 80",
   "raw_capture": "klog/library-summary.txt",
   "raw_lines": 12,

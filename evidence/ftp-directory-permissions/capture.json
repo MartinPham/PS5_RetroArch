@@ -1,7 +1,7 @@
 {
   "step": "ftp-directory-permissions",
   "recorded": "2026-09-19T17:21:15.269410+00:00",
-  "revision": "828f0e1 + managed-directory permissions",
+  "revision": "ab55775 + managed-directory permissions",
   "commands": [
     "tools/run-title.sh --no-build --watch 30",
     "python3 tools/check-ftp-write.py",

@@ -27,5 +27,5 @@
   },
   "cleanup": "Title exited normally, test files removed or restored, frontend configuration and PPSSPP profile byte-identical, control helper stopped.",
   "limitations": "Native service accepted nonzero synthesized PCM. Physical feel was not observed. Float format and failure recovery verified with host mocks, not forced on hardware. Games/cores must request libretro rumble; this does not add authored game haptics or adaptive triggers.",
-  "derived_from": "https://github.com/mihawk-99/PS5_RetroArch/pull/6 at cc0cc0a4755ad4a69321b22ba041eae9e2322b82"
+  "derived_from": "https://github.com/mihawk-99/PS5_RetroArch/pull/6 at 56a369270dd07cf61687d7914a87feed095e87b1"
 }

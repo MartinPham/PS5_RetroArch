@@ -2,7 +2,7 @@
   "step": "multi-controller",
   "recorded": "2026-10-05T01:23:34Z",
   "console_run": "base PS5 13.40, run 211620 and the owner's own session",
-  "revision": "5ab84a1 + four controller ports",
+  "revision": "c56a9aa + four controller ports",
   "command": "tools/run-title.sh --no-build --no-deploy --pad-monitor --watch 120; the owner's launch from the home screen",
   "raw_capture": "klog/multipad/summary.txt",
   "raw_lines": 15,

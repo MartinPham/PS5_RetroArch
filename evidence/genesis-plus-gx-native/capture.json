@@ -1,7 +1,7 @@
 {
   "step": "genesis-plus-gx-native",
   "recorded": "2026-09-19",
-  "revision": "4c9d763 + native Genesis Plus GX port",
+  "revision": "9844f9b + native Genesis Plus GX port",
   "command": "bash tools/verify.sh; bash tools/run-title.sh --no-build --core-test=genesis_plus_gx --watch 240 (owner manually selects content and tests menu/next-game transitions)",
   "raw_capture": "klog/genesis-first-run.log",
   "raw_lines": 11243,

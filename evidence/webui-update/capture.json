@@ -1,7 +1,7 @@
 {
   "step": "webui-update",
   "recorded": "2026-10-02T23:04:37.445722+00:00",
-  "revision": "8854f31c648c918c7208a404cdb546ae2f6eb610 + updater changes",
+  "revision": "d5f429c039d6fc615d615273800777ef34281683 + updater changes",
   "build": "0e3423d78a8046a1ae9d8ae849282a57c25b9b79ccb52d40bf5ccfaba7fa46cf",
   "command": "Use development WebUI Install latest release for v0.6.0-alpha.6; wait for ready; Install and close RetroArch; reopen and read /version.json. Host: bash tools/verify.sh; browser: tests/webui_update_fixture.py + tests/webui_update_browser.cjs",
   "raw_capture": "klog/webui-update/sanitized-summary.txt",

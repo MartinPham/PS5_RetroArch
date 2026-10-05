@@ -1,7 +1,7 @@
 {
   "step": "native-joypad",
   "recorded": "2026-09-19T17:34:57.651249+00:00",
-  "revision": "132274e + native joypad binding fix",
+  "revision": "be8e22b + native joypad binding fix",
   "commands": [
     "tools/verify.sh",
     "tools/run-title.sh --no-build --watch 120",

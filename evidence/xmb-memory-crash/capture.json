@@ -1,7 +1,7 @@
 {
   "step": "xmb-memory-crash",
   "recorded": "2026-09-19",
-  "revision": "1b0d875df6716ec6c65ca90d864063326281a7d3",
+  "revision": "9b2b05d8362f89255b894a33d1bc3b992a18b5e5",
   "command": "Launch the previously uploaded diagnostic after verifying its build identity and starting klog; owner reproduces XMB crash; preserve allocation/frontend/trace logs over FTP. Symbolize against klog/xmb-memory-a4a751e58339/llvm-pie.elf with klog image load base.",
   "raw_capture": "klog/xmb-memory-run-20260919-184732/crash-memory-diagnostics.log",
   "raw_lines": 19,

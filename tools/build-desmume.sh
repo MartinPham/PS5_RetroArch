@@ -20,7 +20,7 @@ core_stamp_skip desmume \
     -- "$root/tools/build-desmume.sh" "$root/tools/core-fork.sh"
 [[ $# == 0 ]] || { echo "usage: ${0##*/}" >&2; exit 2; }
 
-revision=532c50e6c31395db9885e989526ee0cb1c3728d8  # ../PS5_DeSmuME main
+revision=54540709d343bd93d021487af4408679ca187825  # ../PS5_DeSmuME main
 core_fork_setup
 core_fork_checkout PS5_DeSmuME "$revision"
 core_fork_info desmume_libretro.info 82730a4bcd36df5631f1791f50a66f056075ef47b501c19258f703b73966101b

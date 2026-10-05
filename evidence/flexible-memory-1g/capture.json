@@ -2,7 +2,7 @@
   "step": "flexible-memory-1g",
   "recorded": "2026-10-05T16:15:59Z",
   "console_run": "PS5 Pro, firmware 10.01, 2026-10-05: four runs of the installed release, PPSA99169",
-  "revision": "release build 716a3c05 on the console; sce_sys/param.json of e4a2e49 plus the kernel block",
+  "revision": "release build 716a3c05 on the console; sce_sys/param.json of 5eb7e0f plus the kernel block",
   "command": "python3 klog/flexible-memory-1g-20261005/ab.py gc|ps2 base|1g (a scratch driver: idle check, test files, param.json swap and restore, launch, klog, trace)",
   "raw_capture": "klog/flexible-memory-1g-20261005/summary.txt",
   "raw_lines": 61,

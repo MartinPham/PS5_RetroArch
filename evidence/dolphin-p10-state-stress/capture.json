@@ -2,7 +2,7 @@
   "step": "dolphin-p10-state-stress",
   "recorded": "2026-09-25T13:35:59Z",
   "console_run": "",
-  "revision": "title 718b41d7: driver d419098 (R78 and the zero-mapping fix), RetroArch c1d9f15 and the state-copy test aid",
+  "revision": "title 718b41d7: driver d419098 (R78 and the zero-mapping fix), RetroArch d89c5a6 and the state-copy test aid",
   "command": "tooling/dolphin-profiles/p1-accurate.txt; Wind Waker from a copy of my entry state in /app0/p10-states; 21 saves and 21 loads, the last twelve 0.6 s apart; driver profile armed",
   "raw_capture": "klog/p10-states-ww-states-excerpt.txt",
   "raw_lines": 68,

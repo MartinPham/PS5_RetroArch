@@ -1,7 +1,7 @@
 {
   "step": "vulkan-menu-rgba",
   "command": "bash tools/verify.sh; bash tools/run-title.sh --no-build --watch 30",
-  "revision": "44c6fb7 plus RGBA correction (also tested before identity instrumentation)",
+  "revision": "574974e plus RGBA correction (also tested before identity instrumentation)",
   "raw_capture": "klog/gpu-colour-latest-trace.txt",
   "raw_lines": 385,
   "lines": [

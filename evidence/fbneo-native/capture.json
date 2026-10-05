@@ -1,7 +1,7 @@
 {
   "step": "fbneo-native",
   "recorded": "2026-09-19",
-  "revision": "46e6358 + native FBNeo port",
+  "revision": "9155dd5 + native FBNeo port",
   "command": "bash tools/verify.sh; bash tools/run-title.sh --no-build --core-test=fbneo --watch 240 (owner manually loads arcade archive and tests menu/next-game transitions)",
   "raw_capture": "klog/fbneo-catalogue-run.log",
   "raw_lines": 10848,

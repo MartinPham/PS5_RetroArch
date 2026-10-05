@@ -1,7 +1,7 @@
 {
   "step": "native-core-loading",
   "recorded": "2026-09-19",
-  "revision": "7af1081 + native loader/recovery/core upload",
+  "revision": "d337e2c + native loader/recovery/core upload",
   "command": "tools/verify.sh; tools/run-title.sh --no-build --core-test --watch 180 (owner selects FCEUmm and NES archive manually)",
   "raw_capture": "klog/native-core-game-rgba-run.log",
   "raw_lines": 8363,

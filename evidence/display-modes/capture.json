@@ -2,7 +2,7 @@
   "step": "display-modes",
   "recorded": "2026-10-04T18:18:24Z",
   "console_run": "base PS5 13.40, 1080p screen, 2026-10-04 14:14",
-  "revision": "b4d9288 + display modes test (build ce576f3d, RADV PS5_Mesa dc82d01)",
+  "revision": "d8cd370 + display modes test (build ce576f3d, RADV PS5_Mesa 7b59ef2)",
   "command": "tools/run-title.sh --no-build --display-modes-test=180 --watch 60",
   "raw_capture": "klog/display-modes-summary.txt",
   "raw_lines": 15,
@@ -10,7 +10,7 @@
   "lines": [
     "==> tools/run-title.sh --no-build --display-modes-test=180 --watch 60   (base PS5, firmware 13.40, 1080p screen)",
     "build identity: ce576f3d98e85e8d9941db666e207141369132a8e996c9b8a03a731cb1568130",
-    "driver: RADV from PS5_Mesa dc82d01 (VideoOut WSI: a mode for each of 3840x2160, 2560x1440, 1920x1080)",
+    "driver: RADV from PS5_Mesa 7b59ef2 (VideoOut WSI: a mode for each of 3840x2160, 2560x1440, 1920x1080)",
     "display modes test: 3 modes: 3840x2160@59940 2560x1440@59940 1920x1080@59940",
     "wsi/videoout: 3840x2160 framebuffers registered as set 0, buffers 0-4",
     "wsi/videoout: 2560x1440 framebuffers registered as set 1, buffers 5-9",

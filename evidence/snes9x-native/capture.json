@@ -1,7 +1,7 @@
 {
   "step": "snes9x-native",
   "recorded": "2026-09-19",
-  "revision": "8b588e6 + native Snes9x port",
+  "revision": "d2a91b3 + native Snes9x port",
   "command": "bash tools/verify.sh; bash tools/run-title.sh --no-build --core-test=snes9x --watch 180 (owner selects SNES archive and menu transitions manually)",
   "raw_capture": "klog/snes9x-first-run.log",
   "raw_lines": 10341,

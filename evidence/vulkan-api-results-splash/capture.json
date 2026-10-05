@@ -1,7 +1,7 @@
 {
   "step": "vulkan-api-results-splash",
   "recorded": "2026-09-19",
-  "revision": "63569ff0a5177b047ac83ad37d3d678ca31b2278 + diagnostic worktree",
+  "revision": "f27d408057b24ba3574faa07cf0b1bd783c347af + diagnostic worktree",
   "command": "bash tools/run-title.sh --no-build --watch 90",
   "raw_capture": "klog/gpu-api-results-latest-trace.txt",
   "raw_lines": 537,

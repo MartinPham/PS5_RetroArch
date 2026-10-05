@@ -1,7 +1,7 @@
 {
   "step": "xmb-safe-list-run",
   "recorded": "2026-09-19",
-  "revision": "5cbd448 plus verified list safety changes recorded in diagnostic-build.json",
+  "revision": "6aa106b plus verified list safety changes recorded in diagnostic-build.json",
   "command": "Read-only FTP snapshots of memory-diagnostics.log, retroarch.log and trace.txt; 10-second passive kernel backlog capture; no launch or kill",
   "raw_capture": "klog/xmb-stutter-20260919-200720/1-memory-diagnostics.log",
   "build_identity": "88d30106ce625e783e899c97ddeab43d4ca16949ddd98cfb129a06190e0c4ec6",

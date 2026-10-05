@@ -93,7 +93,7 @@ cp "$opengl/native-app/ps5-pie.ld" "$opengl/native-app/app-symbols.map" "$work/t
 # the platform defines are bound, and not the ones ../PS5_OpenGL's shims define
 # (mkstemps, openlog, popen, pclose); the version script keeps every one local.
 # (iswctype_l was frontends/common's until the platform answered FreeBSD's masks
-# itself: PS5_PayloadSDK f05c5de.)
+# itself: PS5_PayloadSDK b5efad5.)
 #
 # That list is eboot.bin's. A frontend imports more of the functions the platform
 # replaces (ES-DE's first start called readlink, which no module exports to a title,

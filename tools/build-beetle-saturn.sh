@@ -20,7 +20,7 @@ core_stamp_skip beetle-saturn \
     "$root/patches/beetle-saturn/ps5-executable-memory.patch"
 [[ $# == 0 ]] || { echo "usage: ${0##*/}" >&2; exit 2; }
 
-revision=41a8a4b6ea1629790da170af775061a25e3c91cb  # ../PS5_BeetleSaturn main
+revision=961375d91d7b02a51f36025e10d321259d6221fe  # ../PS5_BeetleSaturn main
 core_fork_setup
 core_fork_checkout PS5_BeetleSaturn "$revision"
 # Anonymous RWX mappings are not executable in a PS5 title. Use the SDK JIT pool.

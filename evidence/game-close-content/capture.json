@@ -2,7 +2,7 @@
   "step": "game-close-content",
   "recorded": "2026-10-05T02:16:10Z",
   "console_run": "base PS5 13.40, run 221401",
-  "revision": "f0b1c1d + tests/pad/game-close-content.txt",
+  "revision": "c861d36 + tests/pad/game-close-content.txt",
   "command": "tools/run-title.sh --no-build --relaunch-test=1 --relaunch-image=es-de/es-de.bin --frontend-capture=4,20 --frontend-launch --pad-script=tests/pad/game-close-content.txt --watch 80",
   "raw_capture": "klog/close-content/summary.txt",
   "raw_lines": 13,

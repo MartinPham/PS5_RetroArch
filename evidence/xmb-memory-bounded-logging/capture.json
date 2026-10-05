@@ -1,7 +1,7 @@
 {
   "step": "xmb-memory-bounded-logging",
   "recorded": "2026-09-19",
-  "revision": "971534c + bounded failure logging",
+  "revision": "481c675 + bounded failure logging",
   "command": "PS5_MEMORY_DIAGNOSTICS=1 bash tools/verify.sh; python3 tools/check-memory-diagnostics.py",
   "console_run": null,
   "raw_capture": "klog/xmb-memory-bounded-verify.log",

@@ -1,7 +1,7 @@
 {
   "step": "frontend-patch-idempotence",
   "command": "python3 tools/apply-port-patches.py build/ra-conf (repeat and compare SHA256 for every patched file)",
-  "revision": "fc65097 + 0023 marker fix",
+  "revision": "7461171 + 0023 marker fix",
   "raw_capture": "",
   "raw_lines": 18,
   "lines": [

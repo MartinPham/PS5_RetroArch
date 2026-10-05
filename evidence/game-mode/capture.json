@@ -2,7 +2,7 @@
   "step": "game-mode",
   "recorded": "2026-10-04T22:07:06Z",
   "console_run": "base PS5 13.40, run frontend-20261004-180356",
-  "revision": "c813ae3 + game mode",
+  "revision": "8cb7e98 + game mode",
   "command": "PS5_FRONTENDS='es-de picker' tools/build-title.sh; tools/run-title.sh --no-build --relaunch-test=1 --relaunch-image=es-de/es-de.bin --frontend-capture=4,20 --frontend-launch --retroarch-frames=600 --watch 75",
   "raw_capture": "klog/game-mode-summary.txt",
   "raw_lines": 16,

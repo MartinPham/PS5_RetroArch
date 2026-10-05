@@ -2,7 +2,7 @@
   "step": "esde-collections",
   "recorded": "2026-10-05T02:32:04Z",
   "console_run": "base PS5 13.40, runs 222652 (favourite), 222946 and 223054 (ES-DE)",
-  "revision": "59098d5 + RetroArch's favourites and play in ES-DE",
+  "revision": "1e6b8cb + RetroArch's favourites and play in ES-DE",
   "command": "tools/run-title.sh --no-build --no-deploy --pad-script=tests/pad/history-favourite.txt --watch 25; tools/run-title.sh --no-build --no-deploy --relaunch-test=1 --relaunch-image=es-de/es-de.bin --frontend-capture=4 --watch 30",
   "raw_capture": "klog/collections-evidence/summary.txt",
   "raw_lines": 11,

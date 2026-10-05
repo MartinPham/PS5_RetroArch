@@ -2,7 +2,7 @@
   "step": "sdl-probe",
   "recorded": "2026-10-04T19:05:36Z",
   "console_run": "base PS5 13.40, run relaunch-20261004-150134",
-  "revision": "1217743 + frontend executable build (build c1383963)",
+  "revision": "5e302e0 + frontend executable build (build c1383963)",
   "command": "PS5_FRONTENDS=sdl-probe tools/build-title.sh; tools/run-title.sh --no-build --relaunch-test=1 --relaunch-image=es-de/sdl-probe.bin --watch 45",
   "raw_capture": "klog/sdl-probe-summary.txt",
   "raw_lines": 13,

@@ -1,7 +1,7 @@
 {
   "step": "ppsspp-memory-recovery",
   "build_identity": "8b635e9bb096b97155989f58509cf2bc21e5e73b77f494bf42afccd74725a28e",
-  "sdk_revision": "f674976f48a8c319abd5646079eca284fde790fd",
+  "sdk_revision": "3752be7e7812713e01fbe998d92952cd7b559f7f",
   "core_sha256": "b8895534991d734e06fcd7b6d848456be8f6a835e2a9097541c1a9b007afaa00",
   "command": "PYTHONPATH=tools python3 klog/memory-priorities/console-test.py <profile>",
   "raw_capture": "klog/memory-priorities/results.txt",

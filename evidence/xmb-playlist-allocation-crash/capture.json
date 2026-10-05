@@ -1,7 +1,7 @@
 {
   "step": "xmb-playlist-allocation-crash",
   "recorded": "2026-09-19",
-  "revision": "d7ad1b3",
+  "revision": "0a29c59",
   "command": "Owner-authorized launch with prior-log preservation, uploaded identity verification, pre-launch klog, periodic FTP snapshots; symbolization against klog/xmb-first-failure/llvm-pie.elf using the recorded image base. Read-only FTP count of playlist JSON items.",
   "raw_capture": "klog/xmb-first-failure-run-20260919-192044/crash-memory-diagnostics.log",
   "raw_bytes": 6829,

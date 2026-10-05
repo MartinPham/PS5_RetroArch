@@ -20,7 +20,7 @@ core_stamp_skip beetle-psx \
     -- "$root/tools/build-beetle-psx.sh" "$root/tools/core-fork.sh"
 [[ $# == 0 ]] || { echo "usage: ${0##*/}" >&2; exit 2; }
 
-revision=e43b3980e031c47066917c941be6ace6f51ed24f  # ../PS5_BeetlePSX main
+revision=9c3146aa9580850bf4af16a776e0dcccc5c1a71e  # ../PS5_BeetlePSX main
 core_fork_setup
 core_fork_checkout PS5_BeetlePSX "$revision"
 core_fork_info mednafen_psx_hw_libretro.info 0790f04425488765bf3c199755036501f0ef09bc4af6b00cd516c209b4358940

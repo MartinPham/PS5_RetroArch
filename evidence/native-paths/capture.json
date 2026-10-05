@@ -1,7 +1,7 @@
 {
   "step": "native-paths",
   "recorded": "2026-09-19T17:07:12.824804+00:00",
-  "revision": "0523743 + native platform/config/directory changes",
+  "revision": "1b849da + native platform/config/directory changes",
   "command": "tools/run-title.sh --no-build --watch 90",
   "raw_capture": "klog/paths-large-run.log",
   "build_identity": "26139a294d687ccf21c8fa779e5ad3883273b873b71ce67e1df48f48589f8f76",

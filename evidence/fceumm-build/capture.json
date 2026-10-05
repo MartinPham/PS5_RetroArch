@@ -1,7 +1,7 @@
 {
   "step": "fceumm-build",
   "recorded": "2026-09-19",
-  "revision": "4ac3bce + FCEUmm build step",
+  "revision": "dae9006 + FCEUmm build step",
   "command": "make fceumm; tools/verify.sh; tools/run-title.sh --no-build --watch 120 (owner loads core/game manually)",
   "raw_capture": "klog/fceumm-metadata-run.log",
   "raw_lines": 7865,

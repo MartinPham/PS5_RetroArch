@@ -1,7 +1,7 @@
 {
   "step": "vulkan-splash-dismissal",
   "recorded": "2026-09-19",
-  "revision": "59c09fa + src/main.cpp splash dismissal",
+  "revision": "0bfcaf1 + src/main.cpp splash dismissal",
   "command": "bash tools/run-title.sh --no-build --watch 90",
   "raw_capture": "klog/gpu-splash-latest-trace.txt",
   "raw_lines": 471,
