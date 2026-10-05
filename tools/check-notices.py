@@ -6,7 +6,8 @@
     python3 tools/check-notices.py [dist/PPSA99169] [--release]
 
 What it establishes, and nothing more:
-  - every executable file (eboot.bin, *.prx, *.so) and every core .info file belongs
+  - every executable file (eboot.bin, the frontends' es-de/es-de.bin and
+    picker/picker.bin, *.prx, *.so) and every core .info file belongs
     to at least one listed part, and the sha256 recorded for it is the file's own;
   - every listed licence text is present and not empty, and a text marked verbatim
     (FBNeo's, Snes9x's, Genesis Plus GX's) is byte for byte the one staged;
@@ -24,8 +25,9 @@ import json
 import sys
 from pathlib import Path
 
-COVERED = ("eboot.bin", "sce_module/*.prx", "cores/*.so", "cores/*.info", "info/*.info")
-EXECUTABLE = ("eboot.bin", "*.prx", "*.so")
+COVERED = ("eboot.bin", "es-de/*.bin", "picker/*.bin", "sce_module/*.prx", "cores/*.so", "cores/*.info",
+           "info/*.info")
+EXECUTABLE = ("eboot.bin", "es-de.bin", "picker.bin", "*.prx", "*.so")
 
 
 def sha256(path):

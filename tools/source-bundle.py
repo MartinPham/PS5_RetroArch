@@ -137,14 +137,16 @@ def plan(component, root):
         if sha256(tarball) != revision:
             raise BundleError("libmicrohttpd: source archive differs from the build pin")
         steps.append((tarball.name, ("copy", tarball), source.get("url", "")))
-    else:
-        return []  # a part with no source to archive here (see SOURCES.txt)
+    # Otherwise no archive of its own (see SOURCES.txt); its extra sources, if any,
+    # are what the build used: the frontends' libraries' tarballs and trees.
     for extra in spec.get("extra", []):
         if "tarball" in extra:
             tarball = root / extra["tarball"]
+            if not tarball.is_file():
+                raise BundleError(f"{cid}: {extra['tarball']} is not there")
             steps.append((tarball.name, ("copy", tarball), f"used by {cid}"))
         else:
-            rev = pinned(extra["pin"], root)
+            rev = extra["revision"] if "revision" in extra else pinned(extra["pin"], root)
             steps.append((f"{extra['name']}-{rev[:12]}.tar.gz",
                           ("git", root / extra["git"], rev, tuple(extra.get("paths", ()))),
                           f"{extra.get('remote', '')}/tree/{rev} (used by {cid})"))

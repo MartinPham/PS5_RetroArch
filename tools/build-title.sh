@@ -428,9 +428,15 @@ PY_WEBUI
 # Pinned production effects, with dependency and development-fixture checks.
 python3 "$root/tools/video-assets.py" stage "$dist"
 
-# Frontend executables beside eboot.bin (frontends/, tools/build-frontend.sh), only
-# those PS5_FRONTENDS names: they need ../PS5_OpenGL's SDK and its SDL2 build, and a
-# default title carries none yet. Built before the manifest so it covers them.
+# Frontend executables beside eboot.bin (frontends/, tools/build-frontend.sh), those
+# PS5_FRONTENDS names: they need ../PS5_OpenGL's SDK and its SDL2 build, and
+# ../PS5_VulkanTemplate for the picker. A development build carries none unless asked;
+# a release carries both (their notices and sources are listed with the rest:
+# tooling/notices/components.json, docs/RELEASING.md), unless PS5_FRONTENDS is set,
+# empty included. Built before the manifest so it covers them.
+if [[ -n ${PS5_RELEASE_TAG:-} && -z ${PS5_FRONTENDS+set} ]]; then
+    PS5_FRONTENDS="es-de picker"
+fi
 if [[ -n ${PS5_FRONTENDS:-} ]]; then
     read -r -a frontends <<< "$PS5_FRONTENDS"
     for frontend in "${frontends[@]}"; do

@@ -138,6 +138,23 @@ class Notices(unittest.TestCase):
         problems = check.check(self.title, release=True)
         self.assertEqual(problems, ["port: built from uncommitted source"])
 
+    def test_a_frontend_executable_must_belong_to_a_part(self):
+        # The frontends beside eboot.bin (es-de/es-de.bin, picker/picker.bin) are
+        # executables like it: each must belong to a part, with its digest recorded.
+        (self.title / "es-de").mkdir()
+        (self.title / "es-de/es-de.bin").write_bytes(b"frontend")
+        self.run_stage()
+        problems = check.check(self.title)
+        self.assertIn("es-de/es-de.bin belongs to no listed part", problems)
+        self.assertIn("es-de/es-de.bin has no recorded digest", problems)
+        table = json.loads(self.table.read_text())
+        table["components"][0]["artifacts"].append("es-de/es-de.bin")
+        self.table.write_text(json.dumps(table))
+        staged = self.run_stage()
+        self.assertEqual(check.check(self.title), [])
+        port = next(c for c in staged if c["id"] == "port")
+        self.assertEqual(port["executables"]["es-de/es-de.bin"], digest(b"frontend"))
+
     def test_the_repository_table_names_existing_build_scripts(self):
         table = json.loads((ROOT / "tooling/notices/components.json").read_text())
         ids = [c["id"] for c in table["components"]]

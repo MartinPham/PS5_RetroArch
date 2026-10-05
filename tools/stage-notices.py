@@ -33,7 +33,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 TABLE = ROOT / "tooling/notices/components.json"
-EXECUTABLE = ("eboot.bin", "*.prx", "*.so")
+# The title's executables: eboot.bin, the frontends beside it, modules and cores.
+EXECUTABLE = ("eboot.bin", "es-de.bin", "picker.bin", "*.prx", "*.so")
 
 
 class NoticeError(Exception):
