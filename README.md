@@ -85,7 +85,7 @@ The new **Alerts** panel lists missing required BIOS/system files by installed
 core and shows the configured location. Choose **Recheck** after adding files.
 It checks presence, not BIOS authenticity; regional requirements may not apply to
 your content. `/app0` means the RetroArch installation folder. Optional firmware
-and RPCS3 are excluded from these checks. These controls are not in the published
+is excluded from these checks. These controls are not in the published
 Alpha 6 package; install an updated source build once to enable future WebUI updates.
 
 > The WebUI is a local HTTP service without a login. Use a trusted network and
@@ -119,10 +119,6 @@ Use matching arcade sets: MAME currently targets **0.289**, and FBNeo requires
 sets compatible with its pinned version. Azahar requires decrypted content.
 Core binaries must be built for this native SDK and loader; desktop cores or
 cores from another PS5 distribution are not interchangeable.
-
-RPCS3 is **source-only and excluded from every release**. Its separate build
-instructions and distribution restrictions are below. It is also excluded from
-the WebUI’s guided core catalogs.
 
 ## Balanced graphics for a 4K display
 
@@ -259,9 +255,7 @@ The cores that needed changes for the console build from my forks of them
 [PS5_MAME](https://github.com/mihawk-99/PS5_MAME),
 [PS5_DeSmuME](https://github.com/mihawk-99/PS5_DeSmuME),
 [PS5_Azahar](https://github.com/mihawk-99/PS5_Azahar) with
-[PS5_Dynarmic](https://github.com/mihawk-99/PS5_Dynarmic), and, for builds you
-make yourself, [PS5_RPCS3](https://github.com/mihawk-99/PS5_RPCS3) with
-[PS5_LLVM](https://github.com/mihawk-99/PS5_LLVM)), each pinned by revision in
+[PS5_Dynarmic](https://github.com/mihawk-99/PS5_Dynarmic)), each pinned by revision in
 its build script. The script uses the sibling checkout when there is one, and
 `github.com/mihawk-99/<fork>` otherwise.
 
@@ -287,9 +281,7 @@ bash tools/verify.sh
 
 The five gates are **format → unit → build → integration → evidence**. The build
 pins RetroArch 1.22.2, fetches core sources/metadata with checked hashes, builds the
-frontend and fifteen cores, and stages the native title in `dist/PPSA99169/`. RPCS3
-is left out unless you build your own title with `PS5_WITH_RPCS3=1`, and a release
-never carries it.
+frontend and fifteen cores, and stages the native title in `dist/PPSA99169/`.
 The initial dependency/source fetch requires network access.
 
 For an already configured checkout:
@@ -302,45 +294,13 @@ bash tools/build-ppsspp.sh   # The larger cores have scripts of their own:
                              # build-ppsspp.sh, build-dolphin.sh, build-lrps2.sh,
                              # build-beetle-psx.sh, build-mupen64plus.sh,
                              # build-beetle-saturn.sh, build-vice.sh,
-                             # build-mame.sh, build-desmume.sh, build-azahar.sh,
-                             # build-rpcs3.sh (your own builds only)
+                             # build-mame.sh, build-desmume.sh, build-azahar.sh
 ```
 
 When adding or updating a core, rebuild the title too: the frontend's native
 import table and build identity depend on the shipped core binaries. Source
 patches live in `patches/`; fetched and generated trees stay in ignored
 `vendor/`, `.deps/`, `build/` and `dist/` directories.
-
-### PlayStation 3 (RPCS3): build it yourself
-
-No release of this title carries RPCS3, and none will while its licence stands
-as it does: RPCS3 is **GPL-2.0-only**, and the title it runs in is
-**GPL-3.0-or-later** (this port's runtime is linked into the core, and the core
-runs against the title's GPL-3.0 platform code), so the two cannot be handed
-out together as one program. What is public is the source: my fork
-[PS5_RPCS3](https://github.com/mihawk-99/PS5_RPCS3) and this repository's build
-scripts. **If you want RPCS3, you must compile it yourself**, for your own
-console:
-
-```bash
-PS5_WITH_RPCS3=1 bash tools/build-title.sh   # your own build: the frontend, every core and RPCS3
-```
-
-Leave `PS5_RELEASE_TAG` unset: a plain build leaves RPCS3 out, a release build
-(`PS5_RELEASE_TAG=...`) refuses `PS5_WITH_RPCS3=1`, and `tools/check-notices.py --release` refuses a title with any
-RPCS3 file in it. Build the whole title, not the core alone: the title's native
-import table is made from the cores it is built with, so a release title cannot
-load an RPCS3 core built on its own. `tools/build-rpcs3.sh` builds only the
-core (from PS5_RPCS3, with LLVM from my fork PS5_LLVM, at their pinned
-revisions), for work on it.
-
-Keep what you build for your own console: **do not share, upload or
-redistribute the binaries you build.** RPCS3 needs your own copy of the PS3
-system software (`PS3UPDAT.PUP`, from Sony's official PS3 system software
-update page) in `system/RPCS3/`, where it installs on the first start, and
-your own games: a disc you own, dumped yourself, or a PSN purchase with its
-`.rap` licence file. Piracy is not condoned.
-
 
 <details>
 <summary><strong>Authors and acknowledgements</strong></summary>
@@ -384,7 +344,6 @@ lists and original notices.
 | [MAME](https://github.com/libretro/mame) | MAMEdev and contributors |
 | [DeSmuME](https://github.com/libretro/desmume) | DeSmuME team and contributors |
 | [Azahar](https://github.com/azahar-emu/azahar), [Dynarmic](https://github.com/azahar-emu/dynarmic) | Azahar contributors, building on Citra; Dynarmic by merryhime and contributors |
-| [RPCS3](https://github.com/RPCS3/rpcs3) | RPCS3 Team and contributors |
 | [libretro core-info](https://github.com/libretro/libretro-core-info) | Metadata maintainers and contributors |
 
 
@@ -406,19 +365,12 @@ ties every executable file to the source revision it was built from
 release also carries the source archives of everything in it. Releases up to
 v0.5.0-alpha.5 were published without `licenses/`.
 
-**RPCS3 is licensed GPL-2.0-only, which is incompatible with this port's
-GPL-3.0-or-later.** For that reason no release of this title contains RPCS3 or
-any of its files, and you must compile it yourself from source if you want it
-(see [PlayStation 3 (RPCS3): build it yourself](#playstation-3-rpcs3-build-it-yourself));
-the binaries you build are for your own console only.
-
 The cores keep their own licences, and they differ:
 
 | Licence | Cores |
 | --- | --- |
 | GPL-2.0-or-later | FCEUmm, PPSSPP, Dolphin, Beetle PSX HW, Beetle Saturn, Mupen64Plus-Next (with MIT and LGPL parts), VICE, DeSmuME, Azahar (Dynarmic is 0BSD), MAME (as a whole; many files BSD-3-Clause) |
 | GPL-3.0-or-later | LRPS2 (PCSX2) |
-| GPL-2.0-only | RPCS3: **not in any release; compile it yourself from source.** Its source is public and it builds with this repository, but it cannot be distributed together with this port's GPL-3.0 code |
 | MPL-2.0 | mGBA |
 | Non-commercial licences | Snes9x, FinalBurn Neo, Genesis Plus GX: they may not be sold or used commercially, and FBNeo's forbids asking for donations for a project that uses its code |
 
