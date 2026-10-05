@@ -134,6 +134,17 @@ if [[ -n $relaunch_image ]]; then
     (( relaunch_test )) || { echo "--relaunch-image needs --relaunch-test" >&2; exit 2; }
     [[ $relaunch_image =~ ^[A-Za-z0-9_][A-Za-z0-9_./-]*$ && $relaunch_image != *..* ]] ||
         { echo "--relaunch-image takes a path under /app0 without '..'" >&2; exit 2; }
+    # A frontend's executable is never stood in for by a copy of eboot.bin: with dist/
+    # built without that frontend (the build gate builds none), the copy replaced
+    # ES-DE on the console and the cleanup then deleted it (2026-10-04).
+    if [[ $relaunch_image == es-de/* || $relaunch_image == picker/* ]]; then
+        frontend_title=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["titleId"])' \
+            "$root/sce_sys/param.json")
+        [[ -f dist/$frontend_title/$relaunch_image ]] || {
+            echo "--relaunch-image $relaunch_image is a frontend's, and dist/ has none: build with PS5_FRONTENDS" >&2
+            exit 2
+        }
+    fi
 fi
 # The display modes test (src/display_modes_ps5.cpp): frames a mode, every mode, then RetroArch.
 [[ $display_modes_test =~ ^[0-9]+$ ]] && (( display_modes_test <= 1200 )) ||
@@ -583,6 +594,12 @@ with connect(**dt.load_settings()) as ftp:
     from pathlib import Path
     if sys.argv[10] and not Path(f"dist/{sys.argv[1]}/{sys.argv[10]}").is_file():
         remove_if_present(ftp, f"/data/homebrew/{sys.argv[1]}/{sys.argv[10]}")
+        # The deployment's record must not go on vouching for a file this removed.
+        record = dt.deployed_record_path(dt.load_settings(), sys.argv[1])
+        if record.is_file():
+            entries = json.loads(record.read_text())
+            if entries.pop(sys.argv[10], None) is not None:
+                record.write_text(json.dumps(entries, indent=1, sort_keys=True))
     # RetroArch logs by mode (src/frontend_mode_ps5.cpp): a game a frontend started
     # (game mode) in retroarch-game.log, RetroArch's own in retroarch.log.
     game_mode = "launch" in sys.argv[12]
