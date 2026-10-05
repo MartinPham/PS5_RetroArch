@@ -10,6 +10,16 @@ Native Vulkan rendering · Fifteen release cores · A local WebUI
 
 </div>
 
+> [!WARNING]
+> **PS5 RetroArch is a passion project, not a piracy project.** It exists so you
+> can play the games you own on the console you own. **Piracy is not condoned.**
+> This project ships no games, no BIOS files, no console firmware and no
+> decryption keys, and never will. Use only **legally obtained backups of games
+> you own**, made yourself from your own discs, cartridges or digital purchases,
+> and BIOS or firmware files dumped from **hardware you own**. Requests for, or
+> links to, games, BIOS files, firmware or keys are not welcome in this
+> project's issues or discussions.
+
 ![RetroArch WebUI Overview with content uploads, library folders, recent transfers and quick settings](assets/readme/webui-overview.png)
 
 <p align="center"><strong>WebUI Overview</strong> · Open <code>http://&lt;PS5-IP&gt;:6769</code> while RetroArch is running.<br><sub>Replace &lt;PS5-IP&gt; with your console’s local address. Use a browser on the same network.</sub></p>
@@ -118,7 +128,12 @@ through Vulkan. These are supported systems, not a promise that every title work
 Use matching arcade sets: MAME currently targets **0.289**, and FBNeo requires
 sets compatible with its pinned version. Azahar requires decrypted content.
 Core binaries must be built for this native SDK and loader; desktop cores or
-cores from another PS5 distribution are not interchangeable.
+cores from another PS5 distribution are not interchangeable. No games or BIOS
+files are bundled.
+
+None of the games I tested with is provided.
+**Use only legally obtained backups of games you own**, and BIOS files dumped
+from your own hardware: piracy is not condoned.
 
 ## Balanced graphics for a 4K display
 
@@ -174,7 +189,7 @@ usually `/data/homebrew/PPSA99169/`.
 | `content/Saturn/` | Saturn disc images; created automatically |
 | `system/` | General BIOS and system data |
 | `system/Saturn/` | Saturn BIOS files; created automatically |
-| `system/pcsx2/bios/` | PlayStation 2 BIOS |
+| `system/pcsx2/bios/` | PlayStation 2 BIOS (your own dump) |
 | `system/fbneo/` | FinalBurn Neo system files |
 | `cores/` and `info/` | Native cores and their metadata |
 | `config/retroarch.cfg` | Live RetroArch configuration |
@@ -186,14 +201,18 @@ usually `/data/homebrew/PPSA99169/`.
 | `overlays/` | Standard overlay artwork and configurations |
 | `radv-shader-cache/` | Reusable compiled graphics pipelines |
 
-**Saturn setup:** place `mpr-17933.bin` (US/Europe) or `sega_101.bin` (Japan)
-in `system/Saturn/`. Keep a disc’s `.cue` and all referenced tracks together,
+**Saturn setup:** place your own BIOS dump, `mpr-17933.bin` (US/Europe) or
+`sega_101.bin` (Japan), in `system/Saturn/`. Keep a disc’s `.cue` and all referenced tracks together,
 then load the `.cue`. The default system path is routed to the Saturn folder;
 an explicitly selected custom system directory remains unchanged.
 
 Genesis Plus GX’s Sega CD BIOS files and Beetle PSX HW’s optional BIOS files
 belong in the general system folder, with the filenames listed by their metadata.
 BIOS uploads use FTP; the WebUI only exposes `content/`.
+
+Everything you put in `content/` and `system/` must be **your own legally
+obtained backups**: games you own, and BIOS or firmware dumped from hardware you
+own. Piracy is not condoned.
 
 Ordinary scripted updates preserve content and saved settings. Back up your
 files before replacing or removing a title. The file browser has **INTERNAL**
