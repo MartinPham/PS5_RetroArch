@@ -10,15 +10,19 @@ Native Vulkan rendering · Fifteen release cores · A local WebUI
 
 </div>
 
-> [!WARNING]
-> **PS5 RetroArch is a passion project, not a piracy project.** It exists so you
-> can play the games you own on the console you own. **Piracy is not condoned.**
-> This project ships no games, no BIOS files, no console firmware and no
-> decryption keys, and never will. Use only **legally obtained backups of games
-> you own**, made yourself from your own discs, cartridges or digital purchases,
-> and BIOS or firmware files dumped from **hardware you own**. Requests for, or
-> links to, games, BIOS files, firmware or keys are not welcome in this
-> project's issues or discussions.
+![Important warning](assets/readme/important-warning.png)
+
+## PS5 RetroArch is a passion project, not a piracy project.
+
+It exists so you can play the games you own on the console you own.
+
+- **Piracy is not condoned.**
+- **No games, BIOS files, console firmware or decryption keys are included, and they never will be.**
+- **Use only legally obtained backups of games you own**, made yourself from your own discs, cartridges or digital purchases.
+- **Use only BIOS and firmware files dumped from hardware you own.**
+- **Requests for, or links to, games, BIOS files, firmware or keys are not welcome** in this project's issues or discussions.
+
+---
 
 ![RetroArch WebUI Overview with content uploads, library folders, recent transfers and quick settings](assets/readme/webui-overview.png)
 
