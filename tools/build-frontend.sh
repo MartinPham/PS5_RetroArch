@@ -91,9 +91,9 @@ cp "$opengl/native-app/ps5-pie.ld" "$opengl/native-app/app-symbols.map" "$work/t
 # locale variants libc++ calls, bound by name as ../PS5_Vulkan's tools/radv-link.sh
 # binds them for eboot.bin, so a frontend sees the files RetroArch sees. Only names
 # the platform defines are bound, and not the ones ../PS5_OpenGL's shims define
-# (mkstemps, openlog, popen, pclose) or frontends/common does (iswctype_l, whose
-# platform version gives FreeBSD's masks to the console's Dinkumware iswctype);
-# the version script keeps every one local.
+# (mkstemps, openlog, popen, pclose); the version script keeps every one local.
+# (iswctype_l was frontends/common's until the platform answered FreeBSD's masks
+# itself: PS5_PayloadSDK f05c5de.)
 #
 # That list is eboot.bin's. A frontend imports more of the functions the platform
 # replaces (ES-DE's first start called readlink, which no module exports to a title,
@@ -109,12 +109,12 @@ mapfile -t replaced < <("$sdk/bin/llvm-nm" --defined-only "$platform" 2>/dev/nul
     awk '$2 ~ /^[TDR]$/ && $3 ~ /^ps5_/ { print substr($3, 5) }' | sort -u)
 declare -A is_replaced=()
 for name in "${replaced[@]}"; do is_replaced[$name]=1; done
-own=" mkstemps openlog popen pclose iswctype_l "
+own=" mkstemps openlog popen pclose "
 bindings=()
 bind() { [[ $own == *" $1 "* ]] || bindings+=("--defsym=$1=ps5_$1"); }
 for name in qsort_r __xuname __assert regcomp regexec regfree regerror localtime_r newlocale freelocale \
         strtod_l strtof_l dladdr utimensat localeconv_l strtoll_l strtoull_l strtold_l snprintf_l sscanf_l \
-        asprintf_l strcoll_l strxfrm_l strftime_l wcscoll_l wcsxfrm_l btowc_l wctob_l mbrlen_l \
+        asprintf_l strcoll_l strxfrm_l strftime_l wcscoll_l wcsxfrm_l btowc_l wctob_l iswctype_l mbrlen_l \
         mbrtowc_l mbsrtowcs_l mbsnrtowcs_l wcrtomb_l wcsnrtombs_l mbtowc_l ___mb_cur_max_l ___runetype_l \
         ___tolower_l ___toupper_l __runes_for_locale catopen catgets catclose __cxa_thread_atexit_impl \
         localeconv arc4random arc4random_buf arc4random_uniform gmtime_r statvfs fstatvfs futimens \

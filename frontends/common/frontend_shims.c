@@ -12,15 +12,6 @@
  * the console's libc has none. access() itself is the platform's here (bound by
  * tools/build-frontend.sh), the console's refusing every path a title asks about.
  *
- * iswctype_l: libc++ classifies wide characters through it with FreeBSD's ctype
- * masks (_CTYPE_S for a space; ctype_byname<wchar_t>::do_is, which a named
- * std::locale reaches while it builds its time facets). The platform's
- * ps5_iswctype_l hands the mask to the console's iswctype, which is Dinkumware's
- * (it exports _Iswctype and _Getpwctytab) and reads its argument as an index into
- * its class table: ES-DE's std::locale("C") faulted there on its first line
- * (klog/run-PPSA99169-154622.log: SIGSEGV in libSceLibcInternal, c 0x20, mask
- * 0x4000). This answers from the platform's FreeBSD rune type, as FreeBSD does.
- *
  * pathconf: libc++'s std::filesystem::current_path sizes its buffer with it, and
  * only libkernel_sys exports it, which a title does not load: the import would be
  * null. The limits are the console's FreeBSD ones, for a path that exists.
@@ -48,8 +39,6 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <wctype.h>
-
 
 void *__memset_chk(void *destination, int value, size_t length, size_t destination_length)
 {
@@ -67,13 +56,6 @@ int faccessat(int directory, const char *path, int mode, int flags)
         return -1;
     }
     return access(path, mode);
-}
-
-unsigned long ps5____runetype_l(int c, void *locale);
-
-int iswctype_l(wint_t c, wctype_t class_mask, locale_t locale)
-{
-    return (ps5____runetype_l((int)c, (void *)locale) & class_mask) != 0;
 }
 
 long pathconf(const char *path, int name)
