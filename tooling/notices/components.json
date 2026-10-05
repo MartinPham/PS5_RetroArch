@@ -87,7 +87,7 @@
       "copyright": ["Copyright (c) 2003-2026 University of Illinois at Urbana-Champaign and the LLVM project contributors"],
       "texts": [{"from": ["${LLVM}/llvm/LICENSE.TXT", "../PS5_LLVM/llvm/LICENSE.TXT"], "to": "LICENSE.TXT"}],
       "source": {"kind": "fixed", "revision": "ps5-payload-dev SDK v0.42 release archives", "url": "https://github.com/ps5-payload-dev/sdk/releases/tag/v0.42"},
-      "modifications": "Unmodified release archives of the SDK. RPCS3's own LLVM is listed with that core."
+      "modifications": "Unmodified release archives of the SDK."
     },
     {
       "id": "zlib",
@@ -172,7 +172,7 @@
       "copyright": ["Copyright (c) 2019 The RetroArch team"],
       "texts": [{"from": "tooling/notices/texts/libretro-core-info-COPYING.txt", "to": "COPYING"}],
       "source": {"kind": "pin", "file": "tools/core-fork.sh", "var": "core_info_revision", "remote": "https://github.com/libretro/libretro-core-info"},
-      "modifications": "Unmodified, except rpcs3_libretro.info, which this repository writes (tooling/rpcs3)."
+      "modifications": "Unmodified."
     },
     {
       "id": "title-art",
