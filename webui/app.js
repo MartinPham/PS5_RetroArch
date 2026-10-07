@@ -1294,6 +1294,7 @@ function drawJob(job) {
   const chain = (job.sources || job.source).split(',').filter(Boolean);
   const passText = chain.length > 1 && running ? ` · pass ${job.pass + 1} of ${chain.length}: ${scraperSettings?.sources.find(s => s.id === chain[job.pass])?.name || chain[job.pass]}${job.waiting ? ` · ${job.waiting.toLocaleString()} game${job.waiting === 1 ? '' : 's'} waiting for the next source` : ''}` : '';
   $('#job-summary').textContent = `${METHOD_NAMES[job.mode]} · ${sourceName} · ${total.toLocaleString()} games${passText}` + (job.message ? ` · ${job.message}` : '');
+  drawPasses(job, running);
   countTo($('#stat-done'), count(job, 'done')); countTo($('#stat-partial'), count(job, 'partial'));
   countTo($('#stat-kept'), count(job, 'skipped')); countTo($('#stat-attention'), count(job, 'unmatched', 'ambiguous', 'failed'));
   countTo($('#stat-files'), job.mode === 'pc' ? job.transferred.files : job.downloaded.files);
@@ -1411,6 +1412,27 @@ function recapRow(game) {
   return row;
 }
 $('#recap-search').addEventListener('input', () => { recapLimit = {}; drawRecap(); });
+// The funnel, one step a source: done, running (games checked of those that reached
+// it) or waiting; and what each gave. A source with nothing to give is done in seconds.
+function drawPasses(job, running) {
+  const box = $('#job-passes'), passes = job.passes || [];
+  box.hidden = passes.length < 2;
+  if (box.hidden) return;
+  box.replaceChildren(...passes.map((pass, i) => {
+    const state = !running || i < job.pass ? 'done' : i === job.pass ? 'running' : 'waiting';
+    const step = element('li', undefined, 'job-pass'); step.dataset.state = state;
+    const head = element('div', undefined, 'pass-head'), name = scraperSettings?.sources.find(s => s.id === pass.source)?.name || pass.source;
+    head.append(element('span', state === 'done' ? '✓' : String(i + 1), 'pass-number'), element('span', name));
+    step.append(head);
+    const gave = pass.files ? `${pass.files.toLocaleString()} found for ${pass.games.toLocaleString()} game${pass.games === 1 ? '' : 's'}` : 'nothing missing it has';
+    if (state === 'running') {
+      const bar = document.createElement('progress'); bar.max = Math.max(1, pass.reached); bar.value = pass.checked;
+      step.append(element('p', `${pass.checked.toLocaleString()} of ${pass.reached.toLocaleString()} games checked · ${pass.files ? gave : 'nothing found yet'}`), bar);
+    } else if (state === 'done') step.append(element('p', `${pass.checked.toLocaleString()} game${pass.checked === 1 ? '' : 's'} checked · ${gave}`));
+    else step.append(element('p', pass.reached ? `${pass.reached.toLocaleString()} game${pass.reached === 1 ? '' : 's'} waiting for it so far` : 'Asked only for what the sources above do not have'));
+    return step;
+  }));
+}
 function drawProblems(job) {
   const problems = $('#job-problems'); problems.replaceChildren();
   for (const p of job.problems) {

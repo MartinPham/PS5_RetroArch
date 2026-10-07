@@ -443,6 +443,19 @@ struct Job
     uint64_t downloaded_files = 0, downloaded_bytes = 0, transferred_files = 0,
              transferred_bytes = 0, missing_files = 0;
     std::time_t saved = 0;
+    /* Each pass of the funnel: the games its source has checked, those it gave
+     * something, and how many kinds of media and details it gave. */
+    struct PassCount
+    {
+        unsigned checked = 0, games = 0, files = 0;
+    };
+    std::vector<PassCount> passes;
+    PassCount &pass_count(unsigned pass)
+    {
+        if (passes.size() <= pass)
+            passes.resize(pass + 1);
+        return passes[pass];
+    }
 };
 
 std::mutex lock;
@@ -542,6 +555,14 @@ void save_job(Job &job, bool force)
             std::to_string(job.downloaded_files) + ' ' + std::to_string(job.downloaded_bytes) +
             ' ' + std::to_string(job.transferred_files) + ' ' +
             std::to_string(job.transferred_bytes) + '\n';
+    if (!job.passes.empty())
+    {
+        text += "passes\t";
+        for (size_t i = 0; i < job.passes.size(); ++i)
+            text += (i ? "," : "") + std::to_string(job.passes[i].checked) + ' ' +
+                    std::to_string(job.passes[i].games) + ' ' + std::to_string(job.passes[i].files);
+        text += '\n';
+    }
     for (const auto &item : job.items)
     {
         /* An item mid-way is saved as pending: it is redone (its finished media kept). */
@@ -615,6 +636,14 @@ std::shared_ptr<Job> load_job(const std::string &path, const std::vector<Game> &
                 job->options.details = v == "1";
             else if (k == "overwrite")
                 job->options.overwrite = v == "1";
+            else if (k == "passes")
+                for (const auto &entry : candidates_from_list(v))
+                {
+                    Job::PassCount count;
+                    if (std::sscanf(entry.c_str(), "%u %u %u", &count.checked, &count.games,
+                                    &count.files) == 3)
+                        job->passes.push_back(count);
+                }
             else if (k == "counters") /* what was downloaded and sent, kept across restarts */
             {
                 unsigned long long a = 0, b = 0, c = 0, d = 0;
@@ -2398,6 +2427,7 @@ void process(Http &http, Job &job, unsigned index)
         std::lock_guard<std::mutex> guard(lock);
         auto &target = job.items[index];
         const bool ours = target.started || !target.got.empty();
+        ++job.pass_count(pass).checked;
         if (ours)
             funnel_finish(job, index, options, remaining, details_left);
         else
@@ -2408,6 +2438,7 @@ void process(Http &http, Job &job, unsigned index)
         save_job(job, false);
         return;
     }
+    const size_t given_before = item.got.size();
     const std::string source = options.sources[pass];
     Options one = options;
     one.source = source;
@@ -2468,6 +2499,14 @@ void process(Http &http, Job &job, unsigned index)
     lacking(item, remaining, details_left);
     std::lock_guard<std::mutex> guard(lock);
     auto &target = job.items[index];
+    {
+        /* What this source gave it: kinds new since the pass began. */
+        auto &count = job.pass_count(pass);
+        ++count.checked;
+        const size_t gave = target.got.size() > given_before ? target.got.size() - given_before : 0;
+        count.files += unsigned(gave);
+        count.games += gave ? 1 : 0;
+    }
     if ((!remaining.empty() || details_left) && pass + 1 < options.sources.size())
     {
         /* Down the funnel: the next source's pass takes it. */
@@ -3134,6 +3173,32 @@ bool resume(const std::string &id, std::string &why)
     return true;
 }
 
+/* The funnel's passes for the page: per source, the games that reached it, those it has
+ * checked, those it gave something and how much. */
+std::string passes_json(const Job &job)
+{
+    if (job.options.sources.size() <= 1)
+        return "[]";
+    std::string out;
+    for (unsigned i = 0; i < job.options.sources.size(); ++i)
+    {
+        const Job::PassCount count = i < job.passes.size() ? job.passes[i] : Job::PassCount{};
+        /* Reached: checked, plus those waiting for it or in its hands now. */
+        unsigned reached = count.checked;
+        for (const auto &item : job.items)
+            if (item.pass == i && (item.state == State::pending || item.holder) &&
+                !(item.state == State::pending && item.pass < job.pass))
+                ++reached;
+        out += std::string(out.empty() ? "" : ",") +
+               "{\"source\":" + quote(job.options.sources[i]) +
+               ",\"reached\":" + std::to_string(reached) +
+               ",\"checked\":" + std::to_string(count.checked) +
+               ",\"games\":" + std::to_string(count.games) +
+               ",\"files\":" + std::to_string(count.files) + '}';
+    }
+    return '[' + out + ']';
+}
+
 std::string job_json(const std::string &id)
 {
     std::lock_guard<std::mutex> guard(lock);
@@ -3179,7 +3244,8 @@ std::string job_json(const std::string &id)
            ",\"state\":" + quote(job->state) + ",\"message\":" + quote(job->message) +
            ",\"mode\":" + quote(job->options.mode) + ",\"source\":" + quote(job->options.source) +
            ",\"sources\":" + quote(kinds_text(job->options.sources)) +
-           ",\"pass\":" + std::to_string(job->pass) + ",\"waiting\":" +
+           ",\"passes\":" + passes_json(*job) + ",\"pass\":" + std::to_string(job->pass) +
+           ",\"waiting\":" +
            std::to_string(
                std::count_if(job->items.begin(), job->items.end(), [&](const Item &i)
                              { return i.state == State::pending && i.pass > job->pass; })) +

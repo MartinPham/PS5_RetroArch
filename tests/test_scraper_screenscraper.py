@@ -385,6 +385,10 @@ class ScreenScraper(unittest.TestCase):
         job = self.wait(job_id)
         # A funnel: libretro's pass over every game ends before ScreenScraper's begins.
         self.assertLess(max(self.libretro.times), self.first_lookup())
+        # Each pass counted: libretro checked all five and gave box art and screenshots to
+        # three; all five went on to ScreenScraper (videos and details are not libretro's).
+        self.assertEqual([(p['source'], p['checked'], p['games'], p['files']) for p in job['passes']],
+                         [('libretro', 5, 3, 6), ('screenscraper', 5, 3, 6)])
         self.assertEqual(job['sources'], 'libretro,screenscraper')
         self.assertEqual(job['counts'], {'ambiguous': 1, 'done': 3, 'unmatched': 1}, job)
         # libretro gave the box art and screenshots; ScreenScraper only the videos (and
