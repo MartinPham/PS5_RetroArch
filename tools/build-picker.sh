@@ -27,7 +27,7 @@ root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$root"
 template=$(cd -- "${PS5_VULKAN_TEMPLATE:-$root/../PS5_VulkanTemplate}" && pwd)
 vulkan=$(cd -- "${PS5_VULKAN_DIR:-$root/../PS5_Vulkan}" && pwd)
-template_commit=a6c32497a339df4e0c890f96d8ee57287e11a0f0
+template_commit=b577e950684e8bb835746ad0e38495ebcb154fd0
 program=frontendpicker
 title_id=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["titleId"])' "$root/sce_sys/param.json")
 app="$root/dist/$title_id"
