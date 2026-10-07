@@ -81,6 +81,7 @@ frontend_capture=
 frontend_scroll=
 picker_test=
 retroarch_frames=0
+game=
 pad_script=
 pad_monitor=0
 home_launch=0
@@ -105,10 +106,11 @@ while (( $# )); do
         --frontend-launch) frontend_scroll=${frontend_scroll:+$frontend_scroll,}launch ;;
         --picker-test=*) picker_test=${1#*=} ;;
         --retroarch-frames=*) retroarch_frames=${1#*=} ;;
+        --game=*) game=${1#*=} ;;
         --pad-script=*) pad_script=${1#*=} ;;
         --pad-monitor) pad_monitor=1 ;;
         --home-launch) home_launch=1 ;;
-        *) echo "usage: ${0##*/} [--no-build] [--no-deploy] [--watch SECONDS] [--gpu-profile 1..60] [--audio-test] [--core-test[=fceumm|mgba|snes9x|fbneo|genesis_plus_gx|ppsspp]] [--relaunch-test[=1..20] [--relaunch-image=PATH]] [--display-modes-test[=frames]] [--frontend-capture=SECONDS[,SECONDS...] [--frontend-scroll] [--frontend-profile] [--frontend-quit] [--frontend-launch]] [--picker-test=FRAMES:retroarch|es-de|none] [--retroarch-frames=N] [--pad-script=FILE] [--pad-monitor] [--home-launch]" >&2; exit 2 ;;
+        *) echo "usage: ${0##*/} [--no-build] [--no-deploy] [--watch SECONDS] [--gpu-profile 1..60] [--audio-test] [--core-test[=fceumm|mgba|snes9x|fbneo|genesis_plus_gx|ppsspp]] [--relaunch-test[=1..20] [--relaunch-image=PATH]] [--display-modes-test[=frames]] [--frontend-capture=SECONDS[,SECONDS...] [--frontend-scroll] [--frontend-profile] [--frontend-quit] [--frontend-launch]] [--picker-test=FRAMES:retroarch|es-de|none] [--retroarch-frames=N] [--game=CORE:PATH] [--pad-script=FILE] [--pad-monitor] [--home-launch]" >&2; exit 2 ;;
     esac
     shift
 done
@@ -175,6 +177,15 @@ fi
 
 [[ $retroarch_frames =~ ^[0-9]+$ ]] && (( retroarch_frames <= 100000 )) ||
     { echo "--retroarch-frames takes 1..100000 frames" >&2; exit 2; }
+
+# --game=CORE:PATH starts RetroArch straight into a core and its content: CORE is
+# the libretro name (flycast for cores/flycast_libretro.so), PATH the content's
+# path as the title sees it (/app0/content/...). With --retroarch-frames it quits
+# after that many frames and pictures the last one, collected as klog/game-<stamp>.png.
+if [[ -n $game ]]; then
+    [[ $game =~ ^[a-z0-9_]+:/.+ ]] ||
+        { echo "--game takes CORE:PATH, PATH as the title sees it (/app0/...)" >&2; exit 2; }
+fi
 
 # The pad script (src/input_ps5.cpp): presses and actions timed from RetroArch's
 # first poll, at most 128 lines.
@@ -274,7 +285,7 @@ fi
 # appeared. A run that does not ask for extras must not inherit them, so the file
 # is removed on every run - before the launch, because deleting it afterwards
 # would leave it for the next one if this run dies.
-python3 - "$title_id" "$profile" "$audio_test" "$core_test" "$relaunch_test" "$relaunch_run" "$display_modes_test" "$relaunch_image" "$frontend_capture" "$capture_run" "$frontend_scroll" "$picker_test" "$retroarch_frames" "$pad_script" "$pad_monitor" "$home_launch" <<'PY'
+python3 - "$title_id" "$profile" "$audio_test" "$core_test" "$relaunch_test" "$relaunch_run" "$display_modes_test" "$relaunch_image" "$frontend_capture" "$capture_run" "$frontend_scroll" "$picker_test" "$retroarch_frames" "$pad_script" "$pad_monitor" "$home_launch" "$game" <<'PY'
 import importlib.util, sys
 spec = importlib.util.spec_from_file_location("dt", "tools/deploy-title.py")
 dt = importlib.util.module_from_spec(spec); spec.loader.exec_module(dt)
@@ -347,10 +358,22 @@ with connect(**dt.load_settings()) as ftp:
         print(f"    armed picker test: {frames} frames, then {choice}{', Remember ' + switch[0] if switch else ''}")
     # RetroArch quits by itself after that many frames (its --max-frames), from
     # /app0/args.txt, which a test run's launch keeps.
+    # --game: the core and the content, one argument a line (paths have spaces),
+    # and with a frame count a picture of the last frame.
+    lines = []
+    if sys.argv[17]:
+        core, path = sys.argv[17].split(":", 1)
+        lines += ["-L", f"/app0/cores/{core}_libretro.so", path]
+        remove_if_present(ftp, f"/data/homebrew/{sys.argv[1]}/game-shot.png")
+        print(f"    RetroArch starts {core} with {path}")
     if int(sys.argv[13]):
-        ftp.storbinary(f"STOR /data/homebrew/{sys.argv[1]}/args.txt",
-                       io.BytesIO(f"--max-frames={sys.argv[13]}\n".encode()))
+        lines.append(f"--max-frames={sys.argv[13]}")
+        if sys.argv[17]:
+            lines += ["--max-frames-ss", "--max-frames-ss-path=/app0/game-shot.png"]
         print(f"    RetroArch quits after {sys.argv[13]} frames")
+    if lines:
+        ftp.storbinary(f"STOR /data/homebrew/{sys.argv[1]}/args.txt",
+                       io.BytesIO(("\n".join(lines) + "\n").encode()))
     # The pad script, and the pictures an earlier one took: a test launch keeps
     # /app0/pad-script.txt, so one left behind would drive this run.
     remove_if_present(ftp, f"/data/homebrew/{sys.argv[1]}/pad-script.txt")
@@ -483,6 +506,28 @@ if rows and rows[-1] == {"frames": int(frames), "choice": choice, "remember": re
     print(f"    picker test PASS: {frames} frames, a picture of the last ({picture}), then {choice}")
 else:
     print(f"    picker test FAILED: wanted {frames} frames then {choice} ({expected!r}), got {rows}")
+PY
+fi
+
+# --- the game's last frame (--game with --retroarch-frames) -------------------
+if [[ -n $game ]] && (( retroarch_frames )); then
+python3 - "$title_id" "$stamp" <<'PY'
+import importlib.util, sys
+from pathlib import Path
+sys.path.insert(0, "tools")
+from ps5_ftp import connect, list_names, remove_if_present
+spec = importlib.util.spec_from_file_location("dt", "tools/deploy-title.py")
+dt = importlib.util.module_from_spec(spec); spec.loader.exec_module(dt)
+base = f"/data/homebrew/{sys.argv[1]}"
+out = Path("klog") / f"game-{sys.argv[2]}.png"
+with connect(**dt.load_settings()) as ftp:
+    if "game-shot.png" in list_names(ftp, base):
+        with out.open("wb") as stream:
+            ftp.retrbinary(f"RETR {base}/game-shot.png", stream.write)
+        remove_if_present(ftp, f"{base}/game-shot.png")
+        print(f"    game: the last frame saved to {out}")
+    else:
+        print("    game: no picture of the last frame (RetroArch did not reach its frame count)")
 PY
 fi
 
