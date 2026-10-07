@@ -71,7 +71,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
     await page.waitForFunction(() => document.querySelectorAll('.media-row-item').length === 10);
     assert.equal(await page.locator('.media-row-item:not(.missing)').count(), 3);
     assert.equal(await page.locator('.media-row-item.missing').count(), 7);
-    assert.equal(await page.locator('.media-row-item[data-kind="cover"] .preview img').count(), 1);
+    assert.equal(await page.locator('.media-row-item[data-kind="cover"]:not(.missing) .media-stage').count(), 1);
     assert.match(await page.locator('#sheet-media-count').innerText(), /3 of 10 kinds/);
     const fanart = page.locator('.media-row-item[data-kind="fanart"]');
     assert.equal(await fanart.locator('button').innerText(), 'Add…');
@@ -86,6 +86,15 @@ const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
     await page.keyboard.press('Escape');
     await sheet.waitFor({ state: 'hidden' });
     assert.match(await page.locator('.game-card', { hasText: 'Donkey Kong Country 2' }).locator('.media-badges').innerText(), /Fan art/);
+    // The cards' picture: any of four kinds, remembered; a game without it shows the kind's drawing.
+    await page.locator('label:has(input[name="games-view"][value="box3d"])').click();
+    await page.waitForFunction(() => document.querySelector('#games-grid').dataset.view === 'box3d');
+    assert.equal(await page.locator('.game-cover.none').count(), 5);
+    await page.reload();
+    await page.waitForFunction(() => document.querySelectorAll('.game-card').length === 5);
+    assert.equal(await page.locator('input[name="games-view"][value="box3d"]').isChecked(), true);
+    await page.locator('label:has(input[name="games-view"][value="cover"])').click();
+    await page.waitForFunction(() => document.querySelectorAll('.game-cover img').length === 4);
     // The checkbox still selects without opening.
     await page.locator('.game-card', { hasText: 'Donkey Kong Country 2' }).locator('.game-select').click();
     assert.equal(await sheet.isVisible(), false);

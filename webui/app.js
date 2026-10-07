@@ -788,8 +788,10 @@ function visibleGames() {
 function mediaUrl(system, game, kind) {
   return `/api/library/media?system=${encodeURIComponent(system)}&game=${encodeURIComponent(game.key)}&kind=${kind}&v=${encodeURIComponent(game.scraped || '')}`;
 }
+function gamesView() { return $('input[name="games-view"]:checked')?.value || 'cover'; }
 function drawGames() {
-  const grid = $('#games-grid'), list = visibleGames();
+  const grid = $('#games-grid'), list = visibleGames(), view = gamesView();
+  grid.dataset.view = view;
   grid.replaceChildren();
   const total = library.systems.reduce((n, s) => n + s.games.length, 0);
   const withCovers = library.systems.reduce((n, s) => n + s.games.filter(g => g.media.includes('cover')).length, 0);
@@ -801,10 +803,11 @@ function drawGames() {
     pick.setAttribute('aria-label', `Select ${gameName(game)}`); pick.checked = selectedGames.has(game.path);
     card.setAttribute('aria-selected', pick.checked);
     pick.addEventListener('change', () => { if (pick.checked) selectedGames.set(game.path, system.id); else selectedGames.delete(game.path); card.setAttribute('aria-selected', pick.checked); drawSelection(); });
-    if (game.media.includes('cover')) {
-      const img = document.createElement('img'); img.loading = 'lazy'; img.alt = `${gameName(game)} cover`; img.src = mediaUrl(system.id, game, 'cover');
-      img.addEventListener('error', () => img.replaceWith(icon('file'))); cover.append(img);
-    } else cover.append(icon('file'));
+    // The picture the view asks for (box art, 3D box, logo, cartridge or disc).
+    if (game.media.includes(view)) {
+      const img = document.createElement('img'); img.loading = 'lazy'; img.alt = `${gameName(game)} ${KIND_NAMES[view] || view}`; img.src = mediaUrl(system.id, game, view);
+      img.addEventListener('error', () => img.replaceWith(svgIcon(KIND_ICONS[view]))); cover.append(img);
+    } else { cover.classList.add('none'); cover.append(svgIcon(KIND_ICONS[view])); }
     const badges = element('div', undefined, 'media-badges');
     for (const kind of game.media) badges.append(element('span', KIND_NAMES[kind] || kind));
     const tags = element('div', undefined, 'version-tags');
@@ -889,20 +892,33 @@ function drawSheet() {
   drawSheetCover();
 }
 function mediaRow(kind) {
-  const row = element('div', undefined, `media-row-item${kind.present ? '' : ' missing'}`), preview = element('div', undefined, 'preview');
+  const row = element('div', undefined, `media-row-item${kind.present ? '' : ' missing'}`), stage = element('div', undefined, 'media-stage');
   row.dataset.kind = kind.id;
-  if (!kind.present) preview.append(svgIcon(KIND_ICONS[kind.id] || KIND_ICONS.cover));
-  else if (kind.id === 'video') { const v = document.createElement('video'); v.src = sheetMediaUrl(kind.id); v.controls = true; v.preload = 'metadata'; v.muted = true; preview.append(v); }
-  else if (kind.type === 'pdf') { const a = element('a'); a.href = sheetMediaUrl(kind.id); a.target = '_blank'; a.rel = 'noopener'; a.append(svgIcon(KIND_ICONS.manual), element('span', 'Open PDF')); preview.append(a); }
-  else {
-    const img = document.createElement('img'); img.loading = 'lazy'; img.alt = `${kind.name}`; img.src = sheetMediaUrl(kind.id);
-    img.addEventListener('error', () => img.replaceWith(svgIcon(KIND_ICONS[kind.id] || KIND_ICONS.cover))); preview.append(img);
+  if (!kind.present) stage.append(svgIcon(KIND_ICONS[kind.id] || KIND_ICONS.cover), element('span', `No ${kind.name.toLowerCase()} yet · drop a file here`));
+  else if (kind.id === 'video') {
+    // The player at full size, with a big play button until it starts.
+    const video = document.createElement('video'); video.src = sheetMediaUrl(kind.id); video.preload = 'metadata'; video.playsInline = true; video.controls = true;
+    const play = element('button', undefined, 'play'); play.type = 'button'; play.setAttribute('aria-label', 'Play the video');
+    play.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5Z"/></svg>';
+    play.addEventListener('click', () => { video.play(); });
+    video.addEventListener('play', () => { play.hidden = true; });
+    video.addEventListener('pause', () => { play.hidden = false; });
+    stage.append(video, play);
+  } else if (kind.type === 'pdf') {
+    const a = element('a', undefined, 'pdf'); a.href = sheetMediaUrl(kind.id); a.target = '_blank'; a.rel = 'noopener';
+    a.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6Z M15 3v4h4 M9 12h7 M9 16h7"/></svg>'; a.append(element('span', 'Open the manual (PDF)'));
+    stage.append(a);
+  } else {
+    if (kind.id === 'logo') stage.classList.add('checker');
+    const img = document.createElement('img'); img.alt = kind.name; img.src = sheetMediaUrl(kind.id);
+    img.addEventListener('error', () => img.replaceWith(svgIcon(KIND_ICONS[kind.id] || KIND_ICONS.cover)));
+    img.addEventListener('click', () => openLightbox(img.src, kind));
+    stage.append(img);
   }
-  const what = element('div', undefined, 'what'), title = element('strong');
+  const side = element('div', undefined, 'media-side'), title = element('strong');
   title.append(svgIcon(KIND_ICONS[kind.id] || KIND_ICONS.cover), element('span', kind.name));
   const state = kind.present ? element('span', `${kind.type.toUpperCase()} · ${bytes(kind.bytes)}${kind.uploaded ? ' · your file, kept when downloading again' : ''}`, `state${kind.uploaded ? ' mine' : ''}`)
-    : element('span', `Missing · add a ${kind.accepts.join(', ').toUpperCase()} file`, 'state');
-  what.append(title, element('p', kind.description, 'muted'), state);
+    : element('span', `Missing · takes ${kind.accepts.join(', ').toUpperCase()}`, 'state');
   const actions = element('div', undefined, 'actions'), choose = element('button', kind.present ? 'Replace…' : 'Add…', 'secondary');
   choose.type = 'button';
   const input = document.createElement('input'); input.type = 'file'; input.hidden = true;
@@ -910,12 +926,20 @@ function mediaRow(kind) {
   choose.addEventListener('click', () => input.click());
   input.addEventListener('change', () => { if (input.files[0]) uploadMedia(kind, input.files[0], row); input.value = ''; });
   actions.append(choose, input);
+  side.append(title, element('p', kind.description, 'muted'), state, actions);
   // A file dropped on the row replaces that kind.
   row.addEventListener('dragover', event => { event.preventDefault(); row.classList.add('drop'); });
   row.addEventListener('dragleave', () => row.classList.remove('drop'));
   row.addEventListener('drop', event => { event.preventDefault(); row.classList.remove('drop'); const file = event.dataTransfer.files[0]; if (file) uploadMedia(kind, file, row); });
-  row.append(preview, what, actions);
+  row.append(stage, side);
   return row;
+}
+// A picture at full size over the page; a click or Escape closes it.
+function openLightbox(src, kind) {
+  const box = element('div', undefined, `lightbox${kind.id === 'logo' ? ' checker' : ''}`), img = document.createElement('img');
+  img.src = src; img.alt = kind.name; box.append(img, element('p', `${kind.name} · click or press Escape to close`));
+  box.addEventListener('click', () => box.remove());
+  $('#game-sheet').append(box);
 }
 function uploadMedia(kind, file, row) {
   const type = (file.name.split('.').pop() || '').toLowerCase();
@@ -942,7 +966,12 @@ function uploadMedia(kind, file, row) {
 $('#sheet-close').addEventListener('click', () => $('#game-sheet').close());
 $('#game-sheet').addEventListener('click', event => { if (event.target === $('#game-sheet')) $('#game-sheet').close(); });
 $('#game-sheet').addEventListener('close', () => { for (const v of $$('#sheet-media video')) v.pause(); });
+// Escape closes a full-size picture first, then the game.
+$('#game-sheet').addEventListener('cancel', event => { const box = $('#game-sheet .lightbox'); if (box) { event.preventDefault(); box.remove(); } });
 $('#games-search').addEventListener('input', () => { shownGames = 300; drawGames(); });
+// The cards' picture, remembered in this browser.
+try { const saved = localStorage.getItem('ps5-games-view'); const radio = saved && $(`input[name="games-view"][value="${saved}"]`); if (radio) radio.checked = true; } catch {}
+for (const radio of $$('input[name="games-view"]')) radio.addEventListener('change', () => { try { localStorage.setItem('ps5-games-view', radio.value); } catch {} drawGames(); });
 $('#refresh-games').addEventListener('click', loadGames);
 
 // The Download Media tab: a few choices, a live summary, and the job's progress.
@@ -976,6 +1005,8 @@ function svgIcon(path) {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('class', 'icon'); svg.setAttribute('aria-hidden', 'true');
   const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); p.setAttribute('d', path); svg.append(p); return svg;
 }
+// The Games tab's view choices get their drawings (KIND_ICONS is set by now).
+for (const span of $$('[data-view-icon]')) span.prepend(svgIcon(KIND_ICONS[span.dataset.viewIcon]));
 function drawMethod() {
   const method = $('input[name="scrape-method"]:checked')?.value || '';
   $('#scrape-method-hint').textContent = METHOD_HINTS[method] + (scraperSettings && chosenSource().id === 'screenscraper'
