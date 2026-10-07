@@ -3633,6 +3633,21 @@ static void ps5_core_option_default(struct core_option *option)
         'patches/series, 0112: core frame textures are BGRA8888',
     ),
 
+    (
+        # A config written by RetroArch holds input_remapping_directory = "default",
+        # which upstream does not reset as it does the other folders: remaps were
+        # saved to the relative "default/<core>/<game>.rmp" and never loaded.
+        'configuration.c',
+        '   if (string_is_equal(settings->paths.directory_dynamic_wallpapers, "default"))\n',
+        '   /* patches/series, 0113: "default" is the platform\'s remap folder (/app0/config/remaps). */\n'
+        '   if (string_is_equal(settings->paths.directory_input_remapping, "default"))\n'
+        '      configuration_set_string(settings,\n'
+        '            settings->paths.directory_input_remapping,\n'
+        '            g_defaults.dirs[DEFAULT_DIR_REMAP]);\n'
+        '   if (string_is_equal(settings->paths.directory_dynamic_wallpapers, "default"))\n',
+        'patches/series, 0113: "default" is the platform\'s remap folder',
+    ),
+
 ]
 
 # Changes that are withdrawn rather than deleted, by marker.

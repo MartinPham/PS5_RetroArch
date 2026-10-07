@@ -116,6 +116,7 @@ int main(int argc, char **argv)
     assert(std::string(g_defaults.path_config) == "/app0/config/retroarch.cfg");
     assert(std::string(g_defaults.dirs[DEFAULT_DIR_CORE]) == "/app0/cores");
     assert(std::string(g_defaults.dirs[DEFAULT_DIR_MENU_CONTENT]) == "/app0");
+    assert(std::string(g_defaults.dirs[DEFAULT_DIR_REMAP]) == "/app0/config/remaps");
     assert(std::filesystem::is_directory(fixture + "/app0/content"));
     std::ofstream(fixture + "/app0/config/retroarch.cfg") << "user settings\n";
     std::ofstream(fixture + "/app0/retroarch.cfg") << "updated seed\n";

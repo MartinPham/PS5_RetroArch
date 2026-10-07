@@ -82,10 +82,11 @@ void set_directory(default_dirs slot, const char *path)
 
 void initialize(void *)
 {
-    const char *directories[] = {"/app0/config",    "/app0/cores",          "/app0/content",
-                                 "/app0/system",    "/app0/savefiles",      "/app0/savestates",
-                                 "/app0/playlists", "/app0/content/Saturn", "/app0/system/Saturn",
-                                 "/app0/shaders",   "/app0/filters",        "/app0/overlays"};
+    const char *directories[] = {
+        "/app0/config",        "/app0/cores",      "/app0/content",   "/app0/system",
+        "/app0/savefiles",     "/app0/savestates", "/app0/playlists", "/app0/content/Saturn",
+        "/app0/system/Saturn", "/app0/shaders",    "/app0/filters",   "/app0/overlays",
+        "/app0/config/remaps"};
     for (const char *path : directories)
     {
         if (mkdir(path, 0777) != 0 && errno != EEXIST)
@@ -142,6 +143,9 @@ void initialize(void *)
     set_directory(DEFAULT_DIR_SHADER, "/app0/shaders");
     set_directory(DEFAULT_DIR_VIDEO_FILTER, "/app0/filters");
     set_directory(DEFAULT_DIR_OVERLAY, "/app0/overlays");
+    /* input_remapping_directory "default" means this: with it unset, RetroArch loads no
+     * remap at all (config_load_remap) and saves one to a path with no folder. */
+    set_directory(DEFAULT_DIR_REMAP, "/app0/config/remaps");
     set_directory(DEFAULT_DIR_LOGS, "/app0");
     std::fprintf(stderr, "frontend ps5: config=%s browser=/app0 cores=/app0/cores\n", saved_config);
     // Startup summary: what this sandbox exposes, roots and mount names only;
