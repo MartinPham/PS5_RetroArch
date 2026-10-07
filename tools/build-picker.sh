@@ -59,6 +59,8 @@ cp "$root/frontends/picker/picker.cpp" "$generated/examples/$program/$program.cp
 # The remembered frontend's file (config/frontend.cfg) is read and written with the
 # same header-only code as eboot.bin's dispatch and the WebUI.
 cp "$root/src/ps5_frontend_choice.h" "$generated/examples/$program/ps5_frontend_choice.h"
+# The link that keeps the WebUI's daemon up while the picker shows (src/webui_link.h).
+cp "$root/src/webui_link.h" "$root/src/webui_link.cpp" "$generated/examples/$program/"
 rm -rf -- "$generated/examples/$program/kit"
 python3 - "$generated" <<'PY'
 import sys

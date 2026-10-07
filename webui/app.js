@@ -5,7 +5,7 @@ const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const repo = 'mihawk-99/PS5_RetroArch';
 let token = '', connected = false, freeBytes = null, uploadLimit = 64 * 1024 ** 3;
 let currentPath = '', entries = [], folderRequest = 0, settingsValues = {};
-let sessionRequest = null, sending = false, nextTransfer = 0;
+let sessionRequest = null, sending = false, nextTransfer = 0, frontend = 'retroarch';
 const transfers = [];
 function element(tag, text, className) {
   const node = document.createElement(tag);
@@ -41,7 +41,9 @@ async function api(path, options = {}) {
 function setConnection(ok) {
   connected = ok;
   $('#connection').classList.toggle('offline', !ok);
-  $('#connection span:last-child').textContent = ok ? 'RetroArch is running' : 'Console disconnected';
+  // The WebUI stays up while the title changes frontend (src/webui_link.h): say which one shows.
+  const showing = { retroarch: 'RetroArch is running', picker: 'Frontend picker is open', 'es-de': 'EmulationStation is open', title: 'PS5 RetroArch is starting' }[frontend] || 'PS5 RetroArch is closed';
+  $('#connection span:last-child').textContent = ok ? showing : 'Console disconnected';
   $('#connection-notice').hidden = ok;
   for (const id of ['destination', 'dropzone', 'browse-files', 'upload-here', 'folder-name', 'quick-volume', 'quick-rumble', 'quick-frontend', 'settings-fields', 'save-settings']) {
     $('#' + id).disabled = !ok || (['settings-fields', 'save-settings'].includes(id) && !editorRevision) || (['quick-volume', 'quick-rumble', 'quick-frontend', 'settings-fields', 'save-settings'].includes(id) && !Object.keys(settingsValues).length);
@@ -57,7 +59,7 @@ async function reconnect() {
       const state = await api('/api/status');
       if (token && token !== state.token && updateState === 'installing') { location.reload(); return false; }
       const recovered = !connected || token !== state.token;
-      token = state.token; freeBytes = state.freeBytes; uploadLimit = state.uploadLimit;
+      token = state.token; freeBytes = state.freeBytes; uploadLimit = state.uploadLimit; frontend = state.frontend ?? 'retroarch';
       setConnection(true);
       $('#storage-info').textContent = freeBytes === null ? 'Games and files stored on your PS5' : `${bytes(freeBytes)} free on the console`;
       if (recovered) await Promise.all([loadLibrary(), loadSettings(), loadContent(currentPath), loadAlerts(), loadUpdate()]);
@@ -489,7 +491,7 @@ async function loadUpdate() {
   try { renderUpdate(await api('/api/update')); }
   catch (error) {
     if (updateState === 'installing') {
-      $('#update-message').textContent = 'RetroArch has disconnected for installation. Reopen it from your launcher when installation finishes, then check the version above.';
+      $('#update-message').textContent = 'PS5 RetroArch has closed for installation. Reopen it from your launcher when installation finishes, then check the version above.';
     } else if (updateState !== 'idle') {
       $('#update-message').textContent = 'Update status is unavailable. Reconnect to check its progress before retrying.';
     }

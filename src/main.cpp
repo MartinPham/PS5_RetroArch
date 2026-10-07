@@ -57,6 +57,7 @@
 #include "frontend_mode_ps5.h"
 #include "webui_ps5.h"
 #include "webui_update.h"
+#include "webui_link.h"
 
 /* RetroArch's entry, in C. */
 extern "C" int rarch_main(int argc, char *argv[], void *data);
@@ -376,6 +377,9 @@ int main(int process_argc, char **process_argv)
 
     std::set_terminate(on_terminate);
     ps5::debug::mark(PS5_RETROARCH_BUILD_ID);
+    /* The WebUI's daemon, linked to (or started) first, so it already serves while
+     * this launch only hands the title to a frontend (src/webui_link.h). */
+    ps5_webui_link_start("title", nullptr, [](const char *line) { ps5::debug::mark(line); });
     ps5::memory::init("/app0/memory-diagnostics.log", PS5_RETROARCH_BUILD_ID);
     ps5_vulkan_profile_init();
 
@@ -396,6 +400,7 @@ int main(int process_argc, char **process_argv)
      * screen the picker, which restarts the title as RetroArch or EmulationStation;
      * those two are their own executables, started through LoadExec. */
     ps5_frontend_dispatch(process_argc, process_argv);
+    ps5_webui_link_frontend("retroarch");
 
     /* argv must be writable and NULL-terminated: RetroArch's option parsing
      * walks it the way the C runtime would have. */
@@ -608,7 +613,12 @@ int main(int process_argc, char **process_argv)
     }
     else if (ps5vk_display_retain != nullptr)
         ps5vk_display_retain(true);
-    ps5_webui_start("/app0");
+    /* With the daemon serving the WebUI, it stays up as RetroArch quits and the
+     * title changes frontend; with none (no ELF loader), this process serves it
+     * while RetroArch runs, as before the daemon. */
+    ps5_webui_prepare("/app0");
+    if (!ps5_webui_link_wait(8000))
+        ps5_webui_start("/app0");
     const int status =
         rarch_main(static_cast<int>(base_count + extra_count), argv_with_extras, nullptr);
 
@@ -636,7 +646,8 @@ extern "C" void catchReturnFromMain(int status)
         ps5vk_display_retain(false);
     /* A game mode game goes back to its frontend, and RetroArch the picker started to
      * the picker (src/frontend_mode_ps5.cpp). */
-    ps5_frontend_after_retroarch(status, ps5_update::exit_requested() ? 1 : 0);
+    ps5_frontend_after_retroarch(
+        status, ps5_update::exit_requested() || ps5_webui_link_install_requested() ? 1 : 0);
     ps5_permissions_settle();
     std::fflush(nullptr);
     const int result = sceSystemServiceLoadExec("exit", nullptr);

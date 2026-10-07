@@ -37,6 +37,8 @@
 
 #include "kit.hpp"
 #include "ps5_frontend_choice.h"
+#include "webui_link.h"
+#include <atomic>
 #include <ps5platform/libc.h>
 #include <sys/stat.h>
 
@@ -75,6 +77,8 @@ int nextFrontend = -1;
 // Remember's state when the program ended: the frontend chosen is written, or "ask"
 bool rememberChoice = false;
 std::string testLine;
+// The WebUI's daemon asked for the title to close, to install an update (src/webui_link.h)
+std::atomic<bool> closeForUpdate{ false };
 
 const hui::ui::Theme &glossTheme()
 {
@@ -137,6 +141,8 @@ public:
 		settings.overlay = false;
 		ps5.ownOverlay = true;
 		defaultClearColor = { { 0.0f, 0.0f, 0.0f, 1.0f } };
+		// The WebUI is the daemon's while the picker shows: it stays up as a frontend starts
+		ps5_webui_link_start("picker", [] { closeForUpdate = true; }, [](const char *line) { say("%s", line); });
 	}
 
 	void readTest()
@@ -337,6 +343,10 @@ public:
 		if (++framesSinceStart == 30) {
 			openForFtp("/app0/radv-shader-cache", 6);
 		}
+		if (closeForUpdate && chosen == -2) {
+			say("picker: closing the title for the WebUI's update");
+			chosen = -1;
+		}
 		if (chosen != -2) {
 			nextFrontend = chosen;
 			rememberChoice = remember;
@@ -399,6 +409,7 @@ extern "C" void ps5_title_next(void)
 	if (!next) {
 		return; // the title closes
 	}
+	ps5_webui_link_settle(); // a daemon being sent to the loader goes whole
 	say("picker: %s -> LoadExec(%s, \"%s\")", next->id, next->next, next->argument);
 	const char *const argv[] = { next->argument, nullptr };
 	const int result = sceSystemServiceLoadExec(next->next, argv);
@@ -409,3 +420,7 @@ extern "C" void ps5_title_next(void)
 }
 
 VULKAN_EXAMPLE_MAIN()
+
+// The link to the WebUI's daemon, compiled into this program (tools/build-picker.sh
+// copies it beside this file; the template builds one source per program).
+#include "webui_link.cpp"

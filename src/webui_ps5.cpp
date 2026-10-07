@@ -19,6 +19,7 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <map>
+#include <mutex>
 #include <new>
 #include <netinet/in.h>
 #include <string>
@@ -32,6 +33,8 @@ namespace
 {
 MHD_Daemon *web_daemon = nullptr;
 std::string root_path, token;
+std::mutex frontend_lock;
+std::string frontend_name = "retroarch";
 unsigned short listen_port;
 constexpr uint64_t upload_limit = UINT64_C(64) * 1024 * 1024 * 1024;
 struct Setting
@@ -785,6 +788,21 @@ MHD_Result list_content(MHD_Connection *c)
     }
     return respond(c, 200, out + "],\"truncated\":" + (truncated ? "true" : "false") + '}');
 }
+// A download is read in blocks rather than handed to MHD as a descriptor: MHD sends a
+// descriptor with sendfile, which on the console stopped after its first 33 KB
+// (the daemon, 2026-10-07: curl got 33,300 of 1.9 GB and a broken transfer).
+ssize_t read_download(void *cls, uint64_t position, char *buffer, size_t size)
+{
+    const ssize_t got = pread(static_cast<int>(reinterpret_cast<intptr_t>(cls)), buffer, size,
+                              static_cast<off_t>(position));
+    if (got == 0)
+        return MHD_CONTENT_READER_END_OF_STREAM;
+    return got < 0 ? MHD_CONTENT_READER_END_WITH_ERROR : got;
+}
+void close_download(void *cls)
+{
+    close(static_cast<int>(reinterpret_cast<intptr_t>(cls)));
+}
 MHD_Result download(MHD_Connection *c)
 {
     std::string path;
@@ -799,7 +817,9 @@ MHD_Result download(MHD_Connection *c)
         close(fd);
         return error(c, 400, "Choose a file to download.");
     }
-    auto *response = MHD_create_response_from_fd64(st.st_size, fd);
+    auto *response = MHD_create_response_from_callback(
+        static_cast<uint64_t>(st.st_size), 256 * 1024, read_download,
+        reinterpret_cast<void *>(static_cast<intptr_t>(fd)), close_download);
     if (!response)
     {
         close(fd);
@@ -863,6 +883,11 @@ void prepare_upload(MHD_Connection *c, Request &r)
         return;
     }
 }
+std::string current_frontend()
+{
+    std::lock_guard<std::mutex> guard(frontend_lock);
+    return quote(frontend_name);
+}
 MHD_Result route(MHD_Connection *c, const std::string &url, const std::string &method, Request &r)
 {
     if (method == "GET" && url == "/api/status")
@@ -871,9 +896,9 @@ MHD_Result route(MHD_Connection *c, const std::string &url, const std::string &m
         bool space_known = storage_space(fs);
         return respond(
             c, 200,
-            "{\"name\":\"RetroArch\",\"port\":" + std::to_string(listen_port) +
-                ",\"token\":" + quote(token) + ",\"uploadLimit\":" + std::to_string(upload_limit) +
-                ",\"freeBytes\":" +
+            "{\"name\":\"RetroArch\",\"frontend\":" + current_frontend() +
+                ",\"port\":" + std::to_string(listen_port) + ",\"token\":" + quote(token) +
+                ",\"uploadLimit\":" + std::to_string(upload_limit) + ",\"freeBytes\":" +
                 (space_known ? std::to_string(uint64_t(fs.f_bavail) * fs.f_frsize) : "null") + '}');
     }
     if (method == "GET" && url == "/api/alerts")
@@ -1179,13 +1204,32 @@ extern "C" void ps5_webui_core_variables(const char *name, const retro_variable 
     }
     save_metadata(name, json + "]}", defaults);
 }
-bool ps5_webui_start(const char *root, unsigned short port)
+void ps5_webui_prepare(const char *root)
+{
+    root_path = root;
+    apply_core_settings();
+}
+void ps5_webui_set_frontend(const char *frontend)
+{
+    std::lock_guard<std::mutex> guard(frontend_lock);
+    frontend_name = frontend ? frontend : "";
+}
+unsigned ps5_webui_connections()
+{
+    if (!web_daemon)
+        return 0;
+    const MHD_DaemonInfo *info =
+        MHD_get_daemon_info(web_daemon, MHD_DAEMON_INFO_CURRENT_CONNECTIONS);
+    return info ? info->num_connections : 0;
+}
+bool ps5_webui_start(const char *root, unsigned short port, bool apply_settings)
 {
     if (web_daemon)
         return true;
     root_path = root;
     ps5_update::initialize(root_path);
-    apply_core_settings();
+    if (apply_settings)
+        apply_core_settings();
     listen_port = port;
     token = nonce();
     mkdir((root_path + "/content").c_str(), 0755);

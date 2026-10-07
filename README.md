@@ -26,7 +26,7 @@ It exists so you can play the games you own on the console you own.
 
 ![RetroArch WebUI Overview with content uploads, library folders, recent transfers and quick settings](assets/readme/webui-overview.png)
 
-<p align="center"><strong>WebUI Overview</strong> · Open <code>http://&lt;PS5-IP&gt;:6769</code> while RetroArch is running.<br><sub>Replace &lt;PS5-IP&gt; with your console’s local address. Use a browser on the same network.</sub></p>
+<p align="center"><strong>WebUI Overview</strong> · Open <code>http://&lt;PS5-IP&gt;:6769</code> while the title is open.<br><sub>Replace &lt;PS5-IP&gt; with your console’s local address. Use a browser on the same network.</sub></p>
 
 ![The pre-screen: choose RetroArch or EmulationStation when the title starts](assets/readme/pre-screen.png)
 
@@ -35,7 +35,10 @@ It exists so you can play the games you own on the console you own.
 A native RetroArch homebrew title for jailbroken PlayStation 5 consoles, made by
 [Mihawk](https://github.com/mihawk-99). Play through XMB on your TV, then upload
 content, browse your library and adjust settings from your phone or computer.
-The purple WebUI starts with RetroArch and closes with it.
+The purple WebUI stays up while the title is open, on the pre-screen, in RetroArch
+and in EmulationStation, so an upload carries on while you switch. It runs as its own
+payload, started through your console's ELF loader (port 9021) or the homebrew
+launcher (port 8080); with neither, it runs only while RetroArch runs.
 
 **v0.6.7-alpha.6** opens on a pre-screen that starts RetroArch or
 EmulationStation, adds up to four controllers and verified updates from the WebUI,
@@ -217,7 +220,8 @@ usually `/data/homebrew/PPSA99169/`.
 | `cores/` and `info/` | Native cores and their metadata |
 | `config/retroarch.cfg` | Live RetroArch configuration |
 | `config/webui.cfg` | Saved global WebUI preferences |
-| `config/<core>/` | Core options and RetroArch overrides |
+| `config/<core>/` | Core options and RetroArch overrides, per core and per game |
+| `config/remaps/<core>/` | Controller remaps, per core and per game |
 | `savefiles/` and `savestates/` | Save RAM and save states |
 | `shaders/shaders_slang/` | GPU presets, including Mega Bezel and koko-aio |
 | `filters/` | Built-in CPU filter configurations |

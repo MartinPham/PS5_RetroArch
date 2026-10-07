@@ -632,7 +632,7 @@ bool request_install()
 {
     if (status().state != "ready")
         return false;
-    report("installing", "Closing RetroArch to install the update…");
+    report("installing", "Closing the title to install the update…");
     quit = true;
     return true;
 }

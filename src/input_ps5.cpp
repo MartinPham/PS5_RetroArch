@@ -76,6 +76,7 @@
 #include <input/input_driver.h>
 #include "content.h"
 #include "webui_update.h"
+#include "webui_link.h"
 #include "memory_status.h"
 #ifdef HAVE_MENU
 #include "command.h"
@@ -1371,7 +1372,9 @@ void *ps5_input_init(const char *) noexcept
 }
 void ps5_input_poll(void *) noexcept
 {
-    if (ps5_update::exit_requested() && !update_exit_armed)
+    /* An update to install: asked of this process's own WebUI, or of the daemon's
+     * (src/webui_link.h), which installs once the title has closed. */
+    if ((ps5_update::exit_requested() || ps5_webui_link_install_requested()) && !update_exit_armed)
     {
         // End at the next frontend frame boundary. Input polling can run inside
         // retro_run(), where saving state or tearing down the core is unsafe.

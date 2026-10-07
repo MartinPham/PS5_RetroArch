@@ -287,6 +287,9 @@ webui_http=$(bash "$root/tools/build-webui-http.sh" ps5)
 webui_http=${webui_http#"$root/"}
 webui_update=$(bash "$root/tools/build-webui-update.sh" ps5)
 webui_update=${webui_update#"$root/"}
+# The WebUI's own process, which stays up across the title's frontend changes
+# (src/webui_link.h): built from the same server and updater, staged in webui/.
+webui_daemon=$(bash "$root/tools/build-webui-daemon.sh")
 
 # Extract once, before the identity is computed, so catalog changes identify the build.
 python3 "$root/tools/generate-core-metadata.py" "$root/build/webui-core-metadata"
@@ -308,6 +311,8 @@ inputs += [root / name for name in (
     *(f"build/cores/stage/cores/{name}_libretro.so" for name in os.environ["CORE_NAMES"].split()),
     "tools/build.sh", "tools/retroarch-flags.sh")]
 inputs += sorted(p for p in (root / "webui").rglob("*") if p.is_file())
+inputs += sorted(p for p in (root / "daemon").rglob("*") if p.is_file())
+inputs.append(root / "tools/build-webui-daemon.sh")
 inputs += sorted(p for p in (root / "build/webui-core-metadata").rglob("*") if p.is_file())
 inputs += [pathlib.Path(name) for name in sys.argv[3:]]
 digest = hashlib.sha256()
@@ -440,6 +445,7 @@ fi
 # Ship local assets and honest release identity; development builds have no release tag.
 mkdir -p "$dist/webui"
 cp -a "$root/webui/." "$dist/webui/"
+cp "$webui_daemon" "$dist/webui/ps5-retroarch-webui.elf"
 # Core option catalogs are available before the first game is opened.
 mkdir -p "$dist/webui/core-metadata"
 cp -a "$root/build/webui-core-metadata/." "$dist/webui/core-metadata/"

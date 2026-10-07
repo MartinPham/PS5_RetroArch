@@ -30,11 +30,16 @@
  * A game ES-DE starts runs in RetroArch through the title's game mode, and the title
  * comes back here when it is closed (game_ps5.cpp says how).
  *
+ * While ES-DE shows, the WebUI is its daemon's (src/webui_link.h), which a LoadExec
+ * leaves running; when the daemon asks for the title to close for an update, ES-DE
+ * is sent SDL_QUIT, as its Quit entry does.
+ *
  * When ES-DE returns (Quit in its menu), the title goes back to eboot.bin with
  * --ps5-mode=quit, which shows the picker or, when a frontend is remembered, closes
  * the title (src/frontend_mode_ps5.cpp), and with the arguments of this port that
  * this run was given (a relaunch test's, so the test sees its next generation).
  */
+#include <SDL.h>
 #include <cerrno>
 #include <cstdio>
 #include <sys/stat.h>
@@ -43,6 +48,8 @@
 #include <ctime>
 #include <string>
 #include <vector>
+
+#include "webui_link.h"
 
 int esde_main(int argc, char *argv[]);
 
@@ -94,6 +101,20 @@ int main(int argc, char **argv)
         keep_previous(start_log, "/app0/es-de/es-de-ps5.1.log");
     keep_previous("/app0/es-de/stdout.txt", "/app0/es-de/stdout.1.txt");
     note("start: hide splash", sceSystemServiceHideSplashScreen());
+    ps5_webui_link_start(
+        "es-de",
+        [] {
+            SDL_Event quit{};
+            quit.type = SDL_QUIT;
+            SDL_PushEvent(&quit);
+        },
+        [](const char *line) {
+            if (std::FILE *log = std::fopen(start_log, "a"))
+            {
+                std::fprintf(log, "%lld %s\n", static_cast<long long>(std::time(nullptr)), line);
+                std::fclose(log);
+            }
+        });
     if (std::freopen("/app0/es-de/stdout.txt", "w", stdout))
         std::setvbuf(stdout, nullptr, _IOLBF, 0);
     setenv("HOME", home, 1);
@@ -155,6 +176,7 @@ int main(int argc, char **argv)
     if (!mode)
         back.push_back("--ps5-mode=quit");
     back.push_back(nullptr);
+    ps5_webui_link_settle();
     note("back to eboot.bin: LoadExec", sceSystemServiceLoadExec("/app0/eboot.bin", back.data()));
     for (;;)
         sceKernelUsleep(100000);

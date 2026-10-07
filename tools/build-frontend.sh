@@ -82,6 +82,9 @@ for contract in ps5_game ps5_library; do
     "${cc[@]}" -std=c11 "${common[@]}" "${includes[@]}" -c "$root/src/$contract.c" -o "$work/obj/$contract.o"
     objects+=("$work/obj/$contract.o")
 done
+# The link that keeps the WebUI's daemon up while the frontend shows (src/webui_link.h).
+"${cc[@]}" -std=c++17 "${common[@]}" "${includes[@]}" -c "$root/src/webui_link.cpp" -o "$work/obj/webui_link.o"
+objects+=("$work/obj/webui_link.o")
 
 # ../PS5_OpenGL's linker script includes this project's base layout by that path.
 cp "$native/ps5-pie.ld" "$work/tooling/native/ps5-pie-base.ld"

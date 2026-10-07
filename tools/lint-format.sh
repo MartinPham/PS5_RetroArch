@@ -5,7 +5,7 @@
 #   bash tools/lint-format.sh --write    format in place
 #
 # What is checked, and why the boundary sits where it does. clang-format is run
-# over src/, tests/ and tooling/native/ - the code this project writes - and never
+# over src/, daemon/, tests/ and tooling/native/ - the code this project writes - and never
 # over vendor/ or build/, which are RetroArch's and generated: reformatting those
 # would make the port's diff against upstream unreadable, and the invariant in
 # AGENTS.md is that upstream stays upstream.
@@ -32,7 +32,7 @@ fi
 [[ -n $formatter ]] || { echo "error: clang-format is required for the format gate" >&2; exit 2; }
 [[ -f .clang-format ]] || { echo "error: no .clang-format at the repository root" >&2; exit 2; }
 
-mapfile -t sources < <(find src tests tooling/native -type f \
+mapfile -t sources < <(find src daemon tests tooling/native -type f \
     \( -name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.h' -o -name '*.hpp' \) \
     2>/dev/null | sort)
 

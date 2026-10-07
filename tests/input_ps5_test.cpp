@@ -593,3 +593,8 @@ bool exit_requested()
     return request_update_exit;
 }
 } // namespace ps5_update
+/* src/webui_link.cpp: no daemon here; the in-process request above is the one tested. */
+extern "C" int ps5_webui_link_install_requested(void)
+{
+    return 0;
+}

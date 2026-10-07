@@ -47,6 +47,7 @@
 #include <ps5platform/libc.h>
 #include "trace.hpp"
 #include "title_threads.hpp"
+#include "webui_link.h"
 
 extern "C" int __real_mkdir(const char *path, mode_t mode);
 extern "C" int __real_open(const char *path, int flags, ...);
@@ -202,6 +203,9 @@ extern "C" void ps5_open_permissions()
 /* Waits, at most a minute, for the repair to finish; before any LoadExec. */
 extern "C" void ps5_permissions_settle()
 {
+    /* The WebUI's daemon, if this process is sending it to the loader, goes whole
+     * (src/webui_link.h): every LoadExec of eboot.bin waits here first. */
+    ps5_webui_link_settle();
     if (repair_state.load() != 1)
         return;
     const double start = now_ms();
