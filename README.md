@@ -4,7 +4,7 @@
 
 **Your collection on the console. Your controls in the browser.**
 
-Native Vulkan rendering · Sixteen release cores · A local WebUI
+Native Vulkan rendering · Twenty-nine release cores · A local WebUI
 
 [Download a release](https://github.com/mihawk-99/PS5_RetroArch/releases) · [Get started](#get-started) · [Supported systems](#supported-systems) · [Build from source](#build-from-source)
 
@@ -129,6 +129,19 @@ through Vulkan. These are supported systems, not a promise that every title work
 | Nintendo DS | DeSmuME | Software |
 | Nintendo 3DS | Azahar | GPU |
 | Dreamcast, NAOMI, NAOMI 2, Atomiswave | Flycast | GPU |
+| Sega 32X (and Mega Drive, Mega-CD, Master System, Pico) | PicoDrive | Software |
+| PC Engine / TurboGrafx-16, PC Engine CD, SuperGrafx | Beetle PCE | Software |
+| PC-FX | Beetle PC-FX | Software |
+| Virtual Boy | Beetle VB | Software |
+| Neo Geo Pocket / Color | Beetle NeoPop | Software |
+| WonderSwan / Color | Beetle Cygne | Software |
+| Pokémon Mini | PokeMini | Software |
+| Atari Lynx | Handy | Software |
+| Atari Jaguar | Virtual Jaguar | Software |
+| Atari 2600 | Stella | Software |
+| Atari 5200 | a5200 | Software |
+| Atari 7800 | ProSystem | Software |
+| MS-DOS | DOSBox Pure | Software |
 
 Use matching arcade sets: MAME currently targets **0.289**, and FBNeo requires
 sets compatible with its pinned version. Azahar requires decrypted content.
@@ -284,7 +297,20 @@ The cores that needed changes for the console build from my forks of them
 [PS5_DeSmuME](https://github.com/mihawk-99/PS5_DeSmuME),
 [PS5_Azahar](https://github.com/mihawk-99/PS5_Azahar) with
 [PS5_Dynarmic](https://github.com/mihawk-99/PS5_Dynarmic),
-[PS5_Flycast](https://github.com/mihawk-99/PS5_Flycast)), each pinned by revision in
+[PS5_Flycast](https://github.com/mihawk-99/PS5_Flycast),
+[PS5_PicoDrive](https://github.com/mihawk-99/PS5_PicoDrive),
+[PS5_BeetlePCE](https://github.com/mihawk-99/PS5_BeetlePCE),
+[PS5_BeetlePCFX](https://github.com/mihawk-99/PS5_BeetlePCFX),
+[PS5_BeetleVB](https://github.com/mihawk-99/PS5_BeetleVB),
+[PS5_BeetleNGP](https://github.com/mihawk-99/PS5_BeetleNGP),
+[PS5_BeetleWSwan](https://github.com/mihawk-99/PS5_BeetleWSwan),
+[PS5_PokeMini](https://github.com/mihawk-99/PS5_PokeMini),
+[PS5_Handy](https://github.com/mihawk-99/PS5_Handy),
+[PS5_VirtualJaguar](https://github.com/mihawk-99/PS5_VirtualJaguar),
+[PS5_Stella](https://github.com/mihawk-99/PS5_Stella),
+[PS5_A5200](https://github.com/mihawk-99/PS5_A5200),
+[PS5_ProSystem](https://github.com/mihawk-99/PS5_ProSystem),
+[PS5_DOSBoxPure](https://github.com/mihawk-99/PS5_DOSBoxPure)), each pinned by revision in
 its build script. The script uses the sibling checkout when there is one, and
 `github.com/mihawk-99/<fork>` otherwise.
 
@@ -310,7 +336,7 @@ bash tools/verify.sh
 
 The five gates are **format → unit → build → integration → evidence**. The build
 pins RetroArch 1.22.2, fetches core sources/metadata with checked hashes, builds the
-frontend and sixteen cores, and stages the native title in `dist/PPSA99169/`.
+frontend and twenty-nine cores, and stages the native title in `dist/PPSA99169/`.
 The initial dependency/source fetch requires network access.
 
 For an already configured checkout:
@@ -324,7 +350,13 @@ bash tools/build-ppsspp.sh   # The larger cores have scripts of their own:
                              # build-beetle-psx.sh, build-mupen64plus.sh,
                              # build-beetle-saturn.sh, build-vice.sh,
                              # build-mame.sh, build-desmume.sh, build-azahar.sh,
-                             # build-flycast.sh
+                             # build-flycast.sh, build-picodrive.sh,
+                             # build-beetle-pce.sh, build-beetle-pcfx.sh,
+                             # build-beetle-vb.sh, build-beetle-ngp.sh,
+                             # build-beetle-wswan.sh, build-pokemini.sh,
+                             # build-handy.sh, build-virtualjaguar.sh,
+                             # build-stella.sh, build-a5200.sh, build-prosystem.sh,
+                             # build-dosbox-pure.sh
 ```
 
 When adding or updating a core, rebuild the title too: the frontend's native
@@ -375,6 +407,15 @@ lists and original notices.
 | [DeSmuME](https://github.com/libretro/desmume) | DeSmuME team and contributors |
 | [Azahar](https://github.com/azahar-emu/azahar), [Dynarmic](https://github.com/azahar-emu/dynarmic) | Azahar contributors, building on Citra; Dynarmic by merryhime and contributors |
 | [Flycast](https://github.com/flyinghead/flycast) | flyinghead and contributors, building on reicast and nullDC; PS5 port begun by rpf16rj |
+| [PicoDrive](https://github.com/libretro/picodrive) | notaz, fDave and the PicoDrive contributors |
+| [Beetle PCE](https://github.com/libretro/beetle-pce-libretro), [Beetle PC-FX](https://github.com/libretro/beetle-pcfx-libretro), [Beetle VB](https://github.com/libretro/beetle-vb-libretro), [Beetle NeoPop](https://github.com/libretro/beetle-ngp-libretro), [Beetle Cygne](https://github.com/libretro/beetle-wswan-libretro) | The Mednafen authors and contributors; libretro Beetle maintainers |
+| [PokeMini](https://github.com/libretro/PokeMini) | JustBurn and contributors |
+| [Handy](https://github.com/libretro/libretro-handy) | K. Wilkins and contributors |
+| [Virtual Jaguar](https://github.com/libretro/virtualjaguar-libretro) | James Hammons and the Virtual Jaguar contributors |
+| [Stella](https://github.com/stella-emu/stella) | Bradford W. Mott, Stephen Anthony and the Stella Team |
+| [a5200](https://github.com/libretro/a5200) | The Atari800 team and the a5200 contributors |
+| [ProSystem](https://github.com/libretro/prosystem-libretro) | Greg Stanton and contributors |
+| [DOSBox Pure](https://codeberg.org/schelling/dosbox-pure) | Bernhard Schelling, building on DOSBox by the DOSBox Team |
 | [libretro core-info](https://github.com/libretro/libretro-core-info) | Metadata maintainers and contributors |
 
 
@@ -400,10 +441,11 @@ The cores keep their own licences, and they differ:
 
 | Licence | Cores |
 | --- | --- |
-| GPL-2.0-or-later | FCEUmm, PPSSPP, Dolphin, Beetle PSX HW, Beetle Saturn, Mupen64Plus-Next (with MIT and LGPL parts), VICE, DeSmuME, Azahar (Dynarmic is 0BSD), Flycast, MAME (as a whole; many files BSD-3-Clause) |
-| GPL-3.0-or-later | LRPS2 (PCSX2) |
+| GPL-2.0-or-later | FCEUmm, PPSSPP, Dolphin, Beetle PSX HW, Beetle Saturn, Mupen64Plus-Next (with MIT and LGPL parts), VICE, DeSmuME, Azahar (Dynarmic is 0BSD), Flycast, Beetle PCE, Beetle PC-FX, Beetle VB, Beetle NeoPop, Beetle Cygne, Stella, a5200, ProSystem, DOSBox Pure, MAME (as a whole; many files BSD-3-Clause) |
+| GPL-3.0-or-later | LRPS2 (PCSX2), PokeMini, Virtual Jaguar |
+| Zlib | Handy |
 | MPL-2.0 | mGBA |
-| Non-commercial licences | Snes9x, FinalBurn Neo, Genesis Plus GX: they may not be sold or used commercially, and FBNeo's forbids asking for donations for a project that uses its code |
+| Non-commercial licences | Snes9x, FinalBurn Neo, Genesis Plus GX, PicoDrive: they may not be sold or used commercially, and FBNeo's forbids asking for donations for a project that uses its code |
 
 Assets and fonts keep their licences too: the XMB theme is CC-BY-4.0 with the M+
 font licence, PPSSPP's fonts are OFL-1.1, and Dolphin's `Sys` files carry theirs.

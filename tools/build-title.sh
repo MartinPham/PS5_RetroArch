@@ -59,7 +59,9 @@ bash "$root/tools/setup-native-dependencies.sh" >/dev/null
 }
 
 core_names=(fceumm mgba snes9x fbneo genesis_plus_gx ppsspp dolphin pcsx2
-    mednafen_psx_hw mupen64plus_next mednafen_saturn vice_x64sc desmume azahar mame flycast)
+    mednafen_psx_hw mupen64plus_next mednafen_saturn vice_x64sc desmume azahar mame flycast
+    picodrive mednafen_pce mednafen_pcfx mednafen_vb mednafen_ngp mednafen_wswan pokemini
+    handy virtualjaguar stella a5200 prosystem dosbox_pure)
 # RPCS3 is not part of the title by default, console builds included: PS3 is no
 # longer a target (2026-10-04), so no deployment puts it on a console.
 # tools/build-rpcs3.sh still builds the core on this machine, and PS5_WITH_RPCS3=1
@@ -94,6 +96,11 @@ for core_name in "${core_names[@]}"; do
         pcsx2) script=lrps2 ;;
         mednafen_psx_hw) script=beetle-psx ;;
         mednafen_saturn) script=beetle-saturn ;;
+        mednafen_pce) script=beetle-pce ;;
+        mednafen_pcfx) script=beetle-pcfx ;;
+        mednafen_vb) script=beetle-vb ;;
+        mednafen_ngp) script=beetle-ngp ;;
+        mednafen_wswan) script=beetle-wswan ;;
         mupen64plus_next) script=mupen64plus ;;
         vice_x64sc) script=vice ;;
         *) script=${core_name//_/-} ;;
