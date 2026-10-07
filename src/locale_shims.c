@@ -418,3 +418,68 @@ int catclose(nl_catd catalog)
     return 0;
 }
 #endif /* !PS5_RETROARCH_RADV */
+
+/* FreeBSD's <ctype.h> inlines isalpha() and the rest as a look-up in
+ * __getCurrentRuneLocale()'s table for characters below _CACHED_RUNES, and
+ * calls ___runetype() above it (ScummVM, 2026-10-06). The console's libc
+ * exports the classification functions but neither of these, so the C locale's
+ * table is built here once, from those functions. Outside the guard above: the
+ * platform layer that replaces these shims in a RADV build has neither. */
+#include <runetype.h>
+#include <string.h>
+#include <wctype.h>
+#undef iswprint
+extern int iswprint(wint_t);
+#undef isalpha
+#undef iscntrl
+#undef isdigit
+#undef isgraph
+#undef islower
+#undef ispunct
+#undef isspace
+#undef isupper
+#undef isxdigit
+#undef isblank
+#undef isprint
+#undef tolower
+#undef toupper
+extern int isalpha(int), iscntrl(int), isdigit(int), isgraph(int), islower(int), ispunct(int);
+extern int isspace(int), isupper(int), isxdigit(int), isblank(int), isprint(int);
+extern int tolower(int), toupper(int);
+
+static _RuneLocale c_rune_locale;
+static int c_rune_locale_ready;
+
+const _RuneLocale *__getCurrentRuneLocale(void)
+{
+    if (!c_rune_locale_ready)
+    {
+        for (int c = 0; c < _CACHED_RUNES; c++)
+        {
+            unsigned long type = 0;
+            type |= isalpha(c) ? _CTYPE_A : 0;
+            type |= iscntrl(c) ? _CTYPE_C : 0;
+            type |= isdigit(c) ? (_CTYPE_D | _CTYPE_N) : 0;
+            type |= isgraph(c) ? _CTYPE_G : 0;
+            type |= islower(c) ? _CTYPE_L : 0;
+            type |= ispunct(c) ? _CTYPE_P : 0;
+            type |= isspace(c) ? _CTYPE_S : 0;
+            type |= isupper(c) ? _CTYPE_U : 0;
+            type |= isxdigit(c) ? _CTYPE_X : 0;
+            type |= isblank(c) ? _CTYPE_B : 0;
+            type |= isprint(c) ? (_CTYPE_R | (1UL << _CTYPE_SWS)) : 0;
+            c_rune_locale.__runetype[c] = type;
+            c_rune_locale.__maplower[c] = tolower(c);
+            c_rune_locale.__mapupper[c] = toupper(c);
+        }
+        memcpy(c_rune_locale.__magic, _RUNE_MAGIC_1, sizeof(c_rune_locale.__magic));
+        memcpy(c_rune_locale.__encoding, "NONE", 5);
+        c_rune_locale_ready = 1;
+    }
+    return &c_rune_locale;
+}
+
+unsigned long ___runetype(__ct_rune_t c)
+{
+    return (unsigned long)(iswprint((wint_t)c) ? (_CTYPE_R | (1UL << _CTYPE_SWS)) : 0u);
+}
