@@ -924,6 +924,7 @@ function mediaRow(kind) {
   if (!kind.present) stage.append(svgIcon(KIND_ICONS[kind.id] || KIND_ICONS.cover), element('span', `No ${kind.name.toLowerCase()} yet · drop a file here`));
   else if (kind.id === 'video') {
     // The player at full size, with a big play button until it starts.
+    stage.classList.add('video');
     const video = document.createElement('video'); video.src = sheetMediaUrl(kind.id); video.preload = 'metadata'; video.playsInline = true; video.controls = true;
     const play = element('button', undefined, 'play'); play.type = 'button'; play.setAttribute('aria-label', 'Play the video');
     play.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5Z"/></svg>';
@@ -936,7 +937,6 @@ function mediaRow(kind) {
     a.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6Z M15 3v4h4 M9 12h7 M9 16h7"/></svg>'; a.append(element('span', 'Open the manual (PDF)'));
     stage.append(a);
   } else {
-    if (kind.id === 'logo') stage.classList.add('checker');
     const img = document.createElement('img'); img.alt = kind.name; img.src = sheetMediaUrl(kind.id);
     img.addEventListener('error', () => img.replaceWith(svgIcon(KIND_ICONS[kind.id] || KIND_ICONS.cover)));
     img.addEventListener('click', () => openLightbox(img.src, kind));
@@ -963,7 +963,7 @@ function mediaRow(kind) {
 }
 // A picture at full size over the page; a click or Escape closes it.
 function openLightbox(src, kind) {
-  const box = element('div', undefined, `lightbox${kind.id === 'logo' ? ' checker' : ''}`), img = document.createElement('img');
+  const box = element('div', undefined, 'lightbox'), img = document.createElement('img');
   img.src = src; img.alt = kind.name; box.append(img, element('p', `${kind.name} · click or press Escape to close`));
   box.addEventListener('click', () => box.remove());
   $('#game-sheet').append(box);
