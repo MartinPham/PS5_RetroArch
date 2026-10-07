@@ -22,6 +22,7 @@ core_stamp_skip azahar \
 revision=4aef900a1a903d0aa6ea86fdb1e18236fb0d5907  # ../PS5_Azahar main
 core_fork_setup
 core_fork_checkout PS5_Azahar "$revision" submodules
+git -C "$source_dir" apply "$root/tooling/azahar/touchpad-stylus.patch"
 core_fork_info azahar_libretro.info c5bff8202e7ed32bce79ef0ab34dbeabde0637a298ef19a9e9c0ff5ea363aac3
 
 # The libretro build turns off every frontend that cannot be part of a core
@@ -42,4 +43,5 @@ cmake --build "$build" --target citra_libretro --parallel "${JOBS:-16}"
 built=$(find "$build" -name azahar_libretro.so -print -quit)
 [[ -n $built ]] || { echo "error: no azahar_libretro.so was produced" >&2; exit 2; }
 core_fork_stage "$built" "$core_info" "$revision" tools/build-azahar.sh \
-    tooling/azahar/ps5-toolchain.cmake
+    tooling/azahar/ps5-toolchain.cmake \
+    tooling/azahar/touchpad-stylus.patch

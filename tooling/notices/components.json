@@ -336,7 +336,7 @@
       "copyright": ["Copyright the DeSmuME team and contributors"],
       "texts": [{"from": ".deps/desmume-src/desmume/COPYING", "to": "COPYING"}],
       "source": {"kind": "core", "build": "desmume", "tree": ".deps/desmume-src", "remote": "https://github.com/mihawk-99/PS5_DeSmuME"},
-      "modifications": "The fork's commits over libretro/desmume."
+      "modifications": "The fork's commits over libretro/desmume; tooling/desmume/touchpad-stylus.patch adds the PS5 touchpad scale and stylus cursor."
     },
     {
       "id": "azahar",
@@ -347,7 +347,7 @@
       "copyright": ["Copyright the Citra Emulator Project / Azahar Emulator Project", "Copyright MerryMage and the Dynarmic contributors"],
       "texts": [{"from": ".deps/azahar-src/license.txt", "to": "license.txt"}, {"from": ".deps/azahar-src/externals/dynarmic/LICENSE.txt", "to": "dynarmic-LICENSE.txt"}],
       "source": {"kind": "core", "build": "azahar", "tree": ".deps/azahar-src", "remote": "https://github.com/mihawk-99/PS5_Azahar"},
-      "modifications": "The fork's commits over azahar-emu/azahar; externals/dynarmic is mihawk-99/PS5_Dynarmic."
+      "modifications": "The fork's commits over azahar-emu/azahar; externals/dynarmic is mihawk-99/PS5_Dynarmic; tooling/azahar/touchpad-stylus.patch adds relative mouse hover and a stylus cursor."
     },
     {
       "id": "flycast",
@@ -759,6 +759,31 @@
         "remote": "https://github.com/mihawk-99/PS5_RetroArch"
       },
       "modifications": "Unmodified upstream C source vendored in third_party/qrcodegen; upstream URL, version and SHA-256 digests in source.json. Shared runtime WebUI QR wrapper in src/ps5_webui_qr.c."
+    },
+    {
+      "id": "proton-touchpad",
+      "name": "PS5 Proton touchpad tracking (adapted)",
+      "kind": "code",
+      "always": true,
+      "artifacts": [
+        "eboot.bin"
+      ],
+      "licence": "LGPL-2.1-or-later",
+      "copyright": [
+        "Copyright the PS5 Proton contributors"
+      ],
+      "texts": [
+        {
+          "from": "third_party/proton_touchpad/LICENSE",
+          "to": "LGPL-2.1.txt"
+        }
+      ],
+      "source": {
+        "kind": "git",
+        "path": ".",
+        "remote": "https://github.com/mihawk-99/PS5_RetroArch"
+      },
+      "modifications": "Relative contact tracking adapted in src/input_ps5.cpp; original revision and files in third_party/proton_touchpad/source.json."
     }
   ]
 }

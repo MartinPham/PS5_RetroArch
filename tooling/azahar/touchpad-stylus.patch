@@ -1,0 +1,186 @@
+--- a/src/citra_libretro/input/mouse_tracker.cpp
++++ b/src/citra_libretro/input/mouse_tracker.cpp
+@@ -63,7 +63,8 @@
+     }
+ };
+ 
+-MouseTracker::MouseTracker() {
++MouseTracker::MouseTracker() : x(0), y(0), lastMouseX(0), lastMouseY(0),
++    projectedX(0), projectedY(0), isPressed(false) {
+     // Create renderer-specific cursor renderer based on current graphics API
+     cursor_renderer = nullptr;
+     switch (Settings::values.graphics_api.GetValue()) {
+@@ -104,13 +105,24 @@
+ 
+     if (LibRetro::settings.enable_mouse_touchscreen) {
+         state |= LibRetro::CheckInput(0, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_LEFT);
+-    }
+-
+-    if (LibRetro::settings.enable_touch_touchscreen) {
+-        state |= LibRetro::CheckInput(0, RETRO_DEVICE_POINTER, 0, RETRO_DEVICE_ID_POINTER_PRESSED);
+-    }
+-
+-    if (state == true) {
++        const int dx = LibRetro::CheckInput(0, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_X);
++        const int dy = LibRetro::CheckInput(0, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_Y);
++        // DualSense contact units are 1920 x 1080, independent of render scale.
++        mouseRemainderX += dx * layout.bottom_screen.GetWidth() / 1920.0f;
++        mouseRemainderY += dy * layout.bottom_screen.GetHeight() / 1080.0f;
++        const int mx = static_cast<int>(mouseRemainderX);
++        const int my = static_cast<int>(mouseRemainderY);
++        OnMouseMove(mx, my);
++        mouseRemainderX -= mx;
++        mouseRemainderY -= my;
++        wasMoved = dx != 0 || dy != 0;
++    }
++
++    const bool pointerPressed = LibRetro::settings.enable_touch_touchscreen &&
++        LibRetro::CheckInput(0, RETRO_DEVICE_POINTER, 0, RETRO_DEVICE_ID_POINTER_PRESSED);
++    state |= pointerPressed;
++
++    if (pointerPressed) {
+         auto pointerX = LibRetro::CheckInput(0, RETRO_DEVICE_POINTER, 0, RETRO_DEVICE_ID_POINTER_X);
+         auto pointerY = LibRetro::CheckInput(0, RETRO_DEVICE_POINTER, 0, RETRO_DEVICE_ID_POINTER_Y);
+         auto newX = static_cast<int>((pointerX + 0x7fff) / (float)(0x7fff * 2) * bufferWidth);
+@@ -172,7 +184,8 @@
+                     static_cast<int>(controllerY * heightSpeed));
+     }
+ 
+-    Restrict(0, 0, layout.bottom_screen.GetWidth(), layout.bottom_screen.GetHeight());
++    Restrict(0, 0, std::max(0, static_cast<int>(layout.bottom_screen.GetWidth()) - 1),
++             std::max(0, static_cast<int>(layout.bottom_screen.GetHeight()) - 1));
+ 
+     // Store as bottom-screen-local pixel coordinates
+     projectedX = static_cast<float>(x);
+@@ -180,7 +193,7 @@
+ 
+     isPressed = state;
+ 
+-    if (wasMoved) {
++    if (wasMoved || state) {
+         last_moved = std::chrono::steady_clock::now();
+     }
+ 
+@@ -340,49 +353,24 @@
+         return; // No framebuffer data available
+     }
+ 
+-    // Convert coordinates to screen space
+-    int centerX = static_cast<int>(projectedX);
+-    int centerY = static_cast<int>(projectedY);
+-    int radius = static_cast<int>(renderRatio);
+-
+-    // Calculate cursor dimensions within bounds
+-    int verticalLeft = std::max(centerX - radius / 5, static_cast<int>(layout.bottom_screen.left));
+-    int verticalRight =
+-        std::min(centerX + radius / 5, static_cast<int>(layout.bottom_screen.right));
+-    int verticalTop = std::max(centerY - radius, static_cast<int>(layout.bottom_screen.top));
+-    int verticalBottom = std::min(centerY + radius, static_cast<int>(layout.bottom_screen.bottom));
+-
+-    int horizontalLeft = std::max(centerX - radius, static_cast<int>(layout.bottom_screen.left));
+-    int horizontalRight = std::min(centerX + radius, static_cast<int>(layout.bottom_screen.right));
+-    int horizontalTop = std::max(centerY - radius / 5, static_cast<int>(layout.bottom_screen.top));
+-    int horizontalBottom =
+-        std::min(centerY + radius / 5, static_cast<int>(layout.bottom_screen.bottom));
+-
+-    // Draw cursor directly to framebuffer (assuming RGBA8888 format)
+-    uint32_t* pixels = static_cast<uint32_t*>(framebuffer_data);
+-    const uint32_t cursorColor = 0xFFFFFFFF; // White cursor
+-
+-    // Draw vertical line of cursor
+-    for (int y = verticalTop; y < verticalBottom; ++y) {
+-        for (int x = verticalLeft; x < verticalRight; ++x) {
+-            if (x >= 0 && x < bufferWidth && y >= 0 && y < bufferHeight) {
+-                int pixelIndex = y * bufferWidth + x;
+-                // XOR blend for visibility on any background
+-                pixels[pixelIndex] ^= cursorColor;
++    // A pen whose nib is the touch point, clipped to the bottom screen.
++    static const char glyph[12][13] = {
++        "##          ", "#.#         ", " #.#        ", "  #.##      ",
++        "   #..#     ", "   #...#    ", "    #...#   ", "     #...#  ",
++        "      #...# ", "       #...#", "        #.# ", "         #  "
++    };
++    const int size = std::max(1, static_cast<int>(renderRatio / 8));
++    auto* pixels = static_cast<uint32_t*>(framebuffer_data);
++    for (int row = 0; row < 12 * size; ++row) {
++        for (int col = 0; col < 12 * size; ++col) {
++            const int x = static_cast<int>(projectedX) + col;
++            const int y = static_cast<int>(projectedY) + row;
++            if (glyph[row / size][col / size] == '#' && x >= 0 && y >= 0 &&
++                x < bufferWidth && y < bufferHeight && layout.IsWithinTouchscreen(x, y)) {
++                pixels[y * bufferWidth + x] ^= 0x00ffffff;
+             }
+         }
+     }
+-
+-    // Draw horizontal line of cursor
+-    for (int y = horizontalTop; y < horizontalBottom; ++y) {
+-        for (int x = horizontalLeft; x < horizontalRight; ++x) {
+-            if (x >= 0 && x < bufferWidth && y >= 0 && y < bufferHeight) {
+-                int pixelIndex = y * bufferWidth + x;
+-                // XOR blend for visibility on any background
+-                pixels[pixelIndex] ^= cursorColor;
+-            }
+-        }
+-    }
+ }
+ 
+ } // namespace Input
+--- a/src/citra_libretro/input/mouse_tracker.h
++++ b/src/citra_libretro/input/mouse_tracker.h
+@@ -61,6 +61,7 @@
+ private:
+     int x;
+     int y;
++    float mouseRemainderX = 0, mouseRemainderY = 0;
+ 
+     float lastMouseX;
+     float lastMouseY;
+--- a/src/video_core/renderer_vulkan/renderer_vulkan.cpp
++++ b/src/video_core/renderer_vulkan/renderer_vulkan.cpp
+@@ -1087,28 +1087,15 @@
+     const float br = (layout.bottom_screen.right / buf_w) * 2.0f - 1.0f;
+     const float bb = (layout.bottom_screen.bottom / buf_h) * 2.0f - 1.0f;
+ 
+-    // Crosshair geometry clamped to bottom screen bounds
+-    const float vl = std::fmax(cx - rw / 5.0f, bl);
+-    const float vr = std::fmin(cx + rw / 5.0f, br);
+-    const float vt = std::fmax(cy - rh, bt);
+-    const float vb = std::fmin(cy + rh, bb);
+-
+-    const float hl = std::fmax(cx - rw, bl);
+-    const float hr = std::fmin(cx + rw, br);
+-    const float ht = std::fmax(cy - rh / 5.0f, bt);
+-    const float hb = std::fmin(cy + rh / 5.0f, bb);
+-
+-    // 12 vertices = 4 triangles (2 for vertical bar, 2 for horizontal bar)
+-    // clang-format off
++    // Stylus silhouette: the nib stays exactly at the touch coordinate.
++    // Use the existing inversion pipeline so it remains visible over the game.
++    const auto px = [&](float v) { return std::clamp(cx + v * rw / 4.0f, bl, br); };
++    const auto py = [&](float v) { return std::clamp(cy + v * rh / 4.0f, bt, bb); };
+     const float vertices[] = {
+-        // Vertical bar
+-        vl, vt,  vr, vt,  vr, vb,
+-        vl, vt,  vr, vb,  vl, vb,
+-        // Horizontal bar
+-        hl, ht,  hr, ht,  hr, hb,
+-        hl, ht,  hr, hb,  hl, hb,
+-    };
+-    // clang-format on
++        px(0), py(0), px(1), py(4), px(4), py(1), // nib
++        px(2), py(5), px(5), py(2), px(12), py(9), // shaft
++        px(2), py(5), px(12), py(9), px(9), py(12),
++    };
+ 
+     const u64 size = sizeof(vertices);
+     auto [data, offset, invalidate] = vertex_buffer.Map(size, 16);
+@@ -1119,7 +1106,7 @@
+         cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
+         cmdbuf.bindVertexBuffers(0, vertex_buffer.Handle(), {0});
+         const u32 first_vertex = static_cast<u32>(offset) / (sizeof(float) * 2);
+-        cmdbuf.draw(12, 1, first_vertex, 0);
++        cmdbuf.draw(9, 1, first_vertex, 0);
+     });
+ }
+ 

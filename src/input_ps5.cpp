@@ -60,6 +60,7 @@
  * Reference: docs/REFERENCE.md, "Input".
  */
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -180,7 +181,14 @@ struct PadSample
     std::uint8_t right_y;
     std::uint8_t left_trigger;
     std::uint8_t right_trigger;
-    std::uint8_t reserved_to_connected[66];
+    std::uint8_t reserved_to_touch[42];
+    std::uint8_t touch_count;
+    std::uint8_t reserved_touch[7];
+    struct
+    {
+        std::uint16_t x, y;
+        std::uint8_t id, reserved[3];
+    } touches[2];
     std::int32_t connected;
     std::uint64_t timestamp_us;
     std::uint8_t extension[16];
@@ -190,6 +198,9 @@ struct PadSample
 
 static_assert(sizeof(PadSample) == 120, "the console's pad samples are 120 bytes");
 static_assert(offsetof(PadSample, left_x) == 0x04, "the stick bytes follow the button word");
+// Touch fields verified by PS5_Proton's ps5/src/platform.c.
+static_assert(offsetof(PadSample, touch_count) == 0x34, "touch count sits at 0x34");
+static_assert(offsetof(PadSample, touches) == 0x3c, "touch contacts sit at 0x3c");
 static_assert(offsetof(PadSample, connected) == 0x4c, "connection state sits at 0x4c");
 static_assert(offsetof(PadSample, timestamp_us) == 0x50, "the timestamp sits at 0x50");
 
@@ -216,6 +227,28 @@ extern "C" void ps5_input_trace(const char *line) noexcept;
 
 namespace
 {
+// Relative contact tracking adapted from PS5_Proton src/proton_touchpad.h
+// (LGPL-2.1-or-later; provenance and licence in third_party/proton_touchpad).
+struct Touchpad
+{
+    bool active = false, clicked = false;
+    unsigned finger = 0;
+    int x = 0, y = 0, pending_x = 0, pending_y = 0;
+    std::int16_t frame_x = 0, frame_y = 0;
+};
+
+bool stylus_enabled() noexcept
+{
+#ifdef HAVE_MENU
+    if (menu_state_get_ptr()->flags & MENU_ST_FLAG_ALIVE)
+        return false;
+#endif
+    const auto *runloop = runloop_state_get_ptr();
+    const char *name = runloop->system.info.library_name;
+    return (runloop->flags & RUNLOOP_FLAG_CORE_RUNNING) && name &&
+           (!std::strcmp(name, "DeSmuME") || !std::strcmp(name, "Azahar"));
+}
+
 struct PadState
 {
     std::int32_t user_id = -1;
@@ -227,6 +260,7 @@ struct PadState
      * holds older frames and must not be reported as current. */
     std::int32_t sample_count = 0;
     std::uint32_t buttons = 0;
+    Touchpad touch;
     /* Last motor levels pushed to the pad: one scePadSetVibration call carries
      * both, while RetroArch sets one motor at a time. Atomic because the
      * haptic feeder thread reads them from outside the input path. */
@@ -750,6 +784,8 @@ void poll_pad(void *data) noexcept
     PadState *state = state_of(data);
     if (state == nullptr || state->handle < 0)
         return;
+    if (state->port != 0 || !stylus_enabled())
+        state->touch = {};
     const std::int32_t count = scePadRead(state->handle, state->samples, sample_capacity);
     if (count == 0)
         return; // No new samples: preserve the last state across a second binding poll.
@@ -760,11 +796,30 @@ void poll_pad(void *data) noexcept
          * down. */
         state->sample_count = 0;
         state->buttons = 0;
+        state->touch = {};
         return;
     }
     state->sample_count = count;
     const PadSample *newest = newest_sample(*state);
     state->buttons = newest != nullptr ? newest->buttons : 0;
+    if (newest && state->port == 0 && stylus_enabled())
+    {
+        auto &touch = state->touch;
+        const auto &finger = newest->touches[0];
+        const bool touching = newest->touch_count != 0;
+        if (touching && touch.active && finger.id == touch.finger)
+        {
+            touch.pending_x = std::clamp(touch.pending_x + finger.x - touch.x, -32767, 32767);
+            touch.pending_y = std::clamp(touch.pending_y + finger.y - touch.y, -32767, 32767);
+        }
+        touch.active = touching;
+        touch.clicked = (newest->buttons & pad_button_touch_pad) != 0;
+        touch.finger = finger.id;
+        touch.x = finger.x;
+        touch.y = finger.y;
+    }
+    else
+        state->touch = {};
 
     /* Successful button transitions are routine, not diagnostics. Keep pad-open
      * failures and lifecycle logs, without a synchronous file write per press. */
@@ -1245,7 +1300,10 @@ std::uint32_t joypad_buttons(unsigned port) noexcept
     const PadSample *sample = newest_sample(*state);
     if (!sample)
         return scripted;
-    auto mask = pad_buttons_to_retropad(sample->buttons) | scripted;
+    auto buttons = sample->buttons;
+    if (port == 0 && stylus_enabled())
+        buttons &= ~pad_button_touch_pad;
+    auto mask = pad_buttons_to_retropad(buttons) | scripted;
     if (sample->left_trigger > 127)
         mask |= UINT32_C(1) << RETRO_DEVICE_ID_JOYPAD_L2;
     if (sample->right_trigger > 127)
@@ -1372,6 +1430,17 @@ void *ps5_input_init(const char *) noexcept
 }
 void ps5_input_poll(void *) noexcept
 {
+    if (auto *pad = pad_at(0))
+    {
+        auto &touch = pad->touch;
+        if (!stylus_enabled())
+            touch = {};
+        // Joypad polling precedes this callback. Snapshot once per input poll:
+        // repeated core queries see the same delta; binding polls lose no motion.
+        touch.frame_x = static_cast<std::int16_t>(touch.pending_x);
+        touch.frame_y = static_cast<std::int16_t>(touch.pending_y);
+        touch.pending_x = touch.pending_y = 0;
+    }
     /* An update to install: asked of this process's own WebUI, or of the daemon's
      * (src/webui_link.h), which installs once the title has closed. */
     if ((ps5_update::exit_requested() || ps5_webui_link_install_requested()) && !update_exit_armed)
@@ -1388,16 +1457,30 @@ void ps5_input_free(void *) noexcept
 }
 
 std::int16_t ps5_input_state(void *, const input_device_driver_t *, const input_device_driver_t *,
-                             rarch_joypad_info_t *, const retro_keybind_set *, bool, unsigned,
-                             unsigned, unsigned, unsigned) noexcept
+                             rarch_joypad_info_t *, const retro_keybind_set *, bool, unsigned port,
+                             unsigned device, unsigned, unsigned id) noexcept
 {
+    if (port == 0 && device == RETRO_DEVICE_MOUSE && stylus_enabled())
+        if (const auto *pad = pad_at(0))
+        {
+            switch (id)
+            {
+            case RETRO_DEVICE_ID_MOUSE_X:
+                return pad->touch.frame_x;
+            case RETRO_DEVICE_ID_MOUSE_Y:
+                return pad->touch.frame_y;
+            case RETRO_DEVICE_ID_MOUSE_LEFT:
+                return pad->touch.clicked;
+            }
+        }
     return 0; // Mapped joypad input is supplied by RetroArch's input_state_wrap.
 }
 
 std::uint64_t ps5_input_capabilities(void *data) noexcept
 {
     (void)data;
-    return (UINT64_C(1) << RETRO_DEVICE_JOYPAD) | (UINT64_C(1) << RETRO_DEVICE_ANALOG);
+    return (UINT64_C(1) << RETRO_DEVICE_JOYPAD) | (UINT64_C(1) << RETRO_DEVICE_ANALOG) |
+           (UINT64_C(1) << RETRO_DEVICE_MOUSE);
 }
 } // namespace
 

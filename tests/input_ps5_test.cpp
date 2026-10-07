@@ -544,6 +544,97 @@ int main()
         login_users[1] = login_users[2] = login_users[3] = -1;
     }
 
+    assert(ps5_joypad.init(input));
+    // Proton-style relative tracking: hover, drag, finger identity, release,
+    // duplicate binding polls and loss of the pad must not jump or stick.
+    auto mouse = [&](unsigned id, unsigned port = 0)
+    {
+        return input_ps5.input_state(input, &ps5_joypad, nullptr, nullptr, nullptr, false, port,
+                                     RETRO_DEVICE_MOUSE, 0, id);
+    };
+    for (const char *core : {"DeSmuME", "Azahar"})
+    {
+        test_runloop.system.info.library_name = core;
+        test_runloop.flags |= RUNLOOP_FLAG_CORE_RUNNING;
+        p = sample();
+        p.touch_count = 1;
+        p.touches[0].id = 7;
+        p.touches[0].x = 500;
+        p.touches[0].y = 400;
+        feed(p);
+        input_ps5.poll(input);
+        assert(mouse(RETRO_DEVICE_ID_MOUSE_X) == 0);
+        p.touches[0].x += 20;
+        p.touches[0].y -= 10;
+        feed(p);
+        ps5_joypad.poll(); // No new sample: pending movement is retained.
+        input_ps5.poll(input);
+        assert(mouse(RETRO_DEVICE_ID_MOUSE_X) == 20);
+        assert(mouse(RETRO_DEVICE_ID_MOUSE_X) == 20); // Stable within this poll.
+        assert(mouse(RETRO_DEVICE_ID_MOUSE_Y) == -10);
+        assert(!mouse(RETRO_DEVICE_ID_MOUSE_LEFT));
+        assert(!mouse(RETRO_DEVICE_ID_MOUSE_X, 1));
+        input_ps5.poll(input);
+        assert(!mouse(RETRO_DEVICE_ID_MOUSE_X));
+        p.buttons = pad_button_touch_pad;
+        feed(p);
+        input_ps5.poll(input);
+        assert(mouse(RETRO_DEVICE_ID_MOUSE_LEFT));
+        assert(!ps5_joypad.button(0, RETRO_DEVICE_ID_JOYPAD_SELECT));
+        p.touches[0].id = 8;
+        p.touches[0].x = 10;
+        feed(p);
+        input_ps5.poll(input);
+        assert(!mouse(RETRO_DEVICE_ID_MOUSE_X) && mouse(RETRO_DEVICE_ID_MOUSE_LEFT));
+        p.touch_count = 0;
+        p.buttons = 0;
+        feed(p);
+        input_ps5.poll(input);
+        assert(!mouse(RETRO_DEVICE_ID_MOUSE_LEFT));
+        p.touch_count = 1;
+        p.touches[0].x = 800;
+        feed(p);
+        input_ps5.poll(input);
+        assert(!mouse(RETRO_DEVICE_ID_MOUSE_X));
+        for (int failure = 0; failure < 3; ++failure)
+        {
+            p.connected = 1;
+            p.buttons = pad_button_touch_pad;
+            feed(p);
+            input_ps5.poll(input);
+            assert(mouse(RETRO_DEVICE_ID_MOUSE_LEFT));
+            if (failure == 0)
+                p.connected = 0;
+            if (failure == 1)
+                p.buttons |= pad_button_intercepted;
+            if (failure == 2)
+            {
+                read_results[1] = -1;
+                ps5_joypad.poll();
+            }
+            else
+                feed(p);
+            input_ps5.poll(input);
+            assert(!mouse(RETRO_DEVICE_ID_MOUSE_LEFT));
+        }
+        test_runloop.flags &= ~RUNLOOP_FLAG_CORE_RUNNING;
+        p = sample();
+        p.buttons = pad_button_touch_pad;
+        feed(p);
+        input_ps5.poll(input);
+        assert(!mouse(RETRO_DEVICE_ID_MOUSE_LEFT));
+        assert(ps5_joypad.button(0, RETRO_DEVICE_ID_JOYPAD_SELECT));
+    }
+    test_runloop.system.info.library_name = "Other core";
+    test_runloop.flags |= RUNLOOP_FLAG_CORE_RUNNING;
+    feed(p);
+    assert(!mouse(RETRO_DEVICE_ID_MOUSE_LEFT));
+    assert(ps5_joypad.button(0, RETRO_DEVICE_ID_JOYPAD_SELECT));
+    test_runloop.flags = 0;
+    test_runloop.system.info.library_name = nullptr;
+
+    ps5_joypad.destroy();
+
     // STOP ends the run on the next frame, as --max-frames does, and only once.
     test_video.frame_count = 1234;
     actions[0] = ScriptAction{0.0, false, ScriptActionKind::stop, -1, {}, {}};
@@ -583,7 +674,8 @@ int main()
     assert(test_runloop.max_frames == 51); // repeated polls cannot postpone exit
     request_update_exit = false;
     std::puts("PS5 joypad: raw binding capture, axes, user mappings, rumble, poll retention, "
-              "lifecycle, four players by signed-in user and the script's STOP and OPTION PASS");
+              "lifecycle, touchpad stylus, four players by signed-in user and the script's STOP "
+              "and OPTION PASS");
 }
 
 namespace ps5_update
