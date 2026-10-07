@@ -204,6 +204,9 @@ Response Http::request(const char *method, const std::string &url, uint64_t limi
     if (!head)
         curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    /* An https request is never redirected to http: its address may carry an account. */
+    if (url.rfind("https://", 0) == 0)
+        curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR, "https");
     curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
     curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L);

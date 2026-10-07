@@ -4,6 +4,7 @@
 
 #include "ps5_library.h"
 #include "scraper_http.h"
+#include "scraper_json.h"
 
 #include <algorithm>
 #include <atomic>
@@ -24,6 +25,17 @@
 #include <sys/stat.h>
 #include <thread>
 #include <unistd.h>
+
+/* ScreenScraper's developer account, scrambled (tools/build-webui-daemon.sh writes the
+ * header under build/, from .env); a build without one offers no ScreenScraper. */
+#if defined(__has_include)
+#if __has_include("screenscraper_dev.h")
+#include "screenscraper_dev.h"
+#endif
+#endif
+#ifndef PS5_SS_DEV
+#define PS5_SS_DEV 0
+#endif
 
 namespace ps5_scraper
 {
@@ -238,7 +250,7 @@ std::string stored_media(const std::string &system, const std::string &key, cons
     if (folder == kind_folders.end())
         return "";
     const std::string base = library_root() + '/' + system + '/' + folder->second + '/' + key;
-    for (const char *ext : {".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".webm"})
+    for (const char *ext : {".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".webm", ".pdf"})
         if (is_file(base + ext))
             return base + ext;
     return "";
@@ -710,7 +722,7 @@ std::string media_destination(const Game &game, const std::string &kind, const c
     return library_root() + '/' + game.system + '/' + kind_folders.at(kind) + '/' + game.key + ext;
 }
 /* What is written of a game's metadata (fields edited by hand are kept). */
-void save_meta(const Item &item, const Options &options)
+void save_meta(const Item &item, const Options &options, const Fields &details = {})
 {
     const std::string path = meta_path(item.game.system, item.game.key);
     Fields fields = read_fields(path);
@@ -734,6 +746,9 @@ void save_meta(const Item &item, const Options &options)
         if (options.overwrite || fields[field].empty())
             fields[field] = value;
     };
+    /* A source's details (name, description, developer...) before the fallbacks. */
+    for (const auto &detail : details)
+        set(detail.first.c_str(), detail.second);
     set("name", clean_title(item.matched.empty() ? item.game.label : item.matched));
     set("source", options.source);
     set("source_name", item.matched);
@@ -754,9 +769,9 @@ void save_meta(const Item &item, const Options &options)
 /* One download into the store, PS5 mode: 1 when stored, 0 when the source has none,
  * -1 on failure (why set). Retried on network trouble. */
 int download(Http &http, const Game &game, const std::string &kind, const std::string &url,
-             Job &job, std::string &why)
+             Job &job, std::string &why, const std::string &ext = ".png")
 {
-    const std::string destination = media_destination(game, kind, ".png");
+    const std::string destination = media_destination(game, kind, ext.c_str());
     make_folders(destination.substr(0, destination.find_last_of('/')));
     for (int attempt = 0; attempt < 4 && !cancelling; ++attempt)
     {
@@ -817,6 +832,428 @@ int probe(Http &http, const std::string &url, std::string &why)
     }
     return -1;
 }
+/* ---- ScreenScraper ------------------------------------------------------------------ */
+std::string screenscraper_base = "https://api.screenscraper.fr/api2";
+const std::map<std::string, unsigned> screenscraper_systems = {
+#include "scraper_screenscraper_systems.inc"
+};
+/* Its media types for each of ours, in order of preference. */
+const std::map<std::string, std::vector<std::string>> screenscraper_types = {
+    {"cover", {"box-2D"}},        {"backcover", {"box-2D-back"}},
+    {"box3d", {"box-3D"}},        {"screenshot", {"ss"}},
+    {"title", {"sstitle"}},       {"logo", {"wheel-hd", "wheel"}},
+    {"physical", {"support-2D"}}, {"fanart", {"fanart"}},
+    {"manual", {"manuel"}},       {"video", {"video-normalized", "video"}}};
+
+/* The developer account: built in (scrambled), or, on the host only, the tests'. */
+bool dev_account(std::string &id, std::string &password)
+{
+#if PS5_SS_DEV
+    id.clear();
+    password.clear();
+    for (size_t i = 0; i < sizeof ps5_ss_devid; ++i)
+        id += char(ps5_ss_devid[i] ^ ps5_ss_key[i % sizeof ps5_ss_key]);
+    for (size_t i = 0; i < sizeof ps5_ss_devpassword; ++i)
+        password += char(ps5_ss_devpassword[i] ^ ps5_ss_key[i % sizeof ps5_ss_key]);
+    return true;
+#else
+#ifndef __PROSPERO__
+    const char *test_id = std::getenv("PS5_SCRAPER_TEST_DEVID");
+    const char *test_password = std::getenv("PS5_SCRAPER_TEST_DEVPASSWORD");
+    if (test_id && test_password)
+    {
+        id = test_id;
+        password = test_password;
+        return true;
+    }
+#endif
+    id.clear();
+    password.clear();
+    return false;
+#endif
+}
+
+bool screenscraper_ready()
+{
+    std::string id, password;
+    return dev_account(id, password);
+}
+
+/* The user's account, kept on the console only (never returned to a browser): its own
+ * folder, out of the title's 0777 repair (src/permissions_ps5.cpp), the file 0600. */
+std::string account_path()
+{
+    return root_path + "/config/private/screenscraper.cfg";
+}
+Fields account_fields()
+{
+    return read_fields(account_path());
+}
+bool save_account(const Fields &fields)
+{
+    make_folders(root_path + "/config/private");
+    chmod((root_path + "/config/private").c_str(), 0700);
+    if (!write_atomic(account_path(), fields_text(fields)))
+        return false;
+    chmod(account_path().c_str(), 0600);
+    return true;
+}
+std::mutex account_lock;
+/* How many games ScreenScraper lets this account ask about at once (its maxthreads). */
+std::atomic<unsigned> screenscraper_threads{1};
+
+/* An API URL: the developer account, the user's when signed in, and the parameters. */
+std::string screenscraper_url(const std::string &endpoint, const std::string &parameters,
+                              bool with_user = true)
+{
+    std::string id, password;
+    dev_account(id, password);
+    std::string url = screenscraper_base + '/' + endpoint + "?devid=" + url_encode(id) +
+                      "&devpassword=" + url_encode(password) + "&softname=PS5RetroArch&output=json";
+    if (with_user)
+    {
+        const Fields account = account_fields();
+        if (account.count("user") && account.count("password"))
+            url += "&ssid=" + url_encode(account.at("user")) +
+                   "&sspassword=" + url_encode(account.at("password"));
+    }
+    return url + parameters;
+}
+
+/* What the user's account allows and has used, from any answer that carries it. */
+void note_quota(const Json &user)
+{
+    if (user.kind != Json::object)
+        return;
+    std::lock_guard<std::mutex> guard(account_lock);
+    Fields account = account_fields();
+    if (!account.count("user"))
+        return;
+    for (const char *key : {"requeststoday", "maxrequestsperday", "maxthreads", "niveau"})
+        if (!user[key].str().empty())
+            account[key] = user[key].str();
+    if (std::atoi(account["maxthreads"].c_str()) > 0)
+        screenscraper_threads = unsigned(std::atoi(account["maxthreads"].c_str()));
+    save_account(account);
+}
+
+/* One API call: 1 with the answer, 0 when ScreenScraper has no such game, -1 when this
+ * game failed (why), -2 when the job must wait (quota, closed API, refused account). */
+int screenscraper_call(Http &http, const std::string &url, Json &out, std::string &why)
+{
+    for (int attempt = 0; attempt < 4 && !cancelling; ++attempt)
+    {
+        if (attempt)
+            std::this_thread::sleep_for(std::chrono::seconds(2 << attempt));
+        const Response response = http.get(url, 8 << 20, &cancelling);
+        switch (response.status)
+        {
+        case 200:
+            out = Json::parse(response.body);
+            if (out["response"].kind != Json::object)
+            {
+                if (response.body.find("Erreur") != std::string::npos)
+                    return 0; /* a French message instead of JSON: not found */
+                why = "ScreenScraper's answer could not be read.";
+                return -1;
+            }
+            note_quota(out["response"]["ssuser"]);
+            return 1;
+        case 404:
+            return 0;
+        case 400:
+            why = "ScreenScraper could not read the request.";
+            return -1;
+        case 401:
+            why = "ScreenScraper's API is closed to non-members right now. Try again later.";
+            return -2;
+        case 403:
+            why = "ScreenScraper refused this app's developer account.";
+            return -2;
+        case 423:
+            why = "ScreenScraper's API is closed right now (maintenance). Resume later.";
+            return -2;
+        case 426:
+            why = "ScreenScraper no longer accepts this version of the app. Update it.";
+            return -2;
+        case 429:
+            /* Too many requests a minute: wait, then again. */
+            std::this_thread::sleep_for(std::chrono::seconds(30));
+            continue;
+        case 430:
+            why = "Your ScreenScraper quota for today is used up. Resume the job tomorrow.";
+            return -2;
+        case 431:
+            why = "ScreenScraper stopped answering: too many unrecognised games today. Resume "
+                  "tomorrow.";
+            return -2;
+        default:
+            why = response.status
+                      ? "ScreenScraper answered " + std::to_string(response.status) + '.'
+                      : response.error;
+        }
+    }
+    if (why.empty())
+        why = "ScreenScraper did not answer.";
+    return cancelling ? -1 : -1;
+}
+
+/* A text in the region (names, dates) or language (descriptions) asked for, else the
+ * fallbacks, else the first. */
+std::string pick_text(const Json &list, const char *key, const std::vector<std::string> &order)
+{
+    if (list.kind != Json::array || list.items.empty())
+        return "";
+    for (const auto &want : order)
+        for (const auto &entry : list.items)
+            if (entry[key].str() == want)
+                return entry["text"].str();
+    return list.items.front()["text"].str();
+}
+std::vector<std::string> region_order(const std::string &region)
+{
+    std::vector<std::string> out = {region};
+    for (const char *other : {"wor", "us", "eu", "jp", "ss", "cus"})
+        if (region != other)
+            out.push_back(other);
+    return out;
+}
+/* "Name [12345]": a candidate's ScreenScraper game id, or "". */
+std::string candidate_id(const std::string &candidate)
+{
+    const size_t open = candidate.rfind(" [");
+    if (open == std::string::npos || candidate.back() != ']')
+        return "";
+    const std::string id = candidate.substr(open + 2, candidate.size() - open - 3);
+    return !id.empty() && id.find_first_not_of("0123456789") == std::string::npos ? id : "";
+}
+/* The game's file size, read where the file is (its /app0 path is the title's folder). */
+std::string file_size(const std::string &path)
+{
+    std::string real = path;
+    if (real.rfind("/app0/", 0) == 0 && root_path != "/app0")
+        real = root_path + real.substr(5);
+    const size_t hash = real.find('#');
+    if (hash != std::string::npos)
+        real.resize(hash);
+    struct stat st{};
+    return stat(real.c_str(), &st) == 0 && S_ISREG(st.st_mode) ? std::to_string(st.st_size) : "";
+}
+
+/* Games by title, as "Name [id]" candidates (1, 0 for none, or a call's failure). */
+int screenscraper_search(Http &http, unsigned system, const std::string &words,
+                         const std::string &region, std::vector<std::string> &out, std::string &why)
+{
+    Json results;
+    out.clear();
+    const int searched = screenscraper_call(
+        http,
+        screenscraper_url("jeuRecherche.php", "&systemeid=" + std::to_string(system) +
+                                                  "&recherche=" + url_encode(words)),
+        results, why);
+    if (searched <= 0)
+        return searched;
+    for (const auto &game : results["response"]["jeux"].items)
+    {
+        const std::string name = pick_text(game["noms"], "region", region_order(region));
+        if (!game["id"].str().empty() && !name.empty() && out.size() < 8)
+            out.push_back(name + " [" + game["id"].str() + ']');
+    }
+    return out.empty() ? 0 : 1;
+}
+
+void pause_job(Job &job, const std::string &why)
+{
+    std::lock_guard<std::mutex> guard(lock);
+    if (job.state != "running")
+        return;
+    job.state = "paused";
+    job.message = why;
+    save_job(job, true);
+}
+
+void process_screenscraper(Http &http, Job &job, unsigned index)
+{
+    Item item;
+    Options options;
+    {
+        std::lock_guard<std::mutex> guard(lock);
+        item = job.items[index];
+        options = job.options;
+    }
+    auto finish = [&](State state, const std::string &message)
+    {
+        std::lock_guard<std::mutex> guard(lock);
+        auto &target = job.items[index];
+        target.state = state;
+        target.message = message;
+        target.matched = item.matched;
+        target.candidates = item.candidates;
+        target.found = item.found;
+        target.missing = item.missing;
+        save_job(job, false);
+    };
+    const auto system = screenscraper_systems.find(item.game.system);
+    if (system == screenscraper_systems.end())
+        return finish(State::unmatched, "ScreenScraper has no system for these games.");
+    std::vector<std::string> needed;
+    for (const auto &kind : options.kinds)
+        if (options.overwrite || stored_media(item.game.system, item.game.key, kind).empty())
+            needed.push_back(kind);
+    const bool details_wanted =
+        options.overwrite ||
+        read_fields(meta_path(item.game.system, item.game.key))["description"].empty();
+    if (needed.empty() && !details_wanted)
+        return item.started ? finish(State::done, "")
+                            : finish(State::skipped, "Already in the library.");
+    {
+        std::lock_guard<std::mutex> guard(lock);
+        if (!job.items[index].started)
+        {
+            job.items[index].started = true;
+            save_job(job, true);
+        }
+    }
+    const std::string systemeid = "&systemeid=" + std::to_string(system->second);
+    std::string why;
+    Json answer;
+    int found;
+    const std::string chosen = candidate_id(item.matched);
+    if (!chosen.empty())
+        found = screenscraper_call(
+            http, screenscraper_url("jeuInfos.php", systemeid + "&gameid=" + chosen), answer, why);
+    else
+    {
+        /* Identified by the playlist's CRC (no disc is hashed again), the file's name and
+         * size; then, failing that, by a search of its title. */
+        std::string parameters =
+            systemeid + "&romtype=rom&romnom=" +
+            url_encode(item.game.path.substr(item.game.path.find_last_of('/') + 1));
+        if (item.game.crc32.size() >= 8 && item.game.crc32.find("00000000") != 0)
+            parameters += "&crc=" + item.game.crc32.substr(0, 8);
+        const std::string size = file_size(item.game.path);
+        if (!size.empty())
+            parameters += "&romtaille=" + size;
+        found =
+            screenscraper_call(http, screenscraper_url("jeuInfos.php", parameters), answer, why);
+        if (found == 0)
+        {
+            const int searched =
+                screenscraper_search(http, system->second, clean_title(item.game.label),
+                                     options.region, item.candidates, why);
+            if (searched == -2)
+            {
+                pause_job(job, why);
+                return finish(State::pending, "");
+            }
+            if (searched < 0)
+                return finish(State::failed, why);
+            const std::string exact = same_title(item.candidates, item.game.label, options.region);
+            if (exact.empty())
+                return finish(item.candidates.empty() ? State::unmatched : State::ambiguous,
+                              item.candidates.empty()
+                                  ? "Not found at ScreenScraper. Search by name or skip."
+                                  : "Choose the right game, search, or skip.");
+            found = screenscraper_call(
+                http,
+                screenscraper_url("jeuInfos.php", systemeid + "&gameid=" + candidate_id(exact)),
+                answer, why);
+            item.candidates.clear();
+        }
+    }
+    if (found == -2)
+    {
+        pause_job(job, why);
+        return finish(State::pending, "");
+    }
+    if (found < 0)
+        return finish(State::failed, why);
+    if (found == 0)
+        return finish(State::unmatched, "Not found at ScreenScraper. Search by name or skip.");
+    const Json &game = answer["response"]["jeu"];
+    const auto regions = region_order(options.region);
+    const std::vector<std::string> languages = {options.language, "en"};
+    const std::string name = pick_text(game["noms"], "region", regions);
+    item.matched = name + " [" + game["id"].str() + ']';
+    /* Its details, for every frontend's game lists (ES-DE's fields). */
+    Fields details;
+    details["name"] = name;
+    details["description"] = pick_text(game["synopsis"], "langue", languages);
+    details["developer"] = game["developpeur"]["text"].str();
+    details["publisher"] = game["editeur"]["text"].str();
+    details["players"] = game["joueurs"]["text"].str();
+    if (!game["note"]["text"].str().empty())
+    {
+        char rating[16];
+        std::snprintf(rating, sizeof rating, "%.2f",
+                      std::atof(game["note"]["text"].str().c_str()) / 20.0);
+        details["rating"] = rating;
+    }
+    details["released"] = pick_text(game["dates"], "region", regions);
+    if (!game["genres"].items.empty())
+        details["genre"] = pick_text(game["genres"].items.front()["noms"], "langue", languages);
+    details["source_id"] = game["id"].str();
+    /* Its media, each in the region asked for first. */
+    unsigned hits = 0, misses = 0;
+    for (const auto &kind : needed)
+    {
+        const Json *chosen_media = nullptr;
+        for (const auto &type : screenscraper_types.at(kind))
+        {
+            for (const auto &region : regions)
+            {
+                for (const auto &media : game["medias"].items)
+                    if (media["type"].str() == type &&
+                        (media["region"].str() == region || media["region"].str().empty()))
+                    {
+                        chosen_media = &media;
+                        break;
+                    }
+                if (chosen_media)
+                    break;
+            }
+            if (!chosen_media)
+                for (const auto &media : game["medias"].items)
+                    if (media["type"].str() == type)
+                    {
+                        chosen_media = &media;
+                        break;
+                    }
+            if (chosen_media)
+                break;
+        }
+        if (!chosen_media || (*chosen_media)["url"].str().empty())
+        {
+            ++misses;
+            continue;
+        }
+        const std::string format = (*chosen_media)["format"].str();
+        /* Its file type, as a short name of letters and digits ("png", "mp4"), else png. */
+        const bool plain = !format.empty() && format.size() <= 5 &&
+                           std::all_of(format.begin(), format.end(),
+                                       [](char c) { return std::isalnum((unsigned char)c) != 0; });
+        const std::string ext = '.' + (plain ? format : std::string("png"));
+        /* The address carries the developer account: it is used here, never handed out. */
+        std::string url = (*chosen_media)["url"].str();
+        /* Over https only, as the API itself (a sniffer on the network reads nothing). */
+        if (screenscraper_base.rfind("https://", 0) == 0 && url.rfind("http://", 0) == 0)
+            url.insert(4, "s");
+        const int result = download(http, item.game, kind, url, job, why, ext);
+        if (result < 0)
+            return finish(State::failed, why.empty() ? "The download failed." : why);
+        (result > 0 ? hits : misses)++;
+    }
+    if (cancelling)
+        return finish(State::pending, "");
+    item.found = hits;
+    item.missing = misses;
+    save_meta(item, options, details);
+    finish(misses ? State::partial : State::done,
+           misses ? "ScreenScraper has " + std::to_string(hits) + " of " +
+                        std::to_string(hits + misses) + " media."
+                  : "");
+}
+
 void process(Http &http, Job &job, unsigned index)
 {
     Item item;
@@ -826,6 +1263,8 @@ void process(Http &http, Job &job, unsigned index)
         item = job.items[index];
         options = job.options;
     }
+    if (options.source == "screenscraper")
+        return process_screenscraper(http, job, index);
     std::vector<std::string> kinds, unavailable;
     for (const auto &kind : options.kinds)
         (libretro_folders.count(kind) ? kinds : unavailable).push_back(kind);
@@ -983,6 +1422,12 @@ void worker()
                     auto &items = active->items;
                     auto next = std::find_if(items.begin(), items.end(), [](const Item &i)
                                              { return i.state == State::pending; });
+                    /* ScreenScraper: no more games at once than the account may ask about. */
+                    if (next != items.end() && active->options.source == "screenscraper" &&
+                        unsigned(std::count_if(items.begin(), items.end(), [](const Item &i)
+                                               { return i.state == State::working; })) >=
+                            std::max(1u, screenscraper_threads.load()))
+                        next = items.end();
                     if (next != items.end())
                     {
                         next->state = State::working;
@@ -1063,6 +1508,10 @@ void configure(const std::string &root, const std::string &base)
     root_path = root;
     if (!base.empty())
         libretro_base = base;
+    if (const char *ss = std::getenv("PS5_SCRAPER_SCREENSCRAPER_BASE")) /* the tests' */
+        screenscraper_base = ss;
+    if (std::atoi(account_fields()["maxthreads"].c_str()) > 0)
+        screenscraper_threads = unsigned(std::atoi(account_fields()["maxthreads"].c_str()));
     /* HTTPS is verified against the certificates the title ships (the daemon's curl). */
     if (is_file(root + "/webui/ca-bundle.crt"))
         set_certificates(root + "/webui/ca-bundle.crt");
@@ -1176,10 +1625,10 @@ std::string settings_json()
          {"cover", "screenshot", "title", "logo"}},
         {"screenscraper",
          "ScreenScraper",
-         "Every media type and the games' details, found by checksum or name. Needs a free "
-         "screenscraper.fr account. Coming.",
+         "Every media type and the games' details (description, developer, release date, "
+         "rating), found by checksum or name. Sign in with a free screenscraper.fr account.",
          true,
-         false,
+         screenscraper_ready(),
          {"cover", "backcover", "box3d", "screenshot", "title", "logo", "physical", "fanart",
           "manual", "video"}},
         {"launchbox",
@@ -1198,18 +1647,105 @@ std::string settings_json()
           "manual", "video"}}};
     std::string source_list;
     for (const auto &source : sources)
-        source_list += std::string(source_list.empty() ? "" : ",") + "{\"id\":" + quote(source.id) +
-                       ",\"name\":" + quote(source.name) +
-                       ",\"description\":" + quote(source.description) +
-                       ",\"account\":" + (source.account ? "true" : "false") +
-                       ",\"available\":" + (source.available ? "true" : "false") +
-                       ",\"kinds\":" + list(source.kinds) + '}';
+        source_list +=
+            std::string(source_list.empty() ? "" : ",") + "{\"id\":" + quote(source.id) +
+            ",\"name\":" + quote(source.name) + ",\"description\":" + quote(source.description) +
+            ",\"account\":" + (source.account ? "true" : "false") +
+            ",\"available\":" + (source.available ? "true" : "false") + ",\"signed_in\":" +
+            (std::string(source.id) == "screenscraper" && account_fields().count("password")
+                 ? "true"
+                 : "false") +
+            ",\"kinds\":" + list(source.kinds) + '}';
     return "{\"mode\":" + quote(get("mode", "")) +
            ",\"source\":" + quote(get("source", "libretro")) +
            ",\"kinds\":" + list(kinds_from(get("kinds", "cover,screenshot,title"))) +
            ",\"region\":" + quote(get("region", "us")) +
            ",\"language\":" + quote(get("language", "en")) + ",\"catalog\":[" + catalog +
            "],\"sources\":[" + source_list + "]}";
+}
+
+std::string account_json(const std::string &source)
+{
+    if (source != "screenscraper")
+        return "{\"source\":" + quote(source) + ",\"available\":false,\"signed_in\":false}";
+    std::lock_guard<std::mutex> guard(account_lock);
+    Fields account = account_fields();
+    const bool signed_in = account.count("user") && account.count("password");
+    /* The password never leaves the console: only the name and the quotas. */
+    std::string out = "{\"source\":\"screenscraper\",\"available\":" +
+                      std::string(screenscraper_ready() ? "true" : "false") +
+                      ",\"signed_in\":" + (signed_in ? "true" : "false");
+    if (signed_in)
+        out += ",\"user\":" + quote(account["user"]) + ",\"level\":" + quote(account["niveau"]) +
+               ",\"requests_today\":" + quote(account["requeststoday"]) +
+               ",\"max_requests\":" + quote(account["maxrequestsperday"]) +
+               ",\"max_threads\":" + quote(account["maxthreads"]);
+    return out + '}';
+}
+
+bool sign_in(const std::string &source, const std::string &user, const std::string &password,
+             std::string &why)
+{
+    if (source != "screenscraper")
+    {
+        why = "This source has no sign-in.";
+        return false;
+    }
+    if (!screenscraper_ready())
+    {
+        why = "This build has no ScreenScraper developer account.";
+        return false;
+    }
+    if (user.empty() || password.empty())
+    {
+        why = "Enter your ScreenScraper name and password.";
+        return false;
+    }
+    /* The account is checked with ScreenScraper before it is kept. */
+    Http http("PS5-RetroArch-Scraper/1");
+    const Response response =
+        http.get(screenscraper_url(
+                     "ssuserInfos.php",
+                     "&ssid=" + url_encode(user) + "&sspassword=" + url_encode(password), false),
+                 1 << 20, nullptr);
+    const Json answer = response.status == 200 ? Json::parse(response.body) : Json();
+    const Json &ssuser = answer["response"]["ssuser"];
+    if (ssuser.kind != Json::object || ssuser["id"].str().empty())
+    {
+        if (response.status == 0)
+            why = "ScreenScraper could not be reached: " + response.error;
+        else if (response.body.find("utilisateur") != std::string::npos)
+            why = "ScreenScraper did not accept this name and password.";
+        else if (response.body.find("veloppeur") != std::string::npos)
+            why = "ScreenScraper refused this app's developer account.";
+        else if (response.status == 423 || response.status == 401)
+            why = "ScreenScraper's API is closed right now. Try again later.";
+        else
+            why = "ScreenScraper did not accept this name and password.";
+        return false;
+    }
+    std::lock_guard<std::mutex> guard(account_lock);
+    Fields account;
+    account["user"] = ssuser["id"].str();
+    account["password"] = password;
+    for (const char *key : {"requeststoday", "maxrequestsperday", "maxthreads", "niveau"})
+        account[key] = ssuser[key].str();
+    if (std::atoi(account["maxthreads"].c_str()) > 0)
+        screenscraper_threads = unsigned(std::atoi(account["maxthreads"].c_str()));
+    if (!save_account(account))
+    {
+        why = "The account could not be saved on the console.";
+        return false;
+    }
+    return true;
+}
+
+bool sign_out(const std::string &source)
+{
+    if (source != "screenscraper")
+        return false;
+    std::lock_guard<std::mutex> guard(account_lock);
+    return unlink(account_path().c_str()) == 0 || errno == ENOENT;
 }
 
 bool save_settings(const Options &options)
@@ -1240,7 +1776,28 @@ bool start(const Options &requested, const std::vector<Selection> &selection, st
         why = "Choose where to download: this PC or the PS5.";
         return false;
     }
-    if (options.source != "libretro")
+    if (options.source == "screenscraper")
+    {
+        if (!screenscraper_ready())
+        {
+            why = "This build has no ScreenScraper developer account.";
+            return false;
+        }
+        if (!account_fields().count("password"))
+        {
+            why = "Sign in to ScreenScraper first.";
+            return false;
+        }
+        /* Its media addresses carry this app's developer account, which never leaves the
+         * console: no helper on a PC gets them. */
+        if (options.mode == "pc")
+        {
+            why = "ScreenScraper downloads run on the PS5 only: its media links carry this "
+                  "app's private account details, which never leave the console. Choose PS5.";
+            return false;
+        }
+    }
+    else if (options.source != "libretro")
     {
         why = "This source is not available yet.";
         return false;
@@ -1408,7 +1965,9 @@ bool resolve(const std::string &id, unsigned index, const std::string &action,
         }
         if (action == "choose")
         {
-            if (value.empty() || value.find('/') != std::string::npos)
+            if (value.empty() ||
+                (job->options.source == "libretro" && value.find('/') != std::string::npos) ||
+                (job->options.source == "screenscraper" && candidate_id(value).empty()))
             {
                 why = "Choose one of the names offered.";
                 return false;
@@ -1439,7 +1998,21 @@ bool resolve(const std::string &id, unsigned index, const std::string &action,
         database = job->items[index].game.database;
         region = job->options.region;
     }
-    const auto found = closest(libretro_index(http, database), value, region);
+    std::vector<std::string> found;
+    if (job->options.source == "screenscraper")
+    {
+        std::string system_id;
+        {
+            std::lock_guard<std::mutex> guard(lock);
+            system_id = job->items[index].game.system;
+        }
+        const auto system = screenscraper_systems.find(system_id);
+        if (system != screenscraper_systems.end() &&
+            screenscraper_search(http, system->second, value, region, found, why) < 0)
+            return false;
+    }
+    else
+        found = closest(libretro_index(http, database), value, region);
     std::lock_guard<std::mutex> guard(lock);
     auto &item = job->items[index];
     item.candidates = found;

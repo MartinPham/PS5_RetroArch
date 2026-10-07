@@ -76,6 +76,24 @@ done < <(grep -rlnE '(PS5_HOST|PS5_FTP_PASSWORD|KLOG_PORT|PS5_CTL_PORT)[[:space:
             tools docs patches README.md AGENTS.md Makefile 2>/dev/null | sort)
 (( leaks == 0 )) || failures=$((failures + leaks))
 
+echo "==> [lint-shell] the ScreenScraper developer account is in no tracked or shipped file"
+# The account lives in .env alone (git-ignored); local builds carry it scrambled
+# (tools/build-webui-daemon.sh), release builds not at all. Its values are searched
+# for, never printed: in every tracked file, and in the shipped tree under dist/.
+env_file=${LINT_ENV:-.env} # LINT_ENV: a fake one, to test this check
+if [[ -f $env_file ]]; then
+    while IFS= read -r key; do
+        value=$(sed -n "s/^${key}=//p" "$env_file" | tail -1 | tr -d '"')
+        [[ -n $value ]] || continue
+        while IFS= read -r hit; do
+            printf '  FAIL %s holds %s\n' "$hit" "$key" >&2
+            failures=$((failures + 1))
+        # Each search may find nothing (status 1): under set -e it must not end the rest.
+        done < <({ git ls-files -z | xargs -0 grep -lF -- "$value" 2>/dev/null || true
+                   if [[ -d dist ]]; then grep -rlF -- "$value" dist 2>/dev/null || true; fi; } | sort -u)
+    done < <(printf '%s\n' PS5_SCREENSCRAPER_DEVID PS5_SCREENSCRAPER_DEVPASSWORD)
+fi
+
 if (( failures > 0 )); then
     printf 'lint-shell: %s problem(s)\n' "$failures" >&2
     exit 1

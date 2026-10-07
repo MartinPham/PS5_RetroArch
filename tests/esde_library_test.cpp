@@ -103,7 +103,8 @@ int main(int argc, char **argv)
         media + "/snes/metadata/Donkey Kong 2 (USA).meta",
         "description = \"Scraped \\\"text\\\"\\nline two\"\nname = \"Donkey Kong Country 2\"\n");
     write_text(media + "/snes/metadata/Mario & Luigi.meta",
-               "developer = \"AlphaDream\"\nname = \"Mario & Luigi RPG\"\n");
+               "developer = \"AlphaDream\"\nname = \"Mario & Luigi RPG\"\nrating = \"0.85\"\n"
+               "released = \"2003-11-17\"\n");
     const struct ps5_esde_library_paths paths = {playlists.c_str(), info.c_str(), cores.c_str(),
                                                  reference.c_str(), data.c_str(), nullptr,
                                                  media.c_str()};
@@ -147,6 +148,8 @@ int main(int argc, char **argv)
         if (path == "./Hacks/Mario & Luigi.sfc") /* RetroArch's favourite */
             added = std::string(game.child_value("name")) == "Mario & Luigi RPG" &&
                     std::string(game.child_value("developer")) == "AlphaDream" &&
+                    std::string(game.child_value("releasedate")) == "20031117T000000" &&
+                    std::string(game.child_value("rating")) == "0.85" &&
                     std::string(game.child_value("favorite")) == "true" &&
                     !game.child("lastplayed");
         assert(path != "./Gone (USA).zip");

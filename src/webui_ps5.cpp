@@ -1243,6 +1243,26 @@ MHD_Result scraper_route(MHD_Connection *c, const std::string &url, const std::s
         return ps5_scraper::save_settings(options())
                    ? respond(c, 200, ps5_scraper::settings_json())
                    : error(c, 500, "The settings could not be saved.");
+    // A source's sign-in: the name and password come in the body (never the URL, so no
+    // log or history holds them); the answers never carry the password.
+    if (method == "GET" && url == "/api/scraper/account")
+        return respond(c, 200, ps5_scraper::account_json(query(c, "source", "screenscraper")));
+    if (method == "POST" && url == "/api/scraper/account")
+    {
+        const size_t line = r.body.find('\n');
+        const std::string user = r.body.substr(0, line);
+        const std::string password = line == std::string::npos ? "" : r.body.substr(line + 1);
+        const std::string source = query(c, "source", "screenscraper");
+        if (!ps5_scraper::sign_in(source, user, password, why))
+            return error(c, 403, why.c_str());
+        return respond(c, 200, ps5_scraper::account_json(source));
+    }
+    if (method == "DELETE" && url == "/api/scraper/account")
+    {
+        const std::string source = query(c, "source", "screenscraper");
+        ps5_scraper::sign_out(source);
+        return respond(c, 200, ps5_scraper::account_json(source));
+    }
     if (method == "GET" && url == "/api/scraper/job")
         return respond(c, 200, ps5_scraper::job_json(arg(c, "id")));
     if (method == "POST" && url == "/api/scraper/start")

@@ -231,9 +231,24 @@ void add_meta(pugi::xml_node node, const char *media, const char *system,
         const auto value = meta.find(field[0]);
         if (value == meta.end() || value->second.empty())
             continue;
+        std::string text = value->second;
+        /* The store keeps a date as its source gives it (1994-04-19, 1994-04, 1994); ES-DE
+         * reads 19940419T000000. A rating is 0 to 1 in both. */
+        if (std::strcmp(field[1], "releasedate") == 0)
+        {
+            std::string digits;
+            for (char c : text)
+                if (c >= '0' && c <= '9')
+                    digits += c;
+            if (digits.size() != 4 && digits.size() != 6 && digits.size() != 8)
+                continue;
+            while (digits.size() < 8)
+                digits += "01";
+            text = digits + "T000000";
+        }
         const std::string current = node.child_value(field[1]);
         if (current.empty() || (std::strcmp(field[1], "name") == 0 && current == game.label))
-            set_child(node, field[1], value->second);
+            set_child(node, field[1], text);
     }
 }
 

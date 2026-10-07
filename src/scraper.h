@@ -17,9 +17,11 @@
  * WebUI's games view reads them too; a future frontend calls ps5_library_media.
  *
  * Sources: libretro's thumbnail server (no account: covers, screenshots, title
- * screens). ScreenScraper is to be added as a second source (it needs developer
- * credentials); the job model already has what it needs (metadata, logos, videos,
- * ambiguous matches, quotas).
+ * screens) and ScreenScraper (every media type and the games' details; the user's
+ * account, and this app's developer account, built in scrambled by
+ * tools/build-webui-daemon.sh and sent over https only; never handed to a browser or a
+ * PC helper, so ScreenScraper jobs run in PS5 mode). A ScreenScraper job keeps to the
+ * account's thread count and pauses on a quota or a closed API, to be resumed.
  *
  * Jobs run in one of two ways, chosen by the user and remembered on the console:
  *   - "ps5": the console downloads, on worker threads of the server process, so a
@@ -65,6 +67,14 @@ std::string library_json();
 /* The remembered choices (method, media, region), as JSON; and saving them. */
 std::string settings_json();
 bool save_settings(const Options &options);
+
+/* A source's sign-in (ScreenScraper): the account as JSON (the name and the quotas, never
+ * the password); signing in checks the name and password with the source before they
+ * are kept, on the console only (config/private, 0600); signing out forgets them. */
+std::string account_json(const std::string &source);
+bool sign_in(const std::string &source, const std::string &user, const std::string &password,
+             std::string &why);
+bool sign_out(const std::string &source);
 /* A stored media file's path for the WebUI, or "" (kind: cover, screenshot...). */
 std::string media_file(const std::string &system, const std::string &game, const std::string &kind);
 

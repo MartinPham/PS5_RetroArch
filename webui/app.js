@@ -854,7 +854,8 @@ function svgIcon(path) {
 }
 function drawMethod() {
   const method = $('input[name="scrape-method"]:checked')?.value || '';
-  $('#scrape-method-hint').textContent = METHOD_HINTS[method];
+  $('#scrape-method-hint').textContent = METHOD_HINTS[method] + (scraperSettings && chosenSource().id === 'screenscraper'
+    ? ' ScreenScraper downloads run on the PS5 only: its links carry private account details that never leave the console.' : '');
   drawSummary();
 }
 function drawSources() {
@@ -865,13 +866,92 @@ function drawSources() {
     chip.append(element('span', source.name));
     chip.setAttribute('role', 'radio'); chip.setAttribute('aria-checked', source.id === scrapeSource);
     if (!source.available) { chip.disabled = true; chip.append(element('em', 'Coming', 'soon-tag')); }
-    chip.addEventListener('click', () => { scrapeSource = source.id; drawSources(); drawKinds(); });
+    else if (source.account && source.signed_in) { chip.append(checkNode()); chip.title = `${source.name}: signed in`; }
+    else if (source.account) { chip.append(element('em', 'Sign in', 'lock-tag')); chip.title = `${source.name}: sign in to use it`; }
+    // A source with an account asks for it first; once signed in, the chip just picks it.
+    chip.addEventListener('click', () => {
+      if (source.account && !source.signed_in) { openSignIn(source); return; }
+      scrapeSource = source.id; drawSources(); drawKinds();
+    });
     chip.addEventListener('mouseenter', () => { $('#scrape-source-hint').textContent = source.description; });
     chip.addEventListener('focus', () => { $('#scrape-source-hint').textContent = source.description; });
     box.append(chip);
   }
-  $('#scrape-source-hint').textContent = chosenSource().description;
+  const chosen = chosenSource();
+  $('#scrape-source-hint').textContent = chosen.description;
+  $('#scrape-account').hidden = !(chosen.account && chosen.signed_in);
+  if (chosen.account && chosen.signed_in) $('#scrape-account-text').textContent = `Signed in to ${chosen.name}`;
+  $('#scrape-language-pick').hidden = chosen.id !== 'screenscraper';
+  // ScreenScraper's media links carry the app's private account: downloaded on the PS5 only.
+  const pc = $('input[name="scrape-method"][value="pc"]'), pcOnly = chosen.id === 'screenscraper';
+  pc.disabled = pcOnly; pc.closest('label').title = pcOnly ? 'ScreenScraper downloads run on the PS5 only.' : '';
+  if (pcOnly && pc.checked) { pc.checked = false; $('input[name="scrape-method"][value="ps5"]').checked = true; }
+  drawMethod();
 }
+function checkNode() {
+  const badge = element('span', undefined, 'signed-check'); badge.setAttribute('role', 'img'); badge.setAttribute('aria-label', 'Signed in');
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true');
+  const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); p.setAttribute('d', 'M5 12.5l4.5 4.5L19 7.5'); svg.append(p); badge.append(svg); return badge;
+}
+
+// Sign-in: the name and password go to the console in a request body (never in an
+// address), are checked with the source there and kept there; answers carry no password.
+let signInSource = null;
+function showAccount(account) {
+  const signed = account.signed_in;
+  $('#sign-in-fields').hidden = signed; $('#sign-in-account').hidden = !signed;
+  $('#sign-in-forget').hidden = !signed; $('#sign-in-change').hidden = !signed;
+  $('#sign-in-submit').textContent = signed ? 'Done' : 'Sign in';
+  $('#sign-in-title').textContent = signed ? `Your ${signInSource.name} account` : `Sign in to ${signInSource.name}`;
+  if (!signed) return;
+  $('#sign-in-who').replaceChildren(checkNode(), element('span', `Signed in as ${account.user}`));
+  const rows = [['Downloads today', account.max_requests ? `${Number(account.requests_today || 0).toLocaleString()} of ${Number(account.max_requests).toLocaleString()}` : '—'],
+    ['Games at once', account.max_threads || '1'], ['Level', account.level || '—']];
+  $('#sign-in-quota').replaceChildren(...rows.flatMap(([k, v]) => [element('dt', k), element('dd', String(v))]));
+}
+async function openSignIn(source) {
+  signInSource = source;
+  const dialog = $('#sign-in'), logo = iconNode('source-' + source.id);
+  $('#sign-in-logo').replaceChildren(...(logo ? [logo] : []));
+  $('#sign-in-error').textContent = ''; $('#sign-in-password').value = '';
+  showAccount({ signed_in: source.signed_in });
+  dialog.showModal();
+  if (source.signed_in) {
+    try { showAccount(await api('/api/scraper/account?source=' + encodeURIComponent(source.id))); }
+    catch (error) { $('#sign-in-error').textContent = error.message; }
+  } else $('#sign-in-user').focus();
+}
+function signedIn(state) {
+  const source = scraperSettings.sources.find(s => s.id === signInSource.id);
+  source.signed_in = signInSource.signed_in = state;
+  if (state) scrapeSource = source.id; else if (scrapeSource === source.id) scrapeSource = 'libretro';
+  drawSources(); drawKinds();
+}
+$('#sign-in-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const dialog = $('#sign-in');
+  if (!$('#sign-in-account').hidden) { dialog.close(); return; }
+  const user = $('#sign-in-user').value.trim(), password = $('#sign-in-password').value;
+  if (!user || !password) { $('#sign-in-error').textContent = 'Enter your name and password.'; return; }
+  dialog.setAttribute('aria-busy', 'true'); $('#sign-in-error').textContent = ''; $('#sign-in-submit').textContent = 'Checking…';
+  try {
+    const account = await api('/api/scraper/account?source=' + encodeURIComponent(signInSource.id), { method: 'POST', body: `${user}\n${password}`, headers: { 'Content-Type': 'text/plain' }, signal: AbortSignal.timeout(45000) });
+    $('#sign-in-password').value = '';
+    showAccount(account); signedIn(true);
+    announce(`Signed in to ${signInSource.name} as ${account.user}.`);
+  } catch (error) { $('#sign-in-error').textContent = error.message; $('#sign-in-submit').textContent = 'Sign in'; }
+  finally { dialog.removeAttribute('aria-busy'); }
+});
+$('#sign-in-cancel').addEventListener('click', () => $('#sign-in').close());
+$('#sign-in-change').addEventListener('click', () => { showAccount({ signed_in: false }); $('#sign-in-user').focus(); });
+$('#sign-in-forget').addEventListener('click', async () => {
+  try {
+    await api('/api/scraper/account?source=' + encodeURIComponent(signInSource.id), { method: 'DELETE' });
+    $('#sign-in').close(); signedIn(false); announce(`Signed out of ${signInSource.name}. Its password is gone from the console.`);
+  } catch (error) { $('#sign-in-error').textContent = error.message; }
+});
+$('#sign-in').addEventListener('close', () => { $('#sign-in-password').value = ''; });
+$('#scrape-account-manage').addEventListener('click', () => openSignIn(chosenSource()));
 function drawKinds() {
   const source = chosenSource(), box = $('#scrape-kinds'); box.replaceChildren();
   for (const kind of scraperSettings.catalog) {
@@ -918,7 +998,8 @@ async function openMedia() {
     scraperSettings = await api('/api/scraper/settings');
   } catch (error) { announce(error.message, true); return; }
   for (const radio of $$('input[name="scrape-method"]')) radio.checked = radio.value === scraperSettings.mode;
-  scrapeSource = scraperSettings.sources.some(s => s.id === scraperSettings.source && s.available) ? scraperSettings.source : 'libretro';
+  scrapeSource = scraperSettings.sources.some(s => s.id === scraperSettings.source && s.available && (!s.account || s.signed_in)) ? scraperSettings.source : 'libretro';
+  $('#scrape-language').value = scraperSettings.language || 'en';
   scrapeKinds = new Set(scraperSettings.kinds);
   for (const radio of $$('input[name="scrape-region"]')) radio.checked = radio.value === scraperSettings.region;
   const select = $('#scrape-system'), chosen = select.value || $('#games-system').value;
@@ -940,7 +1021,7 @@ $('#scrape-start').addEventListener('click', async () => {
   const lines = scope === 'selected' ? [...selectedGames].map(([path, system]) => `${system}\t${path}`)
     : library.systems.filter(s => scope === 'all' || s.id === $('#scrape-system').value).map(s => `${s.id}\t`);
   if (!kinds.length || !lines.length) { drawSummary(); return; }
-  const query = new URLSearchParams({ mode: method, source: scrapeSource, kinds: kinds.join(','), region: $('input[name="scrape-region"]:checked')?.value || 'us', language: scraperSettings.language || 'en', overwrite: $('#scrape-overwrite').checked ? '1' : '0' });
+  const query = new URLSearchParams({ mode: method, source: scrapeSource, kinds: kinds.join(','), region: $('input[name="scrape-region"]:checked')?.value || 'us', language: $('#scrape-language').value || scraperSettings.language || 'en', overwrite: $('#scrape-overwrite').checked ? '1' : '0' });
   $('#scrape-start').disabled = true; $('#scrape-result').textContent = '';
   try {
     await api('/api/scraper/settings?' + query, { method: 'POST' });
@@ -965,10 +1046,11 @@ function drawJob(job) {
   panel.hidden = false; jobShown = job.id;
   const total = job.total, running = job.state === 'running';
   const identified = total - count(job, 'pending', 'working');
-  const stateText = { running: 'Running', cancelled: 'Cancelled', done: 'Finished', interrupted: 'Interrupted' }[job.state] || job.state;
+  const stateText = { running: 'Running', cancelled: 'Cancelled', done: 'Finished', interrupted: 'Interrupted', paused: 'Paused' }[job.state] || job.state;
   panel.dataset.state = job.state;
   $('#job-title').textContent = running ? 'Downloading media…' : `Download ${stateText.toLowerCase()}`;
-  $('#job-summary').textContent = `${METHOD_NAMES[job.mode]} · ${job.source === 'libretro' ? 'libretro thumbnails' : job.source} · ${total.toLocaleString()} games`;
+  const sourceName = scraperSettings?.sources.find(s => s.id === job.source)?.name || job.source;
+  $('#job-summary').textContent = `${METHOD_NAMES[job.mode]} · ${sourceName} · ${total.toLocaleString()} games` + (job.message ? ` · ${job.message}` : '');
   countTo($('#stat-done'), count(job, 'done')); countTo($('#stat-partial'), count(job, 'partial'));
   countTo($('#stat-kept'), count(job, 'skipped')); countTo($('#stat-attention'), count(job, 'unmatched', 'ambiguous', 'failed'));
   countTo($('#stat-files'), job.mode === 'pc' ? job.transferred.files : job.downloaded.files);

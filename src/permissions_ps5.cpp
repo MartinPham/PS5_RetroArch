@@ -92,6 +92,9 @@ void repair(const char *path, int depth, RepairCounts &counts)
         const int length = std::snprintf(child, sizeof(child), "%s/%s", path, entry->d_name);
         if (length < 0 || static_cast<std::size_t>(length) >= sizeof(child))
             continue;
+        /* The scraper's sign-ins stay private to the title (0700/0600, src/scraper.cpp). */
+        if (std::strcmp(child, "/app0/config/private") == 0)
+            continue;
         struct stat status{};
         if (stat(child, &status) != 0)
             continue;
