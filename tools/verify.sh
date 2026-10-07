@@ -40,7 +40,9 @@ require() {
 gate_format() {
     require tools/lint-shell.sh || return 1
     require tools/lint-format.sh || return 1
-    bash tools/lint-shell.sh
+    # Each command's own result: a gate runs inside a condition, where bash ignores
+    # set -e, and only the last command counted (a failing test passed integration).
+    bash tools/lint-shell.sh || return 1
     bash tools/lint-format.sh
 }
 
@@ -63,8 +65,8 @@ gate_build() {
 gate_integration() {
     require Makefile || return 1
     require tools/check-manifest.sh || return 1
-    make test-integration
-    bash tools/check-manifest.sh
+    make test-integration || return 1
+    bash tools/check-manifest.sh || return 1
     python3 tools/check-notices.py
 }
 
