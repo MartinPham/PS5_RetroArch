@@ -230,6 +230,12 @@ class Scraper(unittest.TestCase):
         self.assertEqual(len(self.media_gets()), before + 3)
         self.assertFalse(list((self.root / 'library').rglob('.partial-*')))
 
+    def test_libretro_has_no_details(self):
+        status, body = self.request('POST', '/api/scraper/start?mode=ps5&source=libretro&kinds=&details=1', b'snes\t')
+        self.assertEqual((status, json.loads(body)['error']), (409, 'libretro has no game details: choose ScreenScraper for them.'))
+        settings = json.loads(self.request('GET', '/api/scraper/settings')[1])
+        self.assertEqual({s['id']: s['details'] for s in settings['sources']}['libretro'], False)
+
     def test_cancel_resume_and_restart_do_not_repeat_work(self):
         games = {f'Filler Game {i:02} (USA)': f'/app0/content/SNES/Filler Game {i:02} (USA).sfc' for i in range(24)}
         self.games = games

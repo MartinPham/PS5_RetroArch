@@ -1236,6 +1236,7 @@ MHD_Result scraper_route(MHD_Connection *c, const std::string &url, const std::s
         o.region = query(c, "region", "us");
         o.language = query(c, "language", "en");
         o.overwrite = std::strcmp(arg(c, "overwrite"), "1") == 0;
+        o.details = std::strcmp(arg(c, "details"), "1") == 0;
         const std::string kinds = arg(c, "kinds");
         size_t start = 0;
         while (start < kinds.size())

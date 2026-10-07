@@ -52,6 +52,7 @@ struct Options
     std::string region = "us";      /* us, eu, jp, wor */
     std::string language = "en";
     bool overwrite = false;
+    bool details = false; /* the games' details too (description, developer...) */
 };
 
 /* Where the title is (its real folder, or /app0 in eboot.bin), and the sources' base

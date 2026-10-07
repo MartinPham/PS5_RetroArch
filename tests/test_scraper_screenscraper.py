@@ -197,8 +197,8 @@ class ScreenScraper(unittest.TestCase):
         settings = json.loads(self.request('GET', '/api/scraper/settings')[1])
         return next(s for s in settings['sources'] if s['id'] == 'screenscraper')
 
-    def start(self, mode='ps5', kinds='cover,screenshot,video', language='fr'):
-        query = f'mode={mode}&source=screenscraper&kinds={kinds}&region=us&language={language}&overwrite=0'
+    def start(self, mode='ps5', kinds='cover,screenshot,video', language='fr', details=True, overwrite=False):
+        query = f'mode={mode}&source=screenscraper&kinds={kinds}&region=us&language={language}&overwrite={int(overwrite)}&details={int(details)}'
         status, body = self.request('POST', f'/api/scraper/start?{query}', b'snes\t')
         self.assertEqual(status, 201, body)
         return json.loads(body)['job']['id']
@@ -289,12 +289,13 @@ class ScreenScraper(unittest.TestCase):
                 self.assertNotIn(PASSWORD.encode(), path.read_bytes(), str(path))
         # The recap: what each game got, per kind, and what is missing.
         recap = json.loads(self.request('GET', f'/api/scraper/recap?id={job_id}')[1])['recap']
-        self.assertEqual(recap['totals'], {k: {'got': 3, 'had': 0, 'missed': 2} for k in ('cover', 'screenshot', 'video')})
+        self.assertEqual(recap['totals'], {k: {'got': 3, 'had': 0, 'missed': 2} for k in ('cover', 'screenshot', 'video', 'details')})
+        self.assertEqual(recap['kinds'], ['cover', 'screenshot', 'video', 'details'])
         games = {g['label']: g for g in recap['systems'][0]['games']}
-        self.assertEqual(games['Super Metroid (Japan, USA) (En,Ja)']['got'], ['cover', 'screenshot', 'video'])
+        self.assertEqual(games['Super Metroid (Japan, USA) (En,Ja)']['got'], ['cover', 'screenshot', 'video', 'details'])
         self.assertEqual(games['Super Metroid (Japan, USA) (En,Ja)']['matched'], 'Super Metroid')
         self.assertEqual((games['Totally Unknown Homebrew']['state'], games['Totally Unknown Homebrew']['missed']),
-                         ('unmatched', ['cover', 'screenshot', 'video']))
+                         ('unmatched', ['cover', 'screenshot', 'video', 'details']))
         # The ambiguous game: two titles offered as "Name [id]", one chosen.
         ambiguous = next(p for p in job['problems'] if p['state'] == 'ambiguous')
         self.assertEqual(sorted(ambiguous['candidates']), ['Chrono Trigger [1002]', 'Chrono Trigger: Jet Bike Special [1003]'])
@@ -320,6 +321,37 @@ class ScreenScraper(unittest.TestCase):
         totals = json.loads(self.request('GET', f'/api/scraper/recap?id={second["id"]}')[1])['recap']['totals']
         self.assertEqual(totals['cover'], {'got': 3, 'had': 0, 'missed': 2})
         self.assertEqual(totals['screenshot'], {'got': 0, 'had': 4, 'missed': 1})
+
+    def test_details_alone_or_media_alone(self):
+        self.assertEqual(self.sign_in()[0], 200)
+        library = self.root / 'library/snes'
+        metroid = self.key('Super Metroid (Japan, USA) (En,Ja)')
+        # Media without details: the pictures, a name, no description.
+        self.wait(self.start(kinds='cover', details=False))
+        self.assertTrue((library / 'covers' / f'{metroid}.png').exists())
+        meta = (library / 'metadata' / f'{metroid}.meta').read_text()
+        self.assertIn('name = "Super Metroid"', meta)
+        self.assertNotIn('description', meta)
+        # Details alone: no kind of media at all, the details filled, no media fetched.
+        with self.source.lock:
+            self.source.calls.clear()
+        job = self.wait(self.start(kinds='', details=True))
+        self.assertEqual(job['counts'], {'ambiguous': 1, 'done': 3, 'unmatched': 1})
+        self.assertIn('description = "Histoire 1001"', (library / 'metadata' / f'{metroid}.meta').read_text())
+        self.assertFalse(any(e == 'medias.php' for e, _ in self.source.calls))
+        recap = json.loads(self.request('GET', f'/api/scraper/recap?id={job["id"]}')[1])['recap']
+        self.assertEqual((recap['kinds'], recap['totals']['details']), (['details'], {'got': 3, 'had': 0, 'missed': 2}))
+        # Again: details already there are kept (nothing to ask), unless replacing.
+        again = self.wait(self.start(kinds='', details=True))
+        self.assertEqual(again['counts'].get('skipped'), 3)
+        # A hand-edited description survives replacing everything.
+        path = library / 'metadata' / f'{metroid}.meta'
+        path.write_text(path.read_text().replace('Histoire 1001', 'Mine') + 'edited = "description"\n')
+        self.wait(self.start(kinds='', details=True, overwrite=True))
+        self.assertIn('description = "Mine"', path.read_text())
+        # Neither: refused.
+        status, body = self.request('POST', '/api/scraper/start?mode=ps5&source=screenscraper&kinds=&details=0', b'snes\t')
+        self.assertEqual((status, json.loads(body)['error']), (409, 'Choose at least one kind of media, or the games\' details.'))
 
     def test_a_quota_pauses_the_job_until_resumed(self):
         self.assertEqual(self.sign_in()[0], 200)

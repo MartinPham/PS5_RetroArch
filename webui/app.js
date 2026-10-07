@@ -10,7 +10,7 @@ const transfers = [];
 // The Games and Download Media tabs' state: declared here, as a page opened straight on
 // either tab reaches them before the code below them has run.
 let library = { systems: [] }, selectedGames = new Map(), shownGames = 300;
-let scrapeSource = 'libretro', scrapeKinds = new Set(), scraperSettings = null;
+let scrapeSource = 'libretro', scrapeKinds = new Set(), scraperSettings = null, scrapeDetails = true;
 let recap = null, recapStamp = '', recapFilter = 'all', recapKind = '', recapLimit = {};
 let jobTimer = null, jobShown = null;
 function element(tag, text, className) {
@@ -955,7 +955,22 @@ const RECOMMENDED = ['cover', 'screenshot', 'title'];
 const KIND_ICONS = { cover: 'M5 3h14v18H5Z M8 7h8 M8 11h8', backcover: 'M5 3h14v18H5Z M8 14h8 M8 17h5', box3d: 'M4 7l8-4 8 4v10l-8 4-8-4Z M4 7l8 4 8-4 M12 11v10',
   screenshot: 'M3 5h18v14H3Z M7 15l3-4 3 3 2-2 3 3', title: 'M3 5h18v14H3Z M7 10h10 M9 14h6', logo: 'M4 12c4-8 12-8 16 0-4 8-12 8-16 0Z M9 12h6',
   physical: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z M12 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z', fanart: 'M3 5h18v14H3Z M3 15l5-5 4 4 3-3 6 6',
-  manual: 'M5 4h10l4 4v12H5Z M8 10h8 M8 14h8', video: 'M3 6h13v12H3Z M16 10l5-3v10l-5-3' };
+  manual: 'M5 4h10l4 4v12H5Z M8 10h8 M8 14h8', video: 'M3 6h13v12H3Z M16 10l5-3v10l-5-3',
+  details: 'M4 5h16v14H4Z M8 9h8 M8 12h8 M8 15h5' };
+const DETAILS_TEXT = 'Description, developer, publisher, release date, genre, players and rating, shown in EmulationStation and on each game here.';
+function detailsOn() { return scrapeDetails && !!chosenSource()?.details; }
+function drawDetails() {
+  const source = chosenSource(), tile = element('button', undefined, 'details-tile'); tile.type = 'button';
+  tile.setAttribute('aria-pressed', detailsOn()); tile.disabled = !source.details;
+  const tick = element('span', undefined, 'tick'), check = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); check.setAttribute('viewBox', '0 0 24 24');
+  const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); p.setAttribute('d', 'M5 12.5l4.5 4.5L19 7.5'); check.append(p); tick.append(check);
+  tile.append(svgIcon(KIND_ICONS.details), element('strong', 'Game details'), source.details ? tick : element('em', `Not from ${source.name}`, 'soon-tag'), element('small', DETAILS_TEXT));
+  const hint = source.details ? `Game details: ${DETAILS_TEXT} Text only, so it costs almost nothing; details you edited yourself are never replaced.` : `Game details: ${source.name} has pictures only. ScreenScraper has details.`;
+  tile.title = hint;
+  for (const event of ['mouseenter', 'focus']) tile.addEventListener(event, () => { $('#scrape-kind-hint').textContent = hint; });
+  tile.addEventListener('click', () => { scrapeDetails = !scrapeDetails; drawDetails(); drawSummary(); });
+  $('#scrape-details-box').replaceChildren(tile);
+}
 function chosenSource() { return scraperSettings.sources.find(s => s.id === scrapeSource) || scraperSettings.sources[0]; }
 function svgIcon(path) {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('class', 'icon'); svg.setAttribute('aria-hidden', 'true');
@@ -1079,6 +1094,7 @@ function drawKinds() {
     });
     box.append(tile);
   }
+  drawDetails();
   drawSummary();
 }
 function setKinds(ids) { scrapeKinds = new Set(ids.filter(id => chosenSource().kinds.includes(id))); drawKinds(); }
@@ -1095,11 +1111,11 @@ function drawSummary() {
   const method = $('input[name="scrape-method"]:checked')?.value;
   $('#scrape-system').hidden = scrapeScope() !== 'system';
   $('#scrape-scope-selected').textContent = `Selected (${selectedGames.size})`;
-  const ready = method && kinds.length && games;
+  const details = detailsOn(), ready = method && (kinds.length || details) && games;
   $('#scrape-start').disabled = !ready;
-  $('#scrape-summary').textContent = !method ? 'Choose where to download from.' : !kinds.length ? 'Choose at least one kind of media.'
+  $('#scrape-summary').textContent = !method ? 'Choose where to download from.' : !kinds.length && !details ? 'Choose at least one kind of media, or Game details.'
     : !games ? (scrapeScope() === 'selected' ? 'Select games on the Games tab, or choose a system.' : 'No games here yet.')
-    : `${kinds.length} kind${kinds.length === 1 ? '' : 's'} of media · ${games.toLocaleString()} game${games === 1 ? '' : 's'} · ${chosenSource().name} · ${method === 'pc' ? 'downloaded on this PC, then transferred to the PS5' : 'downloaded on the PS5'}${$('#scrape-overwrite').checked ? ' · replacing what you have' : ' · only what’s missing'}`;
+    : `${[kinds.length ? `${kinds.length} kind${kinds.length === 1 ? '' : 's'} of media` : '', details ? 'game details' : ''].filter(Boolean).join(' + ')} · ${games.toLocaleString()} game${games === 1 ? '' : 's'} · ${chosenSource().name} · ${method === 'pc' ? 'downloaded on this PC, then transferred to the PS5' : 'downloaded on the PS5'}${$('#scrape-overwrite').checked ? ' · replacing what you have' : ' · only what’s missing'}`;
 }
 async function openMedia() {
   try {
@@ -1109,7 +1125,7 @@ async function openMedia() {
   for (const radio of $$('input[name="scrape-method"]')) radio.checked = radio.value === scraperSettings.mode;
   scrapeSource = scraperSettings.sources.some(s => s.id === scraperSettings.source && s.available && (!s.account || s.signed_in)) ? scraperSettings.source : 'libretro';
   $('#scrape-language').value = scraperSettings.language || 'en';
-  scrapeKinds = new Set(scraperSettings.kinds);
+  scrapeKinds = new Set(scraperSettings.kinds); scrapeDetails = scraperSettings.details !== false;
   for (const radio of $$('input[name="scrape-region"]')) radio.checked = radio.value === scraperSettings.region;
   const select = $('#scrape-system'), chosen = select.value || $('#games-system').value;
   select.replaceChildren(...library.systems.map(s => new Option(`${s.name} (${s.games.length})`, s.id)));
@@ -1135,8 +1151,8 @@ $('#scrape-start').addEventListener('click', async () => {
   const kinds = [...scrapeKinds].filter(id => chosenSource().kinds.includes(id)), scope = scrapeScope();
   const lines = scope === 'selected' ? [...selectedGames].map(([path, system]) => `${system}\t${path}`)
     : library.systems.filter(s => scope === 'all' || s.id === $('#scrape-system').value).map(s => `${s.id}\t`);
-  if (!kinds.length || !lines.length) { drawSummary(); return; }
-  const query = new URLSearchParams({ mode: method, source: scrapeSource, kinds: kinds.join(','), region: $('input[name="scrape-region"]:checked')?.value || 'us', language: $('#scrape-language').value || scraperSettings.language || 'en', overwrite: $('#scrape-overwrite').checked ? '1' : '0' });
+  if ((!kinds.length && !detailsOn()) || !lines.length) { drawSummary(); return; }
+  const query = new URLSearchParams({ mode: method, source: scrapeSource, kinds: kinds.join(','), region: $('input[name="scrape-region"]:checked')?.value || 'us', language: $('#scrape-language').value || scraperSettings.language || 'en', overwrite: $('#scrape-overwrite').checked ? '1' : '0', details: detailsOn() ? '1' : '0' });
   $('#scrape-start').disabled = true; $('#scrape-result').textContent = '';
   try {
     await api('/api/scraper/settings?' + query, { method: 'POST' });
@@ -1202,7 +1218,7 @@ async function loadRecap(id) {
   try { recap = (await api('/api/scraper/recap?id=' + encodeURIComponent(id), { signal: AbortSignal.timeout(30000) })).recap; } catch { return; }
   recapLimit = {}; drawRecap();
 }
-function kindName(id) { return scraperSettings?.catalog.find(k => k.id === id)?.name || id; }
+function kindName(id) { return id === 'details' ? 'Game details' : scraperSettings?.catalog.find(k => k.id === id)?.name || id; }
 function recapMatches(game) {
   const notFound = ['unmatched', 'ambiguous', 'failed'].includes(game.state);
   if (recapKind && !(game.got.includes(recapKind) || game.missed.includes(recapKind) || game.had.includes(recapKind))) return false;

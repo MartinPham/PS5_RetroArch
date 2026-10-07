@@ -24,6 +24,9 @@ const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
     assert.equal(await page.locator('.kind-tile:disabled').count(), 6);
     await page.locator('.kind-tile', { hasText: 'Logo' }).click();
     assert.equal(await page.locator('.kind-tile[aria-pressed="true"]').count(), 4);
+    // Game details: offered, but not by libretro (pictures only).
+    assert.equal(await page.locator('.details-tile').isDisabled(), true);
+    assert.match(await page.locator('.details-tile').innerText(), /Game details[\s\S]*Not from libretro thumbnails/);
     await page.locator('#kinds-recommended').click();
     assert.equal(await page.locator('.kind-tile[aria-pressed="true"]').count(), 3);
     await page.locator('.segmented label:has(input[value="ps5"])').click();

@@ -366,6 +366,20 @@ struct Item
     bool started = false;         /* this job began fetching for it (an interruption may follow) */
     std::vector<std::string> got; /* the kinds this job stored for it (the recap) */
 };
+std::vector<std::string> candidates_from_list(const std::string &text)
+{
+    std::vector<std::string> out;
+    size_t start = 0;
+    while (start < text.size())
+    {
+        size_t end = text.find(',', start);
+        if (end == std::string::npos)
+            end = text.size();
+        out.push_back(text.substr(start, end - start));
+        start = end + 1;
+    }
+    return out;
+}
 void note_got(Item &item, const std::string &kind)
 {
     if (std::find(item.got.begin(), item.got.end(), kind) == item.got.end())
@@ -488,9 +502,10 @@ void save_job(Job &job, bool force)
             job.options.mode + "\nsource\t" + job.options.source + "\nkinds\t" +
             kinds_text(job.options.kinds) + "\nregion\t" + job.options.region + "\nlanguage\t" +
             job.options.language + "\noverwrite\t" + (job.options.overwrite ? "1" : "0") +
-            "\ncounters\t" + std::to_string(job.downloaded_files) + ' ' +
-            std::to_string(job.downloaded_bytes) + ' ' + std::to_string(job.transferred_files) +
-            ' ' + std::to_string(job.transferred_bytes) + '\n';
+            "\ndetails\t" + (job.options.details ? "1" : "0") + "\ncounters\t" +
+            std::to_string(job.downloaded_files) + ' ' + std::to_string(job.downloaded_bytes) +
+            ' ' + std::to_string(job.transferred_files) + ' ' +
+            std::to_string(job.transferred_bytes) + '\n';
     for (const auto &item : job.items)
     {
         /* An item mid-way is saved as pending: it is redone (its finished media kept). */
@@ -554,6 +569,8 @@ std::shared_ptr<Job> load_job(const std::string &path)
                 job->options.region = v;
             else if (k == "language")
                 job->options.language = v;
+            else if (k == "details")
+                job->options.details = v == "1";
             else if (k == "overwrite")
                 job->options.overwrite = v == "1";
             else if (k == "counters") /* what was downloaded and sent, kept across restarts */
@@ -584,7 +601,9 @@ std::shared_ptr<Job> load_job(const std::string &path)
             if (f.size() >= 10)
                 item.candidates = candidates_from(f[9]);
             if (f.size() >= 11)
-                item.got = kinds_from(f[10]);
+                for (const auto &kind : candidates_from_list(f[10]))
+                    if (kind == "details" || kind_folders.count(kind))
+                        note_got(item, kind);
             job->items.push_back(item);
         }
     }
@@ -730,6 +749,12 @@ std::string same_title(const std::vector<std::string> &candidates, const std::st
 std::string media_destination(const Game &game, const std::string &kind, const char *ext)
 {
     return library_root() + '/' + game.system + '/' + kind_folders.at(kind) + '/' + game.key + ext;
+}
+/* A game has details when a source gave its description, developer or release date. */
+bool has_details(const std::string &system, const std::string &key)
+{
+    Fields meta = read_fields(meta_path(system, key));
+    return !meta["description"].empty() || !meta["developer"].empty() || !meta["released"].empty();
 }
 /* The kinds the user put in place themselves (the .meta's "uploaded" list). */
 std::vector<std::string> uploaded_kinds(const std::string &system, const std::string &key)
@@ -1126,8 +1151,7 @@ void process_screenscraper(Http &http, Job &job, unsigned index)
         if (wanted(item.game, kind, options))
             needed.push_back(kind);
     const bool details_wanted =
-        options.overwrite ||
-        read_fields(meta_path(item.game.system, item.game.key))["description"].empty();
+        options.details && (options.overwrite || !has_details(item.game.system, item.game.key));
     if (needed.empty() && !details_wanted)
         return item.started ? finish(State::done, "")
                             : finish(State::skipped, "Already in the library.");
@@ -1202,22 +1226,25 @@ void process_screenscraper(Http &http, Job &job, unsigned index)
     item.matched = name + " [" + game["id"].str() + ']';
     /* Its details, for every frontend's game lists (ES-DE's fields). */
     Fields details;
-    details["name"] = name;
-    details["description"] = pick_text(game["synopsis"], "langue", languages);
-    details["developer"] = game["developpeur"]["text"].str();
-    details["publisher"] = game["editeur"]["text"].str();
-    details["players"] = game["joueurs"]["text"].str();
-    if (!game["note"]["text"].str().empty())
-    {
-        char rating[16];
-        std::snprintf(rating, sizeof rating, "%.2f",
-                      std::atof(game["note"]["text"].str().c_str()) / 20.0);
-        details["rating"] = rating;
-    }
-    details["released"] = pick_text(game["dates"], "region", regions);
-    if (!game["genres"].items.empty())
-        details["genre"] = pick_text(game["genres"].items.front()["noms"], "langue", languages);
     details["source_id"] = game["id"].str();
+    if (details_wanted)
+    {
+        details["name"] = name;
+        details["description"] = pick_text(game["synopsis"], "langue", languages);
+        details["developer"] = game["developpeur"]["text"].str();
+        details["publisher"] = game["editeur"]["text"].str();
+        details["players"] = game["joueurs"]["text"].str();
+        if (!game["note"]["text"].str().empty())
+        {
+            char rating[16];
+            std::snprintf(rating, sizeof rating, "%.2f",
+                          std::atof(game["note"]["text"].str().c_str()) / 20.0);
+            details["rating"] = rating;
+        }
+        details["released"] = pick_text(game["dates"], "region", regions);
+        if (!game["genres"].items.empty())
+            details["genre"] = pick_text(game["genres"].items.front()["noms"], "langue", languages);
+    }
     /* Its media, each in the region asked for first. */
     unsigned hits = 0, misses = 0;
     for (const auto &kind : needed)
@@ -1273,6 +1300,11 @@ void process_screenscraper(Http &http, Job &job, unsigned index)
     item.found = hits;
     item.missing = misses;
     save_meta(item, options, details);
+    if (details_wanted && has_details(item.game.system, item.game.key))
+    {
+        std::lock_guard<std::mutex> guard(lock);
+        note_got(job.items[index], "details");
+    }
     finish(misses ? State::partial : State::done,
            misses ? "ScreenScraper has " + std::to_string(hits) + " of " +
                         std::to_string(hits + misses) + " media."
@@ -1789,10 +1821,12 @@ std::string settings_json()
             (std::string(source.id) == "screenscraper" && account_fields().count("password")
                  ? "true"
                  : "false") +
+            ",\"details\":" + (std::string(source.id) == "libretro" ? "false" : "true") +
             ",\"kinds\":" + list(source.kinds) + '}';
     return "{\"mode\":" + quote(get("mode", "")) +
            ",\"source\":" + quote(get("source", "libretro")) +
            ",\"kinds\":" + list(kinds_from(get("kinds", "cover,screenshot,title"))) +
+           ",\"details\":" + (get("details", "1") == "1" ? "true" : "false") +
            ",\"region\":" + quote(get("region", "us")) +
            ",\"language\":" + quote(get("language", "en")) + ",\"catalog\":[" + catalog +
            "],\"sources\":[" + source_list + "]}";
@@ -1888,6 +1922,7 @@ bool save_settings(const Options &options)
     fields["mode"] = options.mode;
     fields["source"] = options.source;
     fields["kinds"] = kinds_text(options.kinds);
+    fields["details"] = options.details ? "1" : "0";
     fields["region"] = options.region;
     fields["language"] = options.language;
     make_folders(root_path + "/config");
@@ -1936,9 +1971,12 @@ bool start(const Options &requested, const std::vector<Selection> &selection, st
         why = "This source is not available yet.";
         return false;
     }
-    if (options.kinds.empty())
+    if (options.source == "libretro")
+        options.details = false; /* libretro has pictures only */
+    if (options.kinds.empty() && !options.details)
     {
-        why = "Choose at least one kind of media.";
+        why = requested.details ? "libretro has no game details: choose ScreenScraper for them."
+                                : "Choose at least one kind of media, or the games' details.";
         return false;
     }
     const auto games = load_games();
@@ -2071,7 +2109,9 @@ std::string recap_json(const std::string &id)
             return "{\"recap\":null}";
         items = job->items;
     }
-    const auto &kinds = job->options.kinds;
+    std::vector<std::string> kinds = job->options.kinds;
+    if (job->options.details)
+        kinds.push_back("details");
     auto list = [](const std::vector<std::string> &values)
     {
         std::string out;
@@ -2096,7 +2136,9 @@ std::string recap_json(const std::string &id)
                              item.state != State::transferring;
         for (const auto &kind : kinds)
         {
-            const bool stored = !stored_media(item.game.system, item.game.key, kind).empty();
+            const bool stored = kind == "details"
+                                    ? has_details(item.game.system, item.game.key)
+                                    : !stored_media(item.game.system, item.game.key, kind).empty();
             const bool fetched =
                 std::find(item.got.begin(), item.got.end(), kind) != item.got.end();
             auto &total = totals[kind];
