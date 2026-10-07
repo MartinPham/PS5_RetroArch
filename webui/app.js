@@ -658,19 +658,37 @@ async function loadAlerts() {
   const button = $('#refresh-alerts'); button.disabled = true;
   try {
     const data = await api('/api/alerts'), list = $('#alerts-list'); list.replaceChildren();
-    const groups = new Map();
-    for (const alert of data.alerts) {
-      if (!groups.has(alert.core)) { const group = element('section', undefined, 'alert-group'); group.append(element('h3', alert.core)); groups.set(alert.core, group); list.append(group); }
-      const row = element('div', undefined, 'alert-item');
-      row.append(element('strong', alert.title));
-      if (alert.path) row.append(element('code', alert.path));
-      else row.append(element('p', alert.message));
-      groups.get(alert.core).append(row);
-    }
-    const count = data.alerts.length;
+    // What no game of a core runs without first; then what only some games need.
+    const draw = (alerts, heading, note) => {
+      if (!alerts.length) return;
+      const part = element('section', undefined, 'alert-part'); part.append(element('h3', heading, 'alert-part-title'));
+      if (note) part.append(element('p', note, 'muted alert-part-note'));
+      const groups = new Map();
+      for (const alert of alerts) {
+        if (!groups.has(alert.core)) { const group = element('section', undefined, 'alert-group'); group.append(element('h4', alert.core)); groups.set(alert.core, group); part.append(group); }
+        const row = element('div', undefined, `alert-item ${alert.level === 'some' ? 'some' : 'required'}`), what = element('div', undefined, 'alert-what');
+        what.append(element('strong', alert.title));
+        if (alert.message) what.append(element('p', alert.message, 'muted'));
+        if (alert.any_of?.length) {
+          const names = element('p', undefined, 'alert-names'); names.append(document.createTextNode(alert.any_of.length > 1 ? 'Any one of: ' : 'File: '));
+          alert.any_of.forEach((name, i) => { if (i) names.append(document.createTextNode(' ')); names.append(element('code', name)); });
+          what.append(names);
+        }
+        row.append(what);
+        if (alert.path) { const where = element('div', undefined, 'alert-where'); where.append(element('span', alert.any_of?.length ? 'In the folder' : 'Expected at', 'muted'), element('code', alert.path)); row.append(where); }
+        groups.get(alert.core).append(row);
+      }
+      list.append(part);
+    };
+    const needed = data.alerts.filter(a => a.level !== 'some'), some = data.alerts.filter(a => a.level === 'some');
+    draw(needed, 'Needed', '');
+    draw(some, 'Only for some games', 'These cores run most games without them.');
+    const count = needed.length;
     $('#alerts-count').textContent = count; $('#alerts-count').hidden = !count;
-    $('#alerts-summary').textContent = count ? `${count} ${count === 1 ? 'item needs' : 'items need'} attention across your installed cores.` : 'No missing required BIOS or system files found.';
-    $('#alerts-details').hidden = !count;
+    $('#alerts-summary').textContent = count ? `${count} ${count === 1 ? 'file is' : 'files are'} needed by your installed cores${some.length ? `, and ${some.length} more only for some games` : ''}.`
+      : some.length ? `Nothing required is missing. ${some.length} ${some.length === 1 ? 'file is' : 'files are'} needed only for some games.` : 'No missing required BIOS or system files found.';
+    const shown = data.alerts.length;
+    $('#alerts-details').hidden = !shown;
     $('.alerts-panel').dataset.state = count ? 'warning' : 'clear';
   } catch (error) { $('#alerts-summary').textContent = 'Couldn’t check required files. Reconnect and try again.'; $('#alerts-details').hidden = true; $('#alerts-count').hidden = true; }
   finally { button.disabled = false; }

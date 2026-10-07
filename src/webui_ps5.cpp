@@ -435,30 +435,133 @@ std::string update_status()
     return "{\"state\":" + quote(u.state) + ",\"message\":" + quote(u.message) +
            ",\"tag\":" + quote(u.tag) + ",\"received\":" + std::to_string(u.received) + '}';
 }
+// What some cores need, where their .info files say it wrongly: a file of one region
+// is enough (the .info marks every region's required), a core runs without its BIOS
+// for most games (built-in replacements), or a BIOS is "optional" in the .info but no
+// game starts without one. A core listed here is checked by these rules alone.
+struct BiosNeed
+{
+    const char *core;                 // the core's file
+    bool required;                    // no game runs without it; else only some games need it
+    const char *title;                // what it is
+    const char *why;                  // when it is needed
+    std::vector<const char *> any_of; // any one of these files, in the system folder
+};
+const std::vector<BiosNeed> &bios_needs()
+{
+    static const std::vector<BiosNeed> needs = {
+        {"mednafen_psx_hw_libretro.so",
+         true,
+         "A PS1 BIOS",
+         "One is enough: the one of your games' region (scph5500.bin Japan, scph5501.bin USA, "
+         "scph5502.bin Europe). A game of another region needs that region's.",
+         {"scph5500.bin", "scph5501.bin", "scph5502.bin"}},
+        {"mednafen_saturn_libretro.so",
+         true,
+         "A Saturn BIOS",
+         "One is enough: sega_101.bin (Japan) or mpr-17933.bin (USA and Europe).",
+         {"sega_101.bin", "mpr-17933.bin"}},
+        {"opera_libretro.so",
+         true,
+         "A 3DO BIOS",
+         "Any one of the 3DO BIOS files; no 3DO game starts without one.",
+         {"panafz1.bin", "panafz10.bin", "panafz10-norsa.bin", "panafz10e-anvil.bin",
+          "panafz10e-anvil-norsa.bin", "goldstar.bin", "sanyotry.bin", "3do_arcade_saot.bin",
+          "panafz1j.bin", "panafz1j-norsa.bin"}},
+        {"neocd_libretro.so",
+         true,
+         "A Neo Geo CD BIOS",
+         "Any one of the Neo Geo CD BIOS files, in a neocd folder.",
+         {"neocd/neocd_f.rom", "neocd/neocd_sf.rom", "neocd/front-sp1.bin", "neocd/neocd_t.rom",
+          "neocd/neocd_st.rom", "neocd/top-sp1.bin", "neocd/neocd_z.rom", "neocd/neocd_sz.rom",
+          "neocd/neocd.bin", "neocd/uni-bioscd.rom"}},
+        {"neocd_libretro.so",
+         true,
+         "The Neo Geo CD LO ROM",
+         "The zoom table ROM, beside the BIOS in the neocd folder.",
+         {"neocd/000-lo.lo", "neocd/ng-lo.rom"}},
+        {"mednafen_pcfx_libretro.so",
+         true,
+         "The PC-FX BIOS",
+         "No PC-FX game starts without it.",
+         {"pcfx.rom"}},
+        {"mednafen_pce_libretro.so",
+         false,
+         "A PC Engine CD System Card",
+         "Only PC Engine CD games need it (syscard3.pce plays them all); cartridges run without.",
+         {"syscard3.pce", "syscard2.pce", "syscard1.pce", "gexpress.pce"}},
+        {"puae_libretro.so",
+         false,
+         "An Amiga Kickstart",
+         "PUAE runs most games on its built-in replacement (AROS); some need the real "
+         "Kickstart of their model (A500: kick34005.A500, A1200: kick40068.A1200, CD32: "
+         "kick40060.CD32).",
+         {"kick34005.A500", "kick33180.A500", "kick37175.A500", "kick37350.A600", "kick40063.A600",
+          "kick39106.A1200", "kick40068.A1200", "kick39106.A4000", "kick40068.A4000",
+          "kick40060.CD32"}},
+        {"flycast_libretro.so",
+         false,
+         "The Dreamcast BIOS",
+         "Flycast plays most games on its built-in BIOS; a few need the real one (dc/dc_boot.bin).",
+         {"dc/dc_boot.bin"}},
+    };
+    return needs;
+}
+bool system_file(const std::string &path)
+{
+    struct stat st{};
+    return !content_stat(path.c_str(), &st) && S_ISREG(st.st_mode) && st.st_size > 0;
+}
 std::string bios_alerts()
 {
     std::string out = "{\"alerts\":[";
     auto add = [&](const std::string &core, const std::string &description, const std::string &path,
-                   const std::string &message)
+                   const std::string &message, bool required = true,
+                   const std::vector<const char *> &any_of = {})
     {
         if (out.back() != '[')
             out += ',';
+        std::string names;
+        for (const char *name : any_of)
+            names += std::string(names.empty() ? "" : ",") + quote(name);
         out += "{\"core\":" + quote(core) + ",\"title\":" + quote(description) +
-               ",\"path\":" + quote(path) + ",\"message\":" + quote(message) + '}';
+               ",\"path\":" + quote(path) + ",\"message\":" + quote(message) +
+               ",\"level\":" + quote(required ? "required" : "some") + ",\"any_of\":[" + names +
+               "]}";
     };
     const auto global = global_values();
-    for (const auto &entry : read_config(root_path + "/webui/core-metadata/index.cfg"))
+    const auto known = read_config(root_path + "/webui/core-metadata/index.cfg");
+    // Every core installed, not only those with option catalogs.
+    std::vector<std::string> files;
+    if (DIR *dir = opendir((root_path + "/cores").c_str()))
     {
-        if (!valid_path(entry.first) || entry.first.find('/') != std::string::npos ||
-            entry.first == "rpcs3_libretro.so")
-            continue;
+        while (auto *entry = readdir(dir))
+        {
+            const std::string name = entry->d_name;
+            if (name.size() > 12 && name.compare(name.size() - 12, 12, "_libretro.so") == 0 &&
+                valid_path(name) && name != "rpcs3_libretro.so")
+                files.push_back(name);
+        }
+        closedir(dir);
+    }
+    std::sort(files.begin(), files.end());
+    for (const auto &file : files)
+    {
         struct stat st{};
-        if (content_stat((root_path + "/cores/" + entry.first).c_str(), &st))
-            continue;
+        const auto info =
+            read_config(root_path + "/info/" + file.substr(0, file.size() - 3) + ".info");
+        // Its settings live under its library name; it is shown by its display name.
+        const auto listed = known.find(file);
+        const std::string library = listed != known.end()    ? listed->second
+                                    : info.count("corename") ? info.at("corename")
+                                                             : file;
+        const std::string shown = info.count("display_name") ? info.at("display_name") : library;
         auto values = global;
-        overlay(values,
-                read_config(root_path + "/config/" + entry.second + '/' + entry.second + ".cfg"));
-        overlay(values, read_config(root_path + "/config/webui-cores/" + entry.second + ".cfg"));
+        if (valid_path(library) && library.find('/') == std::string::npos)
+        {
+            overlay(values, read_config(root_path + "/config/" + library + '/' + library + ".cfg"));
+            overlay(values, read_config(root_path + "/config/webui-cores/" + library + ".cfg"));
+        }
         std::string directory = values["system_directory"];
         if (directory.empty() || directory == "default")
             directory = root_path + "/system";
@@ -466,16 +569,28 @@ std::string bios_alerts()
             directory = root_path + directory.substr(1);
         else if (directory.rfind("/app0/", 0) == 0)
             directory = root_path + directory.substr(5);
-        if (entry.second == "Beetle Saturn" && directory == root_path + "/system")
+        if (library == "Beetle Saturn" && directory == root_path + "/system")
             directory += "/Saturn";
         if (directory.front() != '/')
         {
-            add(entry.second, "System folder needs attention", directory,
+            add(shown, "System folder needs attention", directory,
                 "Choose an absolute System/BIOS folder in this core's settings.");
             continue;
         }
-        const auto info = read_config(root_path + "/info/" +
-                                      entry.first.substr(0, entry.first.size() - 3) + ".info");
+        bool ruled = false;
+        for (const auto &need : bios_needs())
+        {
+            if (file != need.core)
+                continue;
+            ruled = true;
+            bool present = false;
+            for (const char *name : need.any_of)
+                present = present || system_file(directory + '/' + name);
+            if (!present)
+                add(shown, need.title, directory, need.why, need.required, need.any_of);
+        }
+        if (ruled)
+            continue;
         for (const auto &firmware : info)
         {
             if (firmware.first.rfind("firmware", 0) || firmware.first.size() < 6 ||
@@ -515,7 +630,7 @@ std::string bios_alerts()
             if (!present)
             {
                 auto desc = info.find(prefix + "_desc");
-                add(entry.second, desc == info.end() ? firmware.second : desc->second, path,
+                add(shown, desc == info.end() ? firmware.second : desc->second, path,
                     "Required firmware was not found here. Add your own BIOS/system files for the "
                     "regions and content you use. Presence only is checked; file authenticity is "
                     "not verified.");

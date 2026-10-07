@@ -84,16 +84,37 @@ class WebUI(unittest.TestCase):
         original_cfg = cfg.read_bytes() if cfg.exists() else None
         cfg.unlink(missing_ok=True)
         try:
+            # Saturn: one BIOS of either region is enough (its .info calls both required).
             alerts = json.loads(self.request('GET', '/api/alerts')[2])['alerts']
-            self.assertEqual(len(alerts), 1)
-            self.assertEqual(alerts[0]['path'], str(self.root/'system/Saturn/required.bin'))
-            (self.root/'system/Saturn/required.bin').write_bytes(b'present')
+            self.assertEqual([(a['title'], a['level'], a['path']) for a in alerts],
+                             [('A Saturn BIOS', 'required', str(self.root/'system/Saturn'))])
+            self.assertEqual(alerts[0]['any_of'], ['sega_101.bin', 'mpr-17933.bin'])
+            (self.root/'system/Saturn/mpr-17933.bin').write_bytes(b'present')
             self.assertEqual(json.loads(self.request('GET', '/api/alerts')[2])['alerts'], [])
             cfg.write_text(f'system_directory = "{self.root}/custom-bios"\n')
             alerts = json.loads(self.request('GET', '/api/alerts')[2])['alerts']
-            self.assertEqual(alerts[0]['path'], str(self.root/'custom-bios/required.bin'))
+            self.assertEqual(alerts[0]['path'], str(self.root/'custom-bios'))
+            cfg.unlink()
             core.unlink()
             self.assertEqual(json.loads(self.request('GET', '/api/alerts')[2])['alerts'], [])
+            # Cores with no option catalog are checked too, by their own .info: a 3DO
+            # BIOS (any one), an Amiga Kickstart only for some games, and a core the
+            # rules do not know, by its .info's required firmware.
+            for stem, text in (('opera', 'display_name = "The 3DO Company - 3DO (Opera)"\ncorename = "Opera"\nfirmware0_path = "panafz10.bin"\nfirmware0_opt = "true"\n'),
+                               ('puae', 'display_name = "Commodore - Amiga (PUAE)"\ncorename = "PUAE"\nfirmware0_path = "kick34005.A500"\nfirmware0_opt = "false"\n'),
+                               ('other', 'display_name = "Other (Thing)"\ncorename = "Thing"\nfirmware0_path = "thing.bin"\nfirmware0_opt = "false"\nfirmware0_desc = "Thing BIOS"\n')):
+                (self.root/f'cores/{stem}_libretro.so').write_bytes(b'fixture')
+                (self.root/f'info/{stem}_libretro.info').write_text(text)
+            alerts = {a['core']: a for a in json.loads(self.request('GET', '/api/alerts')[2])['alerts']}
+            self.assertEqual(sorted(alerts), ['Commodore - Amiga (PUAE)', 'Other (Thing)', 'The 3DO Company - 3DO (Opera)'])
+            self.assertEqual((alerts['The 3DO Company - 3DO (Opera)']['title'], alerts['The 3DO Company - 3DO (Opera)']['level']), ('A 3DO BIOS', 'required'))
+            self.assertEqual(alerts['Commodore - Amiga (PUAE)']['level'], 'some')
+            self.assertEqual((alerts['Other (Thing)']['title'], alerts['Other (Thing)']['path']), ('Thing BIOS', str(self.root/'system/thing.bin')))
+            (self.root/'system/goldstar.bin').write_bytes(b'present')
+            alerts = {a['core'] for a in json.loads(self.request('GET', '/api/alerts')[2])['alerts']}
+            self.assertNotIn('The 3DO Company - 3DO (Opera)', alerts)
+            for stem in ('opera', 'puae', 'other'):
+                (self.root/f'cores/{stem}_libretro.so').unlink()
         finally:
             if previous is None: index.unlink(missing_ok=True)
             else: index.write_bytes(previous)
