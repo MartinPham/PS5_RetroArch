@@ -19,6 +19,7 @@ endforeach()
 set(CURL_INCLUDE_DIR ${PS5_DEPS}/curl-ps5/include)
 set(PS5_INCLUDE_DIRS
     ${PS5_PORT_DIR}/include
+    ${PS5_PORT_DIR}/../../../src
     ${PS5_STB}
     ${PS5_DEPS}/ffmpeg-esde-ps5/include
     ${PS5_DEPS}/freetype-ps5/include/freetype2

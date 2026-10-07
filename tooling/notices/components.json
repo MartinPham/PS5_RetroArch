@@ -732,6 +732,33 @@
                            {"name": "PS5_VKHomebrewUI", "git": "../PS5_VKHomebrewUI", "pin": {"file": "../PS5_VulkanTemplate/ps5/ui/setup-kit.sh", "var": "revision"}, "remote": "https://github.com/mihawk-99/PS5_VKHomebrewUI"},
                            {"name": "PS5_PayloadSDK", "git": "../PS5_PayloadSDK", "pin": {"file": "../PS5_VulkanTemplate/ps5/tools/setup-sdk.sh", "var": "sdk_revision"}, "remote": "https://github.com/mihawk-99/PS5_PayloadSDK"}]},
       "modifications": "frontends/picker/picker.cpp (PS5_RetroArch), built as the one program of a title the template generates (tools/build-picker.sh)."
+    },
+    {
+      "id": "qrcodegen",
+      "name": "Nayuki QR Code generator 1.8.0",
+      "kind": "code",
+      "always": true,
+      "artifacts": [
+        "eboot.bin",
+        "es-de/es-de.bin",
+        "picker/picker.bin"
+      ],
+      "licence": "MIT",
+      "copyright": [
+        "Copyright (c) Project Nayuki"
+      ],
+      "texts": [
+        {
+          "from": "third_party/qrcodegen/LICENSE",
+          "to": "MIT.txt"
+        }
+      ],
+      "source": {
+        "kind": "git",
+        "path": ".",
+        "remote": "https://github.com/mihawk-99/PS5_RetroArch"
+      },
+      "modifications": "Unmodified upstream C source vendored in third_party/qrcodegen; upstream URL, version and SHA-256 digests in source.json. Shared runtime WebUI QR wrapper in src/ps5_webui_qr.c."
     }
   ]
 }

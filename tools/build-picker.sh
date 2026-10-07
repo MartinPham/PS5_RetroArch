@@ -61,6 +61,10 @@ cp "$root/frontends/picker/picker.cpp" "$generated/examples/$program/$program.cp
 cp "$root/src/ps5_frontend_choice.h" "$generated/examples/$program/ps5_frontend_choice.h"
 # The link that keeps the WebUI's daemon up while the picker shows (src/webui_link.h).
 cp "$root/src/webui_link.h" "$root/src/webui_link.cpp" "$generated/examples/$program/"
+# The same runtime QR encoder as RetroArch and ES-DE, compiled as C outside the UI namespace.
+cp "$root/src/ps5_webui_qr.h" "$root/src/ps5_webui_qr.c" "$generated/examples/$program/"
+mkdir -p "$generated/examples/$program/qrcodegen"
+cp "$root/third_party/qrcodegen/"*.{c,h} "$generated/examples/$program/qrcodegen/"
 rm -rf -- "$generated/examples/$program/kit"
 python3 - "$generated" <<'PY'
 import sys
@@ -73,6 +77,8 @@ def edit(name, old, new):
     return text.replace(old, new)
 cmake = edit("ps5/CMakeLists.txt", "\tset(app_root /app0)\n\tset(surface_platform _DIRECT2DISPLAY)",
              '\tset(app_root /app0/picker)\n\tset(surface_platform _DIRECT2DISPLAY "PS5_APP_ROOT=\\"/app0/picker\\"")')
+cmake += '\n# Runtime WebUI address lookup must live outside the template program namespace.\n'
+cmake += 'target_sources(samples PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../examples/frontendpicker/ps5_webui_qr.c")\n'
 (generated / "ps5/CMakeLists.txt").write_text(cmake)
 main = (generated / "ps5/src/main.cpp.generated").read_text()
 old = '\t\tstatus = runSample(ps5Samples[0], 0, "", false).ok ? 0 : 1;\n'

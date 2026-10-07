@@ -38,6 +38,7 @@
 #include "kit.hpp"
 #include "ps5_frontend_choice.h"
 #include "webui_link.h"
+#include "ps5_webui_qr.h"
 #include <atomic>
 #include <ps5platform/libc.h>
 #include <sys/stat.h>
@@ -133,6 +134,8 @@ public:
 	int testChoice{ -2 }; // armed: the frontend to choose, or -1 for none
 	int testRemember{ -1 }; // armed: 1 remember, 0 forget, -1 leave the switch
 	bool remember{ false };
+	bool showWebUI{ false };
+	ps5_webui_qr webuiQR{};
 
 	VulkanExample() : KitExample()
 	{
@@ -233,6 +236,16 @@ public:
 			}
 		}
 		clock += dt;
+		// Consume the overlay's buttons so Circle never closes the title underneath it.
+		if (input.is_pressed(hui::Action::north)) {
+			showWebUI = !showWebUI;
+			if (showWebUI) ps5_webui_qr_refresh(&webuiQR, true);
+			input = hui::InputFrame{};
+		} else if (showWebUI) {
+			if (input.is_pressed(hui::Action::back)) showWebUI = false;
+			input = hui::InputFrame{};
+		}
+		if (showWebUI) ps5_webui_qr_refresh(&webuiQR, false);
 		if (input.nav == hui::Direction::left && focus > 0) {
 			move(focus - 1);
 		} else if (input.nav == hui::Direction::right && focus < cardCount - 1) {
@@ -316,9 +329,27 @@ public:
 		ps5ui::draw_hints(scene, kit.fonts, theme,
 			{ { hui::ui::Button::dpad, "Move" }, { hui::ui::Button::cross, "Start" },
 				{ hui::ui::Button::square, remember ? "Remember: on" : "Remember: off" },
-				{ hui::ui::Button::circle, "Close" } },
+				{ hui::ui::Button::triangle, "WebUI" }, { hui::ui::Button::circle, "Close" } },
 			960.0f, 1010.0f, 0);
 		scene.pop_opacity();
+
+		if (showWebUI) {
+			scene.rounded_rect({ 0, 0, 1920, 1080 }, 0, Color{ 0, 0, 0, 0.96f });
+			painter.heading("WebUI", 820, 150, 64, Color::rgb(0xffffff));
+			if (webuiQR.size) {
+				const unsigned scale = 14, side = webuiQR.size * scale;
+				const float left = (1920.0f - side) / 2, top = 210;
+				scene.rounded_rect({ left, top, (float)side, (float)side }, 0, Color::rgb(0xffffff));
+				for (unsigned y = 0; y < webuiQR.size; y++)
+					for (unsigned x = 0; x < webuiQR.size; x++)
+						if (webuiQR.modules[y * webuiQR.size + x])
+							scene.rounded_rect({ left + x * scale, top + y * scale, (float)scale, (float)scale }, 0, Color::rgb(0x000000));
+			}
+			painter.body(webuiQR.size ? webuiQR.url : PS5_WEBUI_QR_OFFLINE, 560, 810, 36, Color::rgb(0xffffff));
+			painter.body("Scan with a phone on the same network", 560, 880, 30, Color::rgb(0xffffff));
+			ps5ui::draw_hints(scene, kit.fonts, theme,
+				{ { hui::ui::Button::triangle, "Close WebUI" }, { hui::ui::Button::circle, "Close WebUI" } }, 960, 1010, 0);
+		}
 
 		hui::gfx::BackdropSpec backdrop = theme.backdrop;
 		backdrop.time = clock;

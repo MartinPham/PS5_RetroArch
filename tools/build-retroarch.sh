@@ -206,6 +206,8 @@ mkdir -p "$obj"
 fingerprint=$({
     printf '%s\n' "${defines[@]}" "${includes[@]}"
     cat "$configured"
+    # The menu drivers include this port's WebUI renderer headers directly.
+    cat "$root"/src/ps5_webui_qr*.h
     for name in "${patched_files[@]}"; do
         case "$name" in
             *.h|*.hpp) cat "$root/build/ra-conf/$name" ;;

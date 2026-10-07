@@ -78,8 +78,8 @@ done < <(find "$root/frontends/$program" "$root/frontends/common" -type f \( -na
 # The contracts every frontend shares with eboot.bin, the same files it is built with:
 # game mode (src/ps5_game.h), how a frontend starts a game, and the game library
 # (src/ps5_library.h), what a frontend shows, read from RetroArch's playlists.
-for contract in ps5_game ps5_library; do
-    "${cc[@]}" -std=c11 "${common[@]}" "${includes[@]}" -c "$root/src/$contract.c" -o "$work/obj/$contract.o"
+for contract in ps5_game ps5_library ps5_webui_qr; do
+    "${cc[@]}" -std=c11 "${common[@]}" "${includes[@]}" -I"$root/third_party" -c "$root/src/$contract.c" -o "$work/obj/$contract.o"
     objects+=("$work/obj/$contract.o")
 done
 # The link that keeps the WebUI's daemon up while the frontend shows (src/webui_link.h).

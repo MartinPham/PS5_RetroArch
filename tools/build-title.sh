@@ -310,6 +310,7 @@ inputs += [root / name for name in (
     ".deps/native/ps5-payload-sdk/.ps5-sdk-revision",
     *(f"build/cores/stage/cores/{name}_libretro.so" for name in os.environ["CORE_NAMES"].split()),
     "tools/build.sh", "tools/retroarch-flags.sh")]
+inputs += sorted(p for p in (root / "third_party/qrcodegen").rglob("*") if p.is_file())
 inputs += sorted(p for p in (root / "webui").rglob("*") if p.is_file())
 inputs += sorted(p for p in (root / "daemon").rglob("*") if p.is_file())
 inputs.append(root / "tools/build-webui-daemon.sh")
@@ -352,7 +353,7 @@ PS5_PAYLOAD_SDK="$sdk" \
 PS5_CLANG=/usr/bin/clang \
 PYTHONPATH="$root/tooling/pystub${PYTHONPATH:+:$PYTHONPATH}" \
 APP_DEFINITIONS="${title_definition_names[*]}" \
-APP_INCLUDE_PATHS="build/ra-conf build vendor/retroarch build/ra-conf/libretro-common/include vendor/retroarch/deps vendor/retroarch/deps/stb .deps/webui/libmicrohttpd-1.0.10/src/include .deps/native/zlib/zlib-1.3.2 .deps/native/zlib/zlib-1.3.2/contrib/minizip vendor/retroarch/deps/mbedtls" \
+APP_INCLUDE_PATHS="third_party build/ra-conf build vendor/retroarch build/ra-conf/libretro-common/include vendor/retroarch/deps vendor/retroarch/deps/stb .deps/webui/libmicrohttpd-1.0.10/src/include .deps/native/zlib/zlib-1.3.2 .deps/native/zlib/zlib-1.3.2/contrib/minizip vendor/retroarch/deps/mbedtls" \
 APP_STATIC_ARCHIVES="build/ra/libretroarch.a $webui_http $webui_update" \
 APP_SDK_ARCHIVES="libps5platform.a" \
 APP_VULKAN_ARCHIVES="${vulkan_archives[*]}" \
