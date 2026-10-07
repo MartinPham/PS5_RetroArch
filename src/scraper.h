@@ -46,8 +46,11 @@ struct Selection
 };
 struct Options
 {
-    std::string mode = "ps5"; /* "ps5" or "pc" */
-    std::string source = "libretro";
+    std::string mode = "ps5";        /* "ps5" or "pc" */
+    std::string source = "libretro"; /* the first of sources */
+    /* The sources in order: each is asked only for what the ones before it did not find
+     * (a limited source's quota goes on the rest). Empty: source alone. */
+    std::vector<std::string> sources;
     std::vector<std::string> kinds; /* cover, screenshot, title, logo, video */
     std::string region = "us";      /* us, eu, jp, wor */
     std::string language = "en";

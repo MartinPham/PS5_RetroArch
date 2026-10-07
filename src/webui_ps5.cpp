@@ -1237,6 +1237,19 @@ MHD_Result scraper_route(MHD_Connection *c, const std::string &url, const std::s
         o.language = query(c, "language", "en");
         o.overwrite = std::strcmp(arg(c, "overwrite"), "1") == 0;
         o.details = std::strcmp(arg(c, "details"), "1") == 0;
+        // The sources in order ("libretro,screenscraper"): each asked for what is still missing.
+        const std::string sources = arg(c, "sources");
+        for (size_t at = 0; at < sources.size();)
+        {
+            size_t end = sources.find(',', at);
+            if (end == std::string::npos)
+                end = sources.size();
+            if (end > at)
+                o.sources.push_back(sources.substr(at, end - at));
+            at = end + 1;
+        }
+        if (!o.sources.empty())
+            o.source = o.sources.front();
         const std::string kinds = arg(c, "kinds");
         size_t start = 0;
         while (start < kinds.size())

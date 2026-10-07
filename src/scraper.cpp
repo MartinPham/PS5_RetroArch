@@ -365,7 +365,34 @@ struct Item
     unsigned found = 0, missing = 0, tasks_open = 0;
     bool started = false;         /* this job began fetching for it (an interruption may follow) */
     std::vector<std::string> got; /* the kinds this job stored for it (the recap) */
+    std::map<std::string, std::string> matches; /* source: the name it knows the game by */
+    std::string candidates_source;              /* whose names the candidates are */
 };
+/* Each source's name for a game, "source=name" separated by the unit separator. */
+std::string matches_text(const std::map<std::string, std::string> &matches)
+{
+    std::string out;
+    for (const auto &match : matches)
+        out += (out.empty() ? "" : "\x1f") + match.first + '=' + match.second;
+    return out;
+}
+std::map<std::string, std::string> matches_from(const std::string &text)
+{
+    std::map<std::string, std::string> out;
+    size_t start = 0;
+    while (start < text.size())
+    {
+        size_t end = text.find('\x1f', start);
+        if (end == std::string::npos)
+            end = text.size();
+        const std::string entry = text.substr(start, end - start);
+        const size_t equals = entry.find('=');
+        if (equals != std::string::npos && equals > 0)
+            out[entry.substr(0, equals)] = entry.substr(equals + 1);
+        start = end + 1;
+    }
+    return out;
+}
 std::vector<std::string> candidates_from_list(const std::string &text)
 {
     std::vector<std::string> out;
@@ -499,10 +526,11 @@ void save_job(Job &job, bool force)
     job.saved = now;
     std::string text = "PS5 RetroArch scraper job 1\n";
     text += "id\t" + job.id + "\ncreated\t" + job.created + "\nstate\t" + job.state + "\nmode\t" +
-            job.options.mode + "\nsource\t" + job.options.source + "\nkinds\t" +
-            kinds_text(job.options.kinds) + "\nregion\t" + job.options.region + "\nlanguage\t" +
-            job.options.language + "\noverwrite\t" + (job.options.overwrite ? "1" : "0") +
-            "\ndetails\t" + (job.options.details ? "1" : "0") + "\ncounters\t" +
+            job.options.mode + "\nsource\t" + job.options.source + "\nsources\t" +
+            kinds_text(job.options.sources) + "\nkinds\t" + kinds_text(job.options.kinds) +
+            "\nregion\t" + job.options.region + "\nlanguage\t" + job.options.language +
+            "\noverwrite\t" + (job.options.overwrite ? "1" : "0") + "\ndetails\t" +
+            (job.options.details ? "1" : "0") + "\ncounters\t" +
             std::to_string(job.downloaded_files) + ' ' + std::to_string(job.downloaded_bytes) +
             ' ' + std::to_string(job.transferred_files) + ' ' +
             std::to_string(job.transferred_bytes) + '\n';
@@ -517,7 +545,9 @@ void save_job(Job &job, bool force)
                 escape_field(item.game.crc32) + '\t' + escape_field(item.matched) + '\t' +
                 escape_field(item.message) + '\t' + (item.started ? "1" : "0") + '\t' +
                 escape_field(candidates_text(item.candidates)) + '\t' +
-                escape_field(kinds_text(item.got)) + '\n';
+                escape_field(kinds_text(item.got)) + '\t' +
+                escape_field(matches_text(item.matches)) + '\t' +
+                escape_field(item.candidates_source) + '\n';
     }
     make_folders(jobs_folder());
     write_atomic(jobs_folder() + '/' + job.id + ".job", text);
@@ -563,6 +593,8 @@ std::shared_ptr<Job> load_job(const std::string &path)
                 job->options.mode = v;
             else if (k == "source")
                 job->options.source = v;
+            else if (k == "sources")
+                job->options.sources = candidates_from_list(v);
             else if (k == "kinds")
                 job->options.kinds = kinds_from(v);
             else if (k == "region")
@@ -585,7 +617,7 @@ std::shared_ptr<Job> load_job(const std::string &path)
                 }
             }
         }
-        else if (f.size() >= 8 && f.size() <= 11 && f[0] == "item")
+        else if (f.size() >= 8 && f.size() <= 13 && f[0] == "item")
         {
             Item item;
             item.state = state_from(f[1]);
@@ -604,9 +636,15 @@ std::shared_ptr<Job> load_job(const std::string &path)
                 for (const auto &kind : candidates_from_list(f[10]))
                     if (kind == "details" || kind_folders.count(kind))
                         note_got(item, kind);
+            if (f.size() >= 12)
+                item.matches = matches_from(f[11]);
+            if (f.size() >= 13)
+                item.candidates_source = f[12];
             job->items.push_back(item);
         }
     }
+    if (job->options.sources.empty())
+        job->options.sources = {job->options.source};
     return job->id.empty() ? nullptr : job;
 }
 
@@ -1122,14 +1160,12 @@ void pause_job(Job &job, const std::string &why)
     save_job(job, true);
 }
 
-void process_screenscraper(Http &http, Job &job, unsigned index)
+void process_screenscraper(Http &http, Job &job, unsigned index, const Options &options)
 {
     Item item;
-    Options options;
     {
         std::lock_guard<std::mutex> guard(lock);
         item = job.items[index];
-        options = job.options;
     }
     auto finish = [&](State state, const std::string &message)
     {
@@ -1311,17 +1347,13 @@ void process_screenscraper(Http &http, Job &job, unsigned index)
                   : "");
 }
 
-void process(Http &http, Job &job, unsigned index)
+void process_libretro(Http &http, Job &job, unsigned index, const Options &options)
 {
     Item item;
-    Options options;
     {
         std::lock_guard<std::mutex> guard(lock);
         item = job.items[index];
-        options = job.options;
     }
-    if (options.source == "screenscraper")
-        return process_screenscraper(http, job, index);
     std::vector<std::string> kinds, unavailable;
     for (const auto &kind : options.kinds)
         (libretro_folders.count(kind) ? kinds : unavailable).push_back(kind);
@@ -1459,6 +1491,195 @@ void process(Http &http, Job &job, unsigned index)
     finish(item.missing || !unavailable.empty() ? State::partial : State::done, note);
 }
 
+/* ---- the chain of sources ------------------------------------------------------------ */
+std::string source_name(const std::string &source)
+{
+    return source == "screenscraper" ? "ScreenScraper" : source == "libretro" ? "libretro" : source;
+}
+bool source_offers(const std::string &source, const std::string &kind)
+{
+    if (kind == "details")
+        return source != "libretro";
+    return source == "libretro" ? libretro_folders.count(kind) > 0
+                                : screenscraper_types.count(kind) > 0;
+}
+bool holds(const std::vector<std::string> &list, const std::string &value)
+{
+    return std::find(list.begin(), list.end(), value) != list.end();
+}
+void process_one(Http &http, Job &job, unsigned index, const Options &options)
+{
+    if (options.source == "screenscraper")
+        process_screenscraper(http, job, index, options);
+    else
+        process_libretro(http, job, index, options);
+}
+
+/* One game through the job's sources in order: the first is asked for every kind (and
+ * the details), each next one only for what is still missing, until nothing is. Each
+ * source keeps its own name for the game; a game no source identified waits for the
+ * user with the first source's choices. */
+void process(Http &http, Job &job, unsigned index)
+{
+    Item item;
+    Options options;
+    {
+        std::lock_guard<std::mutex> guard(lock);
+        item = job.items[index];
+        options = job.options;
+    }
+    if (options.sources.size() <= 1)
+    {
+        if (!options.sources.empty())
+            options.source = options.sources.front();
+        return process_one(http, job, index, options);
+    }
+    /* What this game still lacks of what the job asks (a kind found earlier in this job,
+     * before an interruption, is not asked again). */
+    std::vector<std::string> remaining;
+    for (const auto &kind : options.kinds)
+        if (!holds(item.got, kind) && wanted(item.game, kind, options))
+            remaining.push_back(kind);
+    bool details_left = options.details && !holds(item.got, "details") &&
+                        (options.overwrite || !has_details(item.game.system, item.game.key));
+    if (remaining.empty() && !details_left)
+    {
+        std::lock_guard<std::mutex> guard(lock);
+        auto &target = job.items[index];
+        const bool ours = target.started || !target.got.empty();
+        target.state = ours ? State::done : State::skipped;
+        target.message = ours ? "" : "Already in the library.";
+        save_job(job, false);
+        return;
+    }
+    struct Problem
+    {
+        State state = State::pending;
+        std::string source, message;
+        std::vector<std::string> candidates;
+    } problem;
+    std::string failure;
+    std::vector<std::string> asked;
+    for (const auto &source : options.sources)
+    {
+        Options one = options;
+        one.source = source;
+        one.kinds.clear();
+        for (const auto &kind : remaining)
+            if (source_offers(source, kind))
+                one.kinds.push_back(kind);
+        one.details = details_left && source_offers(source, "details");
+        if (one.kinds.empty() && !one.details)
+            continue;
+        asked.push_back(source);
+        {
+            std::lock_guard<std::mutex> guard(lock);
+            auto &target = job.items[index];
+            target.matched = target.matches.count(source) ? target.matches.at(source) : "";
+            target.candidates.clear();
+            target.state = State::working;
+        }
+        process_one(http, job, index, one);
+        Item after;
+        std::string job_state;
+        {
+            std::lock_guard<std::mutex> guard(lock);
+            auto &target = job.items[index];
+            if (!target.matched.empty() && target.candidates.empty())
+                target.matches[source] = target.matched;
+            after = target;
+            job_state = job.state;
+        }
+        /* A source that must wait (a quota, a closed API) holds the game for the resume. */
+        if (cancelling || job_state != "running")
+        {
+            std::lock_guard<std::mutex> guard(lock);
+            job.items[index].state = State::pending;
+            save_job(job, true);
+            return;
+        }
+        if ((after.state == State::ambiguous && problem.state != State::ambiguous) ||
+            (after.state == State::unmatched && problem.source.empty()))
+        {
+            problem.state = after.state;
+            problem.source = source;
+            problem.message = after.message;
+            problem.candidates = after.candidates;
+        }
+        if (after.state == State::failed && failure.empty())
+            failure = source_name(source) + ": " + after.message;
+        std::vector<std::string> still;
+        for (const auto &kind : remaining)
+            if (!holds(after.got, kind) && wanted(item.game, kind, options))
+                still.push_back(kind);
+        remaining = still;
+        details_left = details_left && !holds(after.got, "details");
+        if (remaining.empty() && !details_left)
+            break;
+    }
+    std::lock_guard<std::mutex> guard(lock);
+    auto &target = job.items[index];
+    target.matched.clear();
+    for (const auto &source : options.sources)
+        if (target.matches.count(source))
+        {
+            target.matched = target.matches.at(source);
+            break;
+        }
+    target.candidates.clear();
+    target.candidates_source.clear();
+    std::string sources;
+    for (size_t i = 0; i < asked.size(); ++i)
+        sources += (i ? (i + 1 == asked.size() ? " or " : ", ") : "") + source_name(asked[i]);
+    if (remaining.empty() && !details_left)
+    {
+        target.state = State::done;
+        target.message.clear();
+    }
+    /* A source that could not tell which game it is: its choices, for what is left. */
+    else if (problem.state == State::ambiguous)
+    {
+        target.state = State::ambiguous;
+        target.candidates = problem.candidates;
+        target.candidates_source = problem.source;
+        target.message = (target.got.empty() ? source_name(problem.source) + " offers these"
+                                             : "Some found; for the rest, " +
+                                                   source_name(problem.source) + " offers these") +
+                         ": choose, search, or skip.";
+    }
+    else if (!target.got.empty())
+    {
+        std::string names;
+        for (const auto &kind : remaining)
+            names += (names.empty() ? "" : ", ") + kind_name(kind);
+        if (details_left)
+            names += std::string(names.empty() ? "" : ", ") + "Game details";
+        target.state = State::partial;
+        target.message = "Not found at " + sources + ": " + names + '.';
+    }
+    else if (!problem.source.empty())
+    {
+        target.state = problem.state;
+        target.candidates = problem.candidates;
+        target.candidates_source = problem.source;
+        target.message =
+            problem.state == State::ambiguous
+                ? source_name(problem.source) + " offers these: choose, search, or skip."
+                : "Not found at " + sources + ". Search by name or skip.";
+    }
+    else if (!failure.empty())
+    {
+        target.state = State::failed;
+        target.message = failure;
+    }
+    else
+    {
+        target.state = State::unmatched;
+        target.message = "Not found at " + sources + ". Search by name or skip.";
+    }
+    save_job(job, false);
+}
+
 /* ---- workers ---------------------------------------------------------------------- */
 constexpr unsigned worker_count = 4;
 void worker()
@@ -1480,7 +1701,7 @@ void worker()
                     auto next = std::find_if(items.begin(), items.end(), [](const Item &i)
                                              { return i.state == State::pending; });
                     /* ScreenScraper: no more games at once than the account may ask about. */
-                    if (next != items.end() && active->options.source == "screenscraper" &&
+                    if (next != items.end() && holds(active->options.sources, "screenscraper") &&
                         unsigned(std::count_if(items.begin(), items.end(), [](const Item &i)
                                                { return i.state == State::working; })) >=
                             std::max(1u, screenscraper_threads.load()))
@@ -1824,7 +2045,8 @@ std::string settings_json()
             ",\"details\":" + (std::string(source.id) == "libretro" ? "false" : "true") +
             ",\"kinds\":" + list(source.kinds) + '}';
     return "{\"mode\":" + quote(get("mode", "")) +
-           ",\"source\":" + quote(get("source", "libretro")) +
+           ",\"source\":" + quote(get("source", "libretro")) + ",\"chain\":" +
+           list(candidates_from_list(get("sources", get("source", "libretro").c_str()))) +
            ",\"kinds\":" + list(kinds_from(get("kinds", "cover,screenshot,title"))) +
            ",\"details\":" + (get("details", "1") == "1" ? "true" : "false") +
            ",\"region\":" + quote(get("region", "us")) +
@@ -1921,6 +2143,8 @@ bool save_settings(const Options &options)
     Fields fields;
     fields["mode"] = options.mode;
     fields["source"] = options.source;
+    fields["sources"] = kinds_text(
+        options.sources.empty() ? std::vector<std::string>{options.source} : options.sources);
     fields["kinds"] = kinds_text(options.kinds);
     fields["details"] = options.details ? "1" : "0";
     fields["region"] = options.region;
@@ -1945,7 +2169,28 @@ bool start(const Options &requested, const std::vector<Selection> &selection, st
         why = "Choose where to download: this PC or the PS5.";
         return false;
     }
-    if (options.source == "screenscraper")
+    if (options.sources.empty())
+        options.sources = {options.source};
+    {
+        std::vector<std::string> unique;
+        for (const auto &source : options.sources)
+            if (!holds(unique, source))
+                unique.push_back(source);
+        options.sources = unique;
+    }
+    options.source = options.sources.front();
+    if (options.mode == "pc" && options.sources.size() > 1)
+    {
+        why = "This PC → PS5 takes one source at a time. Choose PS5 to combine sources.";
+        return false;
+    }
+    for (const auto &source : options.sources)
+        if (source != "libretro" && source != "screenscraper")
+        {
+            why = "This source is not available yet.";
+            return false;
+        }
+    if (holds(options.sources, "screenscraper"))
     {
         if (!screenscraper_ready())
         {
@@ -1966,12 +2211,7 @@ bool start(const Options &requested, const std::vector<Selection> &selection, st
             return false;
         }
     }
-    else if (options.source != "libretro")
-    {
-        why = "This source is not available yet.";
-        return false;
-    }
-    if (options.source == "libretro")
+    if (options.sources == std::vector<std::string>{"libretro"})
         options.details = false; /* libretro has pictures only */
     if (options.kinds.empty() && !options.details)
     {
@@ -2088,6 +2328,7 @@ std::string job_json(const std::string &id)
     return "{\"job\":{\"id\":" + quote(job->id) + ",\"created\":" + quote(job->created) +
            ",\"state\":" + quote(job->state) + ",\"message\":" + quote(job->message) +
            ",\"mode\":" + quote(job->options.mode) + ",\"source\":" + quote(job->options.source) +
+           ",\"sources\":" + quote(kinds_text(job->options.sources)) +
            ",\"overwrite\":" + (job->options.overwrite ? "true" : "false") +
            ",\"total\":" + std::to_string(job->items.size()) + ",\"counts\":{" + state_counts +
            "},\"downloaded\":{\"files\":" + std::to_string(job->downloaded_files) +
@@ -2166,8 +2407,8 @@ std::string recap_json(const std::string &id)
                       ",\"had\":" + std::to_string(totals[kind][1]) +
                       ",\"missed\":" + std::to_string(totals[kind][2]) + '}';
     return "{\"recap\":{\"id\":" + quote(job->id) + ",\"source\":" + quote(job->options.source) +
-           ",\"kinds\":" + list(kinds) + ",\"totals\":{" + total_text + "},\"systems\":[" +
-           systems + "]}}";
+           ",\"sources\":" + quote(kinds_text(job->options.sources)) + ",\"kinds\":" + list(kinds) +
+           ",\"totals\":{" + total_text + "},\"systems\":[" + systems + "]}}";
 }
 
 bool cancel(const std::string &id)
@@ -2207,16 +2448,18 @@ bool resolve(const std::string &id, unsigned index, const std::string &action,
             save_job(*job, true);
             return true;
         }
+        const std::string source =
+            !item.candidates_source.empty() ? item.candidates_source : job->options.source;
         if (action == "choose")
         {
-            if (value.empty() ||
-                (job->options.source == "libretro" && value.find('/') != std::string::npos) ||
-                (job->options.source == "screenscraper" && candidate_id(value).empty()))
+            if (value.empty() || (source == "libretro" && value.find('/') != std::string::npos) ||
+                (source == "screenscraper" && candidate_id(value).empty()))
             {
                 why = "Choose one of the names offered.";
                 return false;
             }
             item.matched = value;
+            item.matches[source] = value;
             item.candidates.clear();
             item.state = State::pending;
             if (job->state != "running")
@@ -2236,14 +2479,16 @@ bool resolve(const std::string &id, unsigned index, const std::string &action,
     }
     /* A search runs here, on the request's thread: the index is cached after once. */
     Http http("PS5-RetroArch-Scraper/1");
-    std::string database, region;
+    std::string database, region, source;
     {
         std::lock_guard<std::mutex> guard(lock);
         database = job->items[index].game.database;
         region = job->options.region;
+        source = !job->items[index].candidates_source.empty() ? job->items[index].candidates_source
+                                                              : job->options.source;
     }
     std::vector<std::string> found;
-    if (job->options.source == "screenscraper")
+    if (source == "screenscraper")
     {
         std::string system_id;
         {
@@ -2260,6 +2505,7 @@ bool resolve(const std::string &id, unsigned index, const std::string &action,
     std::lock_guard<std::mutex> guard(lock);
     auto &item = job->items[index];
     item.candidates = found;
+    item.candidates_source = source;
     item.state = found.empty() ? State::unmatched : State::ambiguous;
     item.message = found.empty() ? "Nothing found for \"" + value + "\"."
                                  : "Choose the right game, search, or skip.";

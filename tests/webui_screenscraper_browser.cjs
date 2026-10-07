@@ -15,22 +15,22 @@ const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
     await page.route('https://api.github.com/**', route => route.fulfill({ json: [] }));
     await page.goto(process.env.WEBUI_TEST_URL + '/#media');
     await page.waitForFunction(() => document.querySelectorAll('.kind-tile').length === 10);
-    const chip = page.locator('#scrape-sources .chip', { hasText: 'ScreenScraper' });
-    assert.equal(await chip.isDisabled(), false);
-    assert.match(await chip.innerText(), /Sign in/);
-    assert.equal(await chip.locator('.signed-check').count(), 0);
-    // A click opens the form; the source is not chosen until signed in.
-    await chip.click();
+    const item = page.locator('.source-item[data-source="screenscraper"]'), libretro = page.locator('.source-item[data-source="libretro"]');
+    const toggle = item.locator('.source-toggle'), order = item.locator('.source-order');
+    // Not signed in: a Sign in button instead of its switch; libretro alone is on.
+    assert.equal(await item.getByRole('button', { name: 'Sign in' }).count(), 1);
+    assert.equal(await toggle.count(), 0);
+    assert.equal(await libretro.locator('.source-order').innerText(), '1');
+    await item.getByRole('button', { name: 'Sign in' }).click();
     const dialog = page.locator('#sign-in');
     await dialog.waitFor({ state: 'visible' });
-    assert.equal(await chip.getAttribute('aria-checked'), 'false');
     assert.equal(await page.locator('#sign-in-user').evaluate(n => n === document.activeElement), true);
     assert.equal(await page.locator('#sign-in-password').getAttribute('type'), 'password');
     await page.locator('#sign-in-user').fill(process.env.SS_USER);
     await page.locator('#sign-in-password').fill('wrong-password');
     await page.locator('#sign-in-submit').click();
     await page.waitForFunction(() => /did not accept/.test(document.querySelector('#sign-in-error').textContent));
-    assert.equal(await chip.locator('.signed-check').count(), 0);
+    assert.equal(await item.locator('.signed-check').count(), 0);
     await page.locator('#sign-in-password').fill(process.env.SS_PASSWORD);
     await page.locator('#sign-in-submit').click();
     await page.waitForFunction(() => !document.querySelector('#sign-in-account').hidden);
@@ -39,28 +39,37 @@ const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
     assert.equal(await page.locator('#sign-in-password').inputValue(), '', 'the password is cleared from the page');
     await page.locator('#sign-in-submit').click(); // Done
     await dialog.waitFor({ state: 'hidden' });
-    // The green check, the source chosen, its own media and the language offered; PC mode off.
-    assert.equal(await chip.locator('.signed-check').count(), 1);
-    assert.equal(await chip.getAttribute('aria-checked'), 'true');
+    // Signed in: the green check, and it joins the chain after libretro.
+    assert.equal(await item.locator('.signed-check').count(), 1);
+    assert.equal(await toggle.getAttribute('aria-checked'), 'true');
+    assert.equal(await order.innerText(), '2');
+    assert.match(await page.locator('#scrape-source-hint').innerText(), /asks libretro thumbnails first; whatever it lacks goes to ScreenScraper/);
     assert.equal(await page.locator('.kind-tile:disabled').count(), 0);
+    assert.match(await page.locator('.kind-tile', { hasText: 'Box art (front)' }).getAttribute('title'), /Asked of libretro thumbnails, then ScreenScraper/);
     assert.equal(await page.locator('#scrape-language-pick').isVisible(), true);
     assert.equal(await page.locator('input[name="scrape-method"][value="pc"]').isDisabled(), true);
     assert.match(await page.locator('#scrape-account-text').innerText(), /Signed in to ScreenScraper/);
+    // The order changes with the arrows; a source can be turned off.
+    await item.getByRole('button', { name: 'Ask ScreenScraper earlier' }).click();
+    assert.equal(await order.innerText(), '1');
+    assert.equal(await libretro.locator('.source-order').innerText(), '2');
+    await libretro.locator('.source-toggle').click();
+    assert.equal(await libretro.locator('.source-toggle').getAttribute('aria-checked'), 'false');
+    assert.equal(await page.locator('.source-item.on').count(), 1);
+    await libretro.locator('.source-toggle').click();
     // Still signed in after a reload (kept on the console, not in the page).
     await page.reload();
     await page.waitForFunction(() => document.querySelectorAll('.kind-tile').length === 10);
-    assert.equal(await chip.locator('.signed-check').count(), 1);
-    // Signed in, a click just chooses the source (no form).
-    await chip.click();
-    assert.equal(await chip.getAttribute('aria-checked'), 'true');
-    assert.equal(await dialog.isVisible(), false);
-    // Manage, then sign out: the check goes, libretro is chosen again.
+    assert.equal(await item.locator('.signed-check').count(), 1);
+    // Manage, then sign out: the check and the switch go, libretro alone again.
+    await page.locator('.source-item[data-source="screenscraper"] .source-toggle').click();
     await page.locator('#scrape-account-manage').click();
     await dialog.waitFor({ state: 'visible' });
     await page.locator('#sign-in-forget').click();
     await dialog.waitFor({ state: 'hidden' });
-    assert.equal(await chip.locator('.signed-check').count(), 0);
-    assert.equal(await page.locator('#scrape-sources .chip', { hasText: 'libretro' }).getAttribute('aria-checked'), 'true');
+    assert.equal(await item.locator('.signed-check').count(), 0);
+    assert.equal(await item.getByRole('button', { name: 'Sign in' }).count(), 1);
+    assert.equal(await page.locator('.source-item.on').count(), 1);
     assert.equal(await page.locator('input[name="scrape-method"][value="pc"]').isDisabled(), false);
     for (const text of answers) assert.ok(!text.includes(process.env.SS_PASSWORD), 'an answer held the password');
     assert.deepEqual(errors, []);

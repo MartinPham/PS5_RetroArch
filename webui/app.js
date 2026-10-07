@@ -10,7 +10,7 @@ const transfers = [];
 // The Games and Download Media tabs' state: declared here, as a page opened straight on
 // either tab reaches them before the code below them has run.
 let library = { systems: [] }, selectedGames = new Map(), shownGames = 300;
-let scrapeSource = 'libretro', scrapeKinds = new Set(), scraperSettings = null, scrapeDetails = true;
+let scrapeChain = ['libretro'], scrapeKinds = new Set(), scraperSettings = null, scrapeDetails = true;
 let recap = null, recapStamp = '', recapFilter = 'all', recapKind = '', recapLimit = {};
 let jobTimer = null, jobShown = null;
 function element(tag, text, className) {
@@ -1000,7 +1000,16 @@ function drawDetails() {
   tile.addEventListener('click', () => { scrapeDetails = !scrapeDetails; drawDetails(); drawSummary(); });
   $('#scrape-details-box').replaceChildren(tile);
 }
-function chosenSource() { return scraperSettings.sources.find(s => s.id === scrapeSource) || scraperSettings.sources[0]; }
+// The chain of sources, in order; chosenSource() is what they offer together.
+function chainSources() { return scrapeChain.map(id => scraperSettings.sources.find(s => s.id === id)).filter(Boolean); }
+function chosenSource() {
+  const list = chainSources();
+  if (!list.length) return { id: '', ids: [], name: 'no source', kinds: [], details: false, description: 'Turn on at least one source.' };
+  return { id: list.map(s => s.id).join(','), ids: list.map(s => s.id), name: list.map(s => s.name).join(' → '),
+    kinds: [...new Set(list.flatMap(s => s.kinds))], details: list.some(s => s.details), description: list.length === 1 ? list[0].description : '' };
+}
+function sourcesFor(kind) { return chainSources().filter(s => kind === 'details' ? s.details : s.kinds.includes(kind)).map(s => s.name); }
+function pcAllowed() { const ids = chosenSource().ids; return ids.length <= 1 && !ids.includes('screenscraper'); }
 function svgIcon(path) {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('class', 'icon'); svg.setAttribute('aria-hidden', 'true');
   const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); p.setAttribute('d', path); svg.append(p); return svg;
@@ -1009,38 +1018,76 @@ function svgIcon(path) {
 for (const span of $$('[data-view-icon]')) span.prepend(svgIcon(KIND_ICONS[span.dataset.viewIcon]));
 function drawMethod() {
   const method = $('input[name="scrape-method"]:checked')?.value || '';
-  $('#scrape-method-hint').textContent = METHOD_HINTS[method] + (scraperSettings && chosenSource().id === 'screenscraper'
-    ? ' ScreenScraper downloads run on the PS5 only: its links carry private account details that never leave the console.' : '');
+  const ids = scraperSettings ? chosenSource().ids : [];
+  $('#scrape-method-hint').textContent = METHOD_HINTS[method] + (ids.includes('screenscraper')
+    ? ' ScreenScraper downloads run on the PS5 only: its links carry private account details that never leave the console.'
+    : ids.length > 1 ? ' Combined sources download on the PS5.' : '');
   drawSummary();
 }
 function drawSources() {
-  const box = $('#scrape-sources'); box.replaceChildren();
-  for (const source of scraperSettings.sources) {
-    const chip = element('button', undefined, 'chip'); chip.type = 'button';
-    const logo = iconNode('source-' + source.id); if (logo) chip.append(logo);
-    chip.append(element('span', source.name));
-    chip.setAttribute('role', 'radio'); chip.setAttribute('aria-checked', source.id === scrapeSource);
-    if (!source.available) { chip.disabled = true; chip.append(element('em', 'Coming', 'soon-tag')); }
-    else if (source.account && source.signed_in) { chip.append(checkNode()); chip.title = `${source.name}: signed in`; }
-    else if (source.account) { chip.append(element('em', 'Sign in', 'lock-tag')); chip.title = `${source.name}: sign in to use it`; }
-    // A source with an account asks for it first; once signed in, the chip just picks it.
-    chip.addEventListener('click', () => {
-      if (source.account && !source.signed_in) { openSignIn(source); return; }
-      scrapeSource = source.id; drawSources(); drawKinds();
-    });
-    chip.addEventListener('mouseenter', () => { $('#scrape-source-hint').textContent = source.description; });
-    chip.addEventListener('focus', () => { $('#scrape-source-hint').textContent = source.description; });
-    box.append(chip);
+  const box = $('#scrape-sources'), ordered = [...chainSources(), ...scraperSettings.sources.filter(s => !scrapeChain.includes(s.id))];
+  box.replaceChildren();
+  const arrow = d => { const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('viewBox', '0 0 24 24'); const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); p.setAttribute('d', d); svg.append(p); return svg; };
+  const move = (id, by) => { const i = scrapeChain.indexOf(id), j = i + by; if (i < 0 || j < 0 || j >= scrapeChain.length) return; [scrapeChain[i], scrapeChain[j]] = [scrapeChain[j], scrapeChain[i]]; drawSources(); drawKinds(); };
+  for (const source of ordered) {
+    const on = scrapeChain.includes(source.id), order = scrapeChain.indexOf(source.id);
+    const item = element('li', undefined, `source-item ${!source.available ? 'unavailable' : on ? 'on' : 'off'}`); item.dataset.source = source.id;
+    const number = element('span', on ? String(order + 1) : '', 'source-order'); number.setAttribute('aria-hidden', 'true');
+    const logo = iconNode('source-' + source.id) || element('span');
+    const text = element('div', undefined, 'source-text'), name = element('strong');
+    name.append(element('span', source.name));
+    if (!source.available) name.append(element('em', 'Coming', 'soon-tag'));
+    else if (source.account && source.signed_in) name.append(checkNode());
+    text.append(name, element('small', source.description));
+    // On or off: a source with an account asks for it first.
+    let control;
+    if (!source.available) control = element('span');
+    else if (source.account && !source.signed_in) {
+      control = element('button', 'Sign in', 'secondary source-sign'); control.type = 'button';
+      control.addEventListener('click', () => openSignIn(source));
+    } else {
+      control = element('button', undefined, 'source-toggle'); control.type = 'button'; control.setAttribute('role', 'switch');
+      control.setAttribute('aria-checked', on); control.setAttribute('aria-label', `Use ${source.name}`);
+      control.addEventListener('click', () => { scrapeChain = on ? scrapeChain.filter(id => id !== source.id) : [...scrapeChain, source.id]; drawSources(); drawKinds(); });
+    }
+    const moves = element('div', undefined, 'source-move');
+    const up = element('button'), down = element('button'); up.type = down.type = 'button';
+    up.append(arrow('M6 15l6-6 6 6')); down.append(arrow('M6 9l6 6 6-6'));
+    up.setAttribute('aria-label', `Ask ${source.name} earlier`); down.setAttribute('aria-label', `Ask ${source.name} later`);
+    up.disabled = !on || order === 0; down.disabled = !on || order === scrapeChain.length - 1;
+    up.addEventListener('click', () => move(source.id, -1)); down.addEventListener('click', () => move(source.id, 1));
+    moves.append(up, down);
+    item.append(number, logo, text, control, moves);
+    // Dragging reorders the sources that are on.
+    if (on && scrapeChain.length > 1) {
+      item.draggable = true;
+      item.addEventListener('dragstart', event => { event.dataTransfer.setData('text/x-source', source.id); item.classList.add('dragging'); });
+      item.addEventListener('dragend', () => item.classList.remove('dragging'));
+    }
+    if (on) {
+      item.addEventListener('dragover', event => { if ([...event.dataTransfer.types].includes('text/x-source')) { event.preventDefault(); item.classList.add('over'); } });
+      item.addEventListener('dragleave', () => item.classList.remove('over'));
+      item.addEventListener('drop', event => {
+        event.preventDefault(); item.classList.remove('over');
+        const dragged = event.dataTransfer.getData('text/x-source'); if (!dragged || dragged === source.id) return;
+        const rest = scrapeChain.filter(id => id !== dragged); rest.splice(rest.indexOf(source.id), 0, dragged); scrapeChain = rest; drawSources(); drawKinds();
+      });
+    }
+    for (const event of ['mouseenter', 'focusin']) item.addEventListener(event, () => { $('#scrape-source-hint').textContent = source.description; });
+    box.append(item);
   }
-  const chosen = chosenSource();
-  $('#scrape-source-hint').textContent = chosen.description;
-  $('#scrape-account').hidden = !(chosen.account && chosen.signed_in);
-  if (chosen.account && chosen.signed_in) $('#scrape-account-text').textContent = `Signed in to ${chosen.name}`;
-  $('#scrape-language-pick').hidden = chosen.id !== 'screenscraper';
-  // ScreenScraper's media links carry the app's private account: downloaded on the PS5 only.
-  const pc = $('input[name="scrape-method"][value="pc"]'), pcOnly = chosen.id === 'screenscraper';
-  pc.disabled = pcOnly; pc.closest('label').title = pcOnly ? 'ScreenScraper downloads run on the PS5 only.' : '';
-  if (pcOnly && pc.checked) { pc.checked = false; $('input[name="scrape-method"][value="ps5"]').checked = true; }
+  const chosen = chosenSource(), names = chainSources().map(s => s.name);
+  $('#scrape-source-hint').textContent = !names.length ? 'Turn on at least one source.'
+    : names.length === 1 ? chosen.description
+    : `Each game asks ${names[0]} first; whatever it lacks goes to ${names.slice(1).join(', then ')}. Free sources first save the quota of limited ones.`;
+  const signed = chainSources().find(s => s.account && s.signed_in);
+  $('#scrape-account').hidden = !signed;
+  if (signed) { $('#scrape-account-text').textContent = `Signed in to ${signed.name}`; $('#scrape-account-manage').onclick = () => openSignIn(signed); }
+  $('#scrape-language-pick').hidden = !chosen.ids.includes('screenscraper');
+  // Combined sources and ScreenScraper download on the PS5.
+  const pc = $('input[name="scrape-method"][value="pc"]'), pcOff = !pcAllowed();
+  pc.disabled = pcOff; pc.closest('label').title = pcOff ? 'Combined sources and ScreenScraper download on the PS5.' : '';
+  if (pcOff && pc.checked) { pc.checked = false; $('input[name="scrape-method"][value="ps5"]').checked = true; }
   drawMethod();
 }
 function checkNode() {
@@ -1079,7 +1126,8 @@ async function openSignIn(source) {
 function signedIn(state) {
   const source = scraperSettings.sources.find(s => s.id === signInSource.id);
   source.signed_in = signInSource.signed_in = state;
-  if (state) scrapeSource = source.id; else if (scrapeSource === source.id) scrapeSource = 'libretro';
+  if (state && !scrapeChain.includes(source.id)) scrapeChain.push(source.id);
+  if (!state) scrapeChain = scrapeChain.filter(id => id !== source.id);
   drawSources(); drawKinds();
 }
 $('#sign-in-form').addEventListener('submit', async event => {
@@ -1106,7 +1154,6 @@ $('#sign-in-forget').addEventListener('click', async () => {
   } catch (error) { $('#sign-in-error').textContent = error.message; }
 });
 $('#sign-in').addEventListener('close', () => { $('#sign-in-password').value = ''; });
-$('#scrape-account-manage').addEventListener('click', () => openSignIn(chosenSource()));
 function drawKinds() {
   const source = chosenSource(), box = $('#scrape-kinds'); box.replaceChildren();
   for (const kind of scraperSettings.catalog) {
@@ -1114,8 +1161,10 @@ function drawKinds() {
     tile.setAttribute('aria-pressed', has && scrapeKinds.has(kind.id)); tile.disabled = !has;
     tile.append(svgIcon(KIND_ICONS[kind.id] || KIND_ICONS.cover), element('span', kind.name));
     if (!has) tile.append(element('em', scraperSettings.sources.some(s => s.kinds.includes(kind.id)) ? 'Coming' : '—', 'soon-tag'));
-    const others = scraperSettings.sources.filter(s => s.id !== source.id && s.kinds.includes(kind.id)).map(s => s.name);
-    const hint = `${kind.name}: ${kind.description}` + (has ? '' : ` Not from ${source.name}${others.length ? `; ${others.join(', ')} will have it` : ''}.`);
+    const others = scraperSettings.sources.filter(s => !source.ids?.includes(s.id) && s.kinds.includes(kind.id)).map(s => s.name);
+    const from = sourcesFor(kind.id);
+    const hint = `${kind.name}: ${kind.description}` + (has ? (from.length > 1 ? ` Asked of ${from.join(', then ')}.` : ` From ${from[0]}.`)
+      : ` Not from ${source.name || 'the sources on'}${others.length ? `; ${others.join(', ')} will have it` : ''}.`);
     tile.title = hint;
     tile.addEventListener('mouseenter', () => { $('#scrape-kind-hint').textContent = hint; });
     tile.addEventListener('focus', () => { $('#scrape-kind-hint').textContent = hint; });
@@ -1142,9 +1191,9 @@ function drawSummary() {
   const method = $('input[name="scrape-method"]:checked')?.value;
   $('#scrape-system').hidden = scrapeScope() !== 'system';
   $('#scrape-scope-selected').textContent = `Selected (${selectedGames.size})`;
-  const details = detailsOn(), ready = method && (kinds.length || details) && games;
+  const details = detailsOn(), ready = method && chainSources().length && (kinds.length || details) && games;
   $('#scrape-start').disabled = !ready;
-  $('#scrape-summary').textContent = !method ? 'Choose where to download from.' : !kinds.length && !details ? 'Choose at least one kind of media, or Game details.'
+  $('#scrape-summary').textContent = !method ? 'Choose where to download from.' : !chainSources().length ? 'Turn on at least one source.' : !kinds.length && !details ? 'Choose at least one kind of media, or Game details.'
     : !games ? (scrapeScope() === 'selected' ? 'Select games on the Games tab, or choose a system.' : 'No games here yet.')
     : `${[kinds.length ? `${kinds.length} kind${kinds.length === 1 ? '' : 's'} of media` : '', details ? 'game details' : ''].filter(Boolean).join(' + ')} · ${games.toLocaleString()} game${games === 1 ? '' : 's'} · ${chosenSource().name} · ${method === 'pc' ? 'downloaded on this PC, then transferred to the PS5' : 'downloaded on the PS5'}${$('#scrape-overwrite').checked ? ' · replacing what you have' : ' · only what’s missing'}`;
 }
@@ -1154,7 +1203,9 @@ async function openMedia() {
     scraperSettings = await api('/api/scraper/settings');
   } catch (error) { announce(error.message, true); return; }
   for (const radio of $$('input[name="scrape-method"]')) radio.checked = radio.value === scraperSettings.mode;
-  scrapeSource = scraperSettings.sources.some(s => s.id === scraperSettings.source && s.available && (!s.account || s.signed_in)) ? scraperSettings.source : 'libretro';
+  const usable = id => scraperSettings.sources.some(s => s.id === id && s.available && (!s.account || s.signed_in));
+  scrapeChain = (scraperSettings.chain || [scraperSettings.source]).filter(usable);
+  if (!scrapeChain.length) scrapeChain = ['libretro'];
   $('#scrape-language').value = scraperSettings.language || 'en';
   scrapeKinds = new Set(scraperSettings.kinds); scrapeDetails = scraperSettings.details !== false;
   for (const radio of $$('input[name="scrape-region"]')) radio.checked = radio.value === scraperSettings.region;
@@ -1183,7 +1234,7 @@ $('#scrape-start').addEventListener('click', async () => {
   const lines = scope === 'selected' ? [...selectedGames].map(([path, system]) => `${system}\t${path}`)
     : library.systems.filter(s => scope === 'all' || s.id === $('#scrape-system').value).map(s => `${s.id}\t`);
   if ((!kinds.length && !detailsOn()) || !lines.length) { drawSummary(); return; }
-  const query = new URLSearchParams({ mode: method, source: scrapeSource, kinds: kinds.join(','), region: $('input[name="scrape-region"]:checked')?.value || 'us', language: $('#scrape-language').value || scraperSettings.language || 'en', overwrite: $('#scrape-overwrite').checked ? '1' : '0', details: detailsOn() ? '1' : '0' });
+  const query = new URLSearchParams({ mode: method, source: scrapeChain[0] || '', sources: scrapeChain.join(','), kinds: kinds.join(','), region: $('input[name="scrape-region"]:checked')?.value || 'us', language: $('#scrape-language').value || scraperSettings.language || 'en', overwrite: $('#scrape-overwrite').checked ? '1' : '0', details: detailsOn() ? '1' : '0' });
   $('#scrape-start').disabled = true; $('#scrape-result').textContent = '';
   try {
     await api('/api/scraper/settings?' + query, { method: 'POST' });
@@ -1211,7 +1262,7 @@ function drawJob(job) {
   const stateText = { running: 'Running', cancelled: 'Cancelled', done: 'Finished', interrupted: 'Interrupted', paused: 'Paused' }[job.state] || job.state;
   panel.dataset.state = job.state;
   $('#job-title').textContent = running ? 'Downloading media…' : `Download ${stateText.toLowerCase()}`;
-  const sourceName = scraperSettings?.sources.find(s => s.id === job.source)?.name || job.source;
+  const sourceName = (job.sources || job.source).split(',').map(id => scraperSettings?.sources.find(s => s.id === id)?.name || id).join(' → ');
   $('#job-summary').textContent = `${METHOD_NAMES[job.mode]} · ${sourceName} · ${total.toLocaleString()} games` + (job.message ? ` · ${job.message}` : '');
   countTo($('#stat-done'), count(job, 'done')); countTo($('#stat-partial'), count(job, 'partial'));
   countTo($('#stat-kept'), count(job, 'skipped')); countTo($('#stat-attention'), count(job, 'unmatched', 'ambiguous', 'failed'));
@@ -1265,7 +1316,8 @@ function drawRecap() {
   const box = $('#job-recap');
   if (!recap || !recap.systems.length) { box.hidden = true; return; }
   box.hidden = false;
-  const source = scraperSettings?.sources.find(s => s.id === recap.source);
+  const recapSources = (recap.sources || recap.source).split(',').map(id => scraperSettings?.sources.find(s => s.id === id)).filter(Boolean);
+  const source = recapSources.length ? { name: recapSources.map(s => s.name).join(' or '), kinds: [...new Set(recapSources.flatMap(s => s.kinds))] } : null;
   // Per kind: counts and a bar; a click narrows the list to that kind.
   $('#recap-kinds').replaceChildren(...recap.kinds.map(kind => {
     const t = recap.totals[kind], all = t.got + t.had + t.missed || 1, tile = element('button', undefined, 'recap-kind'); tile.type = 'button';

@@ -129,10 +129,13 @@ class ScreenScraper(unittest.TestCase):
         cls.binary = webui_build.build(Path(cls.temp.name) / 'server', 'tests/webui_server_main.cpp')
         cls.source = FakeScreenScraper()
         threading.Thread(target=cls.source.serve_forever, daemon=True).start()
+        cls.libretro = base.FakeLibretro()  # the free source, first in a chain
+        threading.Thread(target=cls.libretro.serve_forever, daemon=True).start()
 
     @classmethod
     def tearDownClass(cls):
         cls.source.shutdown()
+        cls.libretro.shutdown()
         cls.temp.cleanup()
 
     def setUp(self):
@@ -157,12 +160,14 @@ class ScreenScraper(unittest.TestCase):
         (self.root / f'playlists/{DB}.lpl').write_text(json.dumps({'version': '1.5', 'items': items}))
         with self.source.lock:
             self.source.reset()
+        with self.libretro.lock:
+            self.libretro.log.clear()
         self.start_server()
 
     def start_server(self, developer=True):
         self.port = base.free_port()
         env = {**os.environ, 'PS5_SCRAPER_SCREENSCRAPER_BASE': f'http://127.0.0.1:{self.source.server_port}',
-               'PS5_SCRAPER_LIBRETRO_BASE': 'http://127.0.0.1:9'}
+               'PS5_SCRAPER_LIBRETRO_BASE': f'http://127.0.0.1:{self.libretro.server_port}'}
         if developer:
             env.update(PS5_SCRAPER_TEST_DEVID=DEV_ID, PS5_SCRAPER_TEST_DEVPASSWORD=DEV_PASSWORD)
         self.server = subprocess.Popen([str(self.binary), str(self.root), str(self.port)], env=env,
@@ -352,6 +357,79 @@ class ScreenScraper(unittest.TestCase):
         # Neither: refused.
         status, body = self.request('POST', '/api/scraper/start?mode=ps5&source=screenscraper&kinds=&details=0', b'snes\t')
         self.assertEqual((status, json.loads(body)['error']), (409, 'Choose at least one kind of media, or the games\' details.'))
+
+    def chain(self, kinds='cover,screenshot,video', details=True):
+        query = f'mode=ps5&sources=libretro,screenscraper&kinds={kinds}&region=us&language=en&overwrite=0&details={int(details)}'
+        status, body = self.request('POST', f'/api/scraper/start?{query}', b'snes\t')
+        self.assertEqual(status, 201, body)
+        return json.loads(body)['job']['id']
+
+    def ss_media(self):
+        with self.source.lock:
+            return [q['media'] for e, q in self.source.calls if e == 'medias.php']
+
+    def test_a_chain_asks_the_next_source_only_for_what_is_missing(self):
+        self.assertEqual(self.sign_in()[0], 200)
+        job_id = self.chain()
+        job = self.wait(job_id)
+        self.assertEqual(job['sources'], 'libretro,screenscraper')
+        self.assertEqual(job['counts'], {'ambiguous': 1, 'done': 3, 'unmatched': 1}, job)
+        # libretro gave the box art and screenshots; ScreenScraper only the videos (and
+        # the details): not one picture asked of it.
+        self.assertEqual(sorted(self.ss_media()), ['video-normalized'] * 3)
+        library = self.root / 'library/snes'
+        metroid = self.key('Super Metroid (Japan, USA) (En,Ja)')
+        self.assertEqual((library / 'covers' / f'{metroid}.png').read_bytes(), base.image('Super Metroid (Japan, USA) (En,Ja)', 'Named_Boxarts'))
+        self.assertEqual((library / 'videos' / f'{metroid}.mp4').read_bytes(), media_bytes('1001', 'video-normalized', 'us'))
+        self.assertIn('description = "English story 1001"', (library / 'metadata' / f'{metroid}.meta').read_text())
+        # The game no source could tell: libretro's choices first; once chosen, what is
+        # left goes to ScreenScraper, which offers its own choices for it.
+        chrono = next(p for p in job['problems'] if p['label'] == 'Chrono')
+        self.assertIn('Chrono Trigger (USA)', chrono['candidates'])
+        self.assertIn('libretro offers these', chrono['message'])
+        self.request('POST', f'/api/scraper/resolve?id={job_id}&item={chrono["item"]}&action=choose&value=' + urllib.parse.quote('Chrono Trigger (USA)'))
+        job = self.wait(job_id, lambda j: j['state'] == 'done' and not j['counts'].get('pending') and not j['counts'].get('working'))
+        chrono = next(p for p in job['problems'] if p['label'] == 'Chrono')
+        self.assertIn('Some found; for the rest, ScreenScraper offers these', chrono['message'])
+        self.assertIn('Chrono Trigger: Jet Bike Special [1003]', chrono['candidates'])
+        self.assertTrue((library / 'covers' / 'Chrono.png').exists())
+        self.request('POST', f'/api/scraper/resolve?id={job_id}&item={chrono["item"]}&action=choose&value=' + urllib.parse.quote('Chrono Trigger: Jet Bike Special [1003]'))
+        job = self.wait(job_id, lambda j: j['state'] == 'done' and not j['counts'].get('pending') and not j['counts'].get('working'))
+        self.assertEqual(job['counts'], {'done': 4, 'unmatched': 1})
+        self.assertEqual((library / 'videos' / 'Chrono.mp4').read_bytes(), media_bytes('1003', 'video-normalized', 'us'))
+        self.assertEqual((library / 'covers' / 'Chrono.png').read_bytes(), base.image('Chrono Trigger (USA)', 'Named_Boxarts'))  # libretro's kept
+        unknown = next(p for p in job['problems'] if p['label'] == 'Totally Unknown Homebrew')
+        self.assertEqual(unknown['message'], 'Not found at libretro or ScreenScraper. Search by name or skip.')
+        recap = json.loads(self.request('GET', f'/api/scraper/recap?id={job_id}')[1])['recap']
+        self.assertEqual(recap['totals']['video'], {'got': 4, 'had': 0, 'missed': 1})
+
+    def test_a_chain_paused_by_a_quota_does_not_ask_again_what_it_found(self):
+        self.assertEqual(self.sign_in()[0], 200)
+        with self.source.lock:
+            self.source.quota_hit = True
+        job_id = self.chain(kinds='cover,video', details=False)
+        job = self.wait(job_id, lambda j: j['state'] == 'paused')
+        self.assertIn('quota for today is used up', job['message'])
+        served = lambda: [p for m, a, p in self.libretro.log if m == 'GET' and p.endswith('.png') and p.split('/')[-1][:-4] in base.SOURCE]
+        with self.libretro.lock:
+            self.assertGreater(len(served()), 0)  # libretro served some before ScreenScraper stopped
+        with self.source.lock:
+            self.source.quota_hit = False
+        self.assertEqual(self.request('POST', f'/api/scraper/resume?id={job_id}')[0], 200)
+        job = self.wait(job_id)
+        self.assertEqual(job['counts'], {'ambiguous': 1, 'done': 3, 'unmatched': 1}, job)
+        with self.libretro.lock:
+            covers = served()
+        self.assertEqual(len(covers), len(set(covers)), covers)  # no cover libretro gave was fetched again
+        self.assertEqual(len(covers), 3)
+        self.assertEqual(sorted(self.ss_media()), ['video-normalized'] * 3)
+
+    def test_a_chain_is_ps5_only_and_remembered(self):
+        self.assertEqual(self.sign_in()[0], 200)
+        status, body = self.request('POST', '/api/scraper/start?mode=pc&sources=libretro,screenscraper&kinds=cover', b'snes\t')
+        self.assertEqual((status, json.loads(body)['error']), (409, 'This PC → PS5 takes one source at a time. Choose PS5 to combine sources.'))
+        self.request('POST', '/api/scraper/settings?mode=ps5&sources=screenscraper,libretro&kinds=cover')
+        self.assertEqual(json.loads(self.request('GET', '/api/scraper/settings')[1])['chain'], ['screenscraper', 'libretro'])
 
     def test_a_quota_pauses_the_job_until_resumed(self):
         self.assertEqual(self.sign_in()[0], 200)
