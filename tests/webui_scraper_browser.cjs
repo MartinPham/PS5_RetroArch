@@ -101,6 +101,78 @@ const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
     await page.locator('.game-card', { hasText: 'Donkey Kong Country 2' }).locator('.game-select').click();
     assert.equal(await sheet.isVisible(), false);
     await page.locator('.game-card', { hasText: 'Donkey Kong Country 2' }).locator('.game-select').click();
+    // Sorting/filtering the complete library, across systems, before the 300-card limit.
+    const game = (name, details = {}) => ({ name, label: name, key: name, path: `/app0/content/${name}.zip`, media: [], ...details });
+    const library = { systems: [
+      { id: 'snes', name: 'Super Nintendo', games: [game('Zelda', { released: '1991', rating: '0.9', genre: 'Adventure', developer: 'Nintendo', publisher: 'Nintendo' }), game('Alpha 10'), game('Éclair', { released: '1994-04-18', rating: '0.8' })] },
+      { id: 'nes', name: 'Nintendo', games: [game('Alpha 2', { released: '1987-01', rating: '0', media: ['cover', 'screenshot'] }), game('1942', { released: '1985-12-11', rating: '0.5' }), game('!Unknown', { released: 'unknown', rating: 'unrated' })] }
+    ] };
+    const libraryRoute = route => route.fulfill({ json: library });
+    await page.route('**/api/library', libraryRoute);
+    await page.locator('#refresh-games').click();
+    await page.waitForFunction(() => document.querySelectorAll('.game-card').length === 6);
+    const titles = () => page.locator('.game-info strong').allTextContents();
+    assert.deepEqual(await titles(), ['!Unknown', '1942', 'Alpha 2', 'Alpha 10', 'Éclair', 'Zelda']);
+    await page.locator('.game-card', { hasText: 'Alpha 2' }).locator('.game-select').check();
+    const letter = value => page.locator(`#games-letters button[data-letter="${value}"]`);
+    await letter('A').click();
+    assert.deepEqual(await titles(), ['Alpha 2', 'Alpha 10']);
+    await page.locator('#games-direction').click();
+    assert.deepEqual(await titles(), ['Alpha 10', 'Alpha 2']);
+    assert.equal(await page.locator('.game-card', { hasText: 'Alpha 2' }).locator('.game-select').isChecked(), true);
+    await page.locator('#games-system').selectOption('snes');
+    assert.deepEqual(await titles(), ['Alpha 10']);
+    await page.locator('#games-search').fill('2');
+    assert.deepEqual(await titles(), []);
+    assert.match(await page.locator('#games-grid').innerText(), /No game matches/);
+    await page.locator('#games-search').fill('');
+    await page.locator('#games-system').selectOption('');
+    await page.locator('#games-missing').check();
+    assert.deepEqual(await titles(), ['Alpha 10']);
+    await page.locator('#games-missing').uncheck();
+    await letter('E').click();
+    assert.deepEqual(await titles(), ['Éclair']);
+    await letter('#').click();
+    assert.deepEqual(await titles(), ['1942', '!Unknown']);
+    await letter('').click();
+    await page.locator('#games-sort').selectOption('released');
+    assert.deepEqual(await titles(), ['Éclair', 'Zelda', 'Alpha 2', '1942', '!Unknown', 'Alpha 10']);
+    await page.locator('#games-direction').click();
+    assert.deepEqual(await titles(), ['1942', 'Alpha 2', 'Zelda', 'Éclair', '!Unknown', 'Alpha 10']);
+    await page.locator('#games-sort').selectOption('rating');
+    assert.deepEqual(await titles(), ['Alpha 2', '1942', 'Éclair', 'Zelda', '!Unknown', 'Alpha 10']);
+    await page.locator('#games-direction').click();
+    assert.deepEqual(await titles(), ['Zelda', 'Éclair', '1942', 'Alpha 2', '!Unknown', 'Alpha 10']);
+    for (const field of ['genre', 'developer', 'publisher']) {
+      await page.locator('#games-sort').selectOption(field);
+      assert.equal((await titles())[0], 'Zelda', `${field}: missing details stay last`);
+    }
+    await page.locator('#games-sort').selectOption('system');
+    assert.deepEqual(await titles(), ['Alpha 10', 'Éclair', 'Zelda', '!Unknown', '1942', 'Alpha 2']);
+    await page.reload();
+    await page.waitForFunction(() => document.querySelectorAll('.game-card').length === 6);
+    assert.equal(await page.locator('#games-sort').inputValue(), 'system');
+    assert.match(await page.locator('#games-direction').innerText(), /Descending/);
+    await page.locator('#games-sort').selectOption('name');
+    await page.locator('#games-direction').click();
+    if (process.env.WEBUI_GAMES_SCREENSHOTS) await page.screenshot({ path: process.env.WEBUI_GAMES_SCREENSHOTS + '-desktop.png', fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), true, 'Games has no sideways scroll on a phone');
+    await letter('Z').focus(); await page.keyboard.press('Enter');
+    assert.deepEqual(await titles(), ['Zelda']);
+    if (process.env.WEBUI_GAMES_SCREENSHOTS) await page.screenshot({ path: process.env.WEBUI_GAMES_SCREENSHOTS + '-phone.png', fullPage: true });
+    await letter('').click();
+    library.systems[0].games.push(...Array.from({ length: 301 }, (_, i) => game(`Bulk ${i}`)));
+    await page.locator('#refresh-games').click();
+    await page.waitForFunction(() => document.querySelectorAll('.game-card').length === 300);
+    await page.locator('#games-direction').click();
+    assert.equal((await titles())[0], 'Zelda', 'sort before slicing the first 300');
+    await page.locator('.games-more').click();
+    assert.equal(await page.locator('.game-card').count(), 307);
+    await letter('A').click(); await letter('').click();
+    assert.equal(await page.locator('.game-card').count(), 300, 'filter resets pagination');
+    assert.match(await page.locator('#games-results').innerText(), /307 of 307 games/);
+    await page.unroute('**/api/library', libraryRoute);
     // The method is remembered on the console.
     await page.goto(process.env.WEBUI_TEST_URL + '/#media');
     await page.waitForFunction(() => document.querySelector('input[name="scrape-method"][value="ps5"]').checked);

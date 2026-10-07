@@ -801,16 +801,40 @@ function gameTags(game) {
 }
 function visibleGames() {
   const system = $('#games-system').value, words = $('#games-search').value.trim().toLowerCase(), missing = $('#games-missing').checked;
+  const letter = $('#games-letters [aria-pressed="true"]')?.dataset.letter || '';
+  const sort = $('#games-sort').value, direction = $('#games-direction').dataset.direction === 'desc' ? -1 : 1;
+  const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+  function sortValue({ system, game }) {
+    if (sort === 'name') return gameName(game);
+    if (sort === 'system') return system.name;
+    const value = (game[sort] || '').trim();
+    if (!value) return null;
+    if (sort === 'rating') return Number.isFinite(Number(value)) ? Number(value) : null;
+    // Sources store ISO dates or just a year. Compare partial dates without a timezone.
+    if (sort === 'released') return /^\d{4}(?:-\d{2}(?:-\d{2})?)?$/.test(value) && Number(value.slice(0, 4)) > 0 ? Number(value.replaceAll('-', '').padEnd(8, '0')) : null;
+    return value;
+  }
   const out = [];
   for (const s of library.systems) {
     if (system && s.id !== system) continue;
     for (const game of s.games) {
+      const initial = gameName(game).trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').charAt(0).toUpperCase();
+      if (letter && letter !== (/^[A-Z]$/.test(initial) ? initial : '#')) continue;
       if (words && !gameName(game).toLowerCase().includes(words) && !game.label.toLowerCase().includes(words)) continue;
       if (missing && game.media.includes('cover') && game.media.includes('screenshot')) continue;
       out.push({ system: s, game });
     }
   }
-  return out;
+  return out.sort((a, b) => {
+    const av = sortValue(a), bv = sortValue(b);
+    if (av === null || bv === null) {
+      if (av !== bv) return av === null ? 1 : -1;
+    } else {
+      const order = typeof av === 'number' ? av - bv : collator.compare(av, bv);
+      if (order) return order * direction;
+    }
+    return collator.compare(gameName(a.game), gameName(b.game)) || collator.compare(a.game.path, b.game.path);
+  });
 }
 function mediaUrl(system, game, kind) {
   return `/api/library/media?system=${encodeURIComponent(system)}&game=${encodeURIComponent(game.key)}&kind=${kind}&v=${encodeURIComponent(game.scraped || '')}`;
@@ -821,6 +845,8 @@ function drawGames() {
   grid.dataset.view = view;
   grid.replaceChildren();
   const total = library.systems.reduce((n, s) => n + s.games.length, 0);
+  $('#games-results').textContent = `${list.length.toLocaleString()} of ${total.toLocaleString()} games`;
+  $('#games-sort-hint').hidden = ['name', 'system'].includes($('#games-sort').value);
   const withCovers = library.systems.reduce((n, s) => n + s.games.filter(g => g.media.includes('cover')).length, 0);
   $('#games-summary').textContent = `${total} games in ${library.systems.length} systems · ${withCovers} with covers · shared by RetroArch, EmulationStation and every frontend`;
   if (!list.length) { grid.append(element('p', total ? 'No game matches.' : 'No games yet. Add content or scan it in RetroArch, then refresh.', 'list-message')); }
@@ -868,6 +894,36 @@ async function loadGames() {
   } catch (error) { $('#games-grid').replaceChildren(element('p', error.message, 'list-message inline-error')); }
 }
 for (const id of ['#games-system', '#games-missing']) $(id).addEventListener('change', () => { shownGames = 300; drawGames(); });
+for (const letter of ['', '#', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ']) {
+  const button = element('button', letter || 'All', 'chip'); button.type = 'button'; button.dataset.letter = letter;
+  button.setAttribute('aria-pressed', String(!letter));
+  if (letter === '#') button.setAttribute('aria-label', 'Numbers and other characters');
+  button.addEventListener('click', () => {
+    for (const other of $$('#games-letters button')) other.setAttribute('aria-pressed', String(other === button));
+    shownGames = 300; drawGames();
+  });
+  $('#games-letters').append(button);
+}
+function setGamesDirection(direction) {
+  $('#games-direction').dataset.direction = direction;
+  $('#games-direction').textContent = direction === 'desc' ? '↓ Descending' : '↑ Ascending';
+}
+try {
+  const sort = localStorage.getItem('ps5-games-sort');
+  if ([...$('#games-sort').options].some(option => option.value === sort)) $('#games-sort').value = sort;
+  setGamesDirection(localStorage.getItem('ps5-games-direction') === 'desc' ? 'desc' : 'asc');
+} catch {}
+function changeGamesSort() {
+  try {
+    localStorage.setItem('ps5-games-sort', $('#games-sort').value);
+    localStorage.setItem('ps5-games-direction', $('#games-direction').dataset.direction);
+  } catch {}
+  shownGames = 300; drawGames();
+}
+$('#games-sort').addEventListener('change', changeGamesSort);
+$('#games-direction').addEventListener('click', () => {
+  setGamesDirection($('#games-direction').dataset.direction === 'asc' ? 'desc' : 'asc'); changeGamesSort();
+});
 
 // A game's page: its details, then one row a kind of media, missing ones greyed, each
 // replaceable by a file from this computer (streamed to the console, then put in place).

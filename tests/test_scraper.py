@@ -440,6 +440,18 @@ class Scraper(unittest.TestCase):
                          else self.request('GET', f'/api/library/media?{query}&kind=fanart')[1], fanart)
         self.assertFalse(list((self.root / 'library').rglob('.partial-*')))
 
+    def test_library_sort_details(self):
+        folder = self.root / 'library/snes/metadata'
+        folder.mkdir(parents=True)
+        key = "Donkey Kong Country 2 - Diddy's Kong Quest (USA)"
+        fields = {'released': '1995-11-20', 'genre': 'Platform', 'developer': 'Rare',
+                  'publisher': 'Nintendo', 'rating': '0.90'}
+        (folder / f'{key}.meta').write_text(''.join(f'{key} = "{value}"\n' for key, value in fields.items()))
+        games = json.loads(self.request('GET', '/api/library')[1])['systems'][0]['games']
+        game = next(game for game in games if game['key'] == key)
+        self.assertEqual({field: game[field] for field in fields}, fields)
+        self.assertTrue(any('released' not in game for game in games))
+
     def test_games_page_in_a_browser(self):
         playwright = next((str(p) for p in (Path.home() / '.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright-core',
                                             Path('/usr/lib/chatgpt/resources/cua_node/lib/node_modules/playwright-core')) if p.exists()),

@@ -2839,7 +2839,11 @@ std::string library_json()
                ",\"label\":" + quote(game.label) + ",\"key\":" + quote(game.key) +
                ",\"name\":" + quote(meta.count("name") ? meta.at("name") : "") +
                ",\"scraped\":" + quote(meta.count("scraped") ? meta.at("scraped") : "") +
-               ",\"media\":[" + media + "]}";
+               ",\"media\":[" + media + "]";
+        for (const char *field : {"released", "genre", "developer", "publisher", "rating"})
+            if (meta.count(field) && !meta.at(field).empty())
+                out += ',' + quote(field) + ':' + quote(meta.at(field));
+        out += '}';
         first_game = false;
     }
     return out + (current.empty() ? "" : "]}") + "]}";

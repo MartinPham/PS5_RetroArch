@@ -1,0 +1,20 @@
+{
+  "step": "webui-games-sorting",
+  "note": "Existing metadata exposed by the real library API. Chromium checks global natural title sorting, direction, partial ISO release dates, numeric ratings including zero, missing/invalid values last, system/genre/developer/publisher sorting, letter and combined filters, selection retention, preference reload, 307-game pagination, keyboard activation and 390px layout. Host-verified only.",
+  "must_contain": [
+    "test_library_sort_details (tests.test_scraper.Scraper.test_library_sort_details) ... ok",
+    "test_games_page_in_a_browser (tests.test_scraper.Scraper.test_games_page_in_a_browser) ... ok",
+    "Ran 2 tests",
+    "OK",
+    "staged WebUI assets match source: PASS",
+    "Ran 169 tests",
+    "verify: PASS (format)",
+    "verify: PASS (unit build integration evidence)"
+  ],
+  "must_not_contain": [
+    "FAILED",
+    "ERROR",
+    "skipped"
+  ],
+  "human_check": "Not deployed. After deploying, restart the title to load the new daemon; confirm metadata sorting with the console library."
+}
