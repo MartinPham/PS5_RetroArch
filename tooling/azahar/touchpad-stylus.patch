@@ -24,8 +24,8 @@
 +        const int dx = LibRetro::CheckInput(0, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_X);
 +        const int dy = LibRetro::CheckInput(0, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_Y);
 +        // DualSense contact units are 1920 x 1080, independent of render scale.
-+        mouseRemainderX += dx * layout.bottom_screen.GetWidth() / 1920.0f;
-+        mouseRemainderY += dy * layout.bottom_screen.GetHeight() / 1080.0f;
++        mouseRemainderX += dx * static_cast<float>(layout.bottom_screen.GetWidth()) / 1920.0f;
++        mouseRemainderY += dy * static_cast<float>(layout.bottom_screen.GetHeight()) / 1080.0f;
 +        const int mx = static_cast<int>(mouseRemainderX);
 +        const int my = static_cast<int>(mouseRemainderY);
 +        OnMouseMove(mx, my);

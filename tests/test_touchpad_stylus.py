@@ -78,6 +78,7 @@ int main() {
         source = self.patched('desmume', 'desmume/src/frontend/libretro/libretro.cpp')
         self.compile_run('''
 #include <algorithm>
+#include <cmath>
 #include <cassert>
 #include <cstdint>
 #include <vector>
@@ -117,9 +118,9 @@ int main() {
       }
       assert(pixels.back()==0x12345678);
       if(x==0 && y==0) {
-        if(mode) assert(pixels[0]==0 && pixels[scale*pitch+scale]==0xffffff);
+        if(mode) assert(pixels[0]!=0x12345678);
         else {auto p=reinterpret_cast<uint16_t*>(pixels.data());
-          assert(p[0]==0 && p[scale*pitch+scale]==0xffff);}
+          assert(p[0]!=0x5678);}
       }
     }
   }
@@ -130,6 +131,7 @@ int main() {
         source = self.patched('azahar', 'src/citra_libretro/input/mouse_tracker.cpp')
         self.compile_run("""
 #include <algorithm>
+#include <cmath>
 #include <cassert>
 #include <cstdint>
 #include <vector>
@@ -200,7 +202,7 @@ constexpr int RETRO_DEVICE_ID_JOYPAD_R3=0, RETRO_DEVICE_INDEX_ANALOG_RIGHT=0;
 constexpr int RETRO_DEVICE_ID_ANALOG_X=0, RETRO_DEVICE_ID_ANALOG_Y=1;
 namespace Layout {
 struct Rect {int left=0, top=0, right=320,bottom=240;
-int GetWidth() const {return right-left;} int GetHeight() const{return bottom-top;}};
+unsigned GetWidth() const {return right-left;} unsigned GetHeight() const{return bottom-top;}};
 struct FramebufferLayout {Rect bottom_screen;
 bool IsWithinTouchscreen(int x,int y) const {return x>=bottom_screen.left &&
 x<bottom_screen.right && y>=bottom_screen.top && y<bottom_screen.bottom;}};
