@@ -11,6 +11,7 @@ const transfers = [];
 // either tab reaches them before the code below them has run.
 let library = { systems: [] }, selectedGames = new Map(), shownGames = 300;
 let scrapeSource = 'libretro', scrapeKinds = new Set(), scraperSettings = null;
+let recap = null, recapStamp = '', recapFilter = 'all', recapKind = '', recapLimit = {};
 let jobTimer = null, jobShown = null;
 function element(tag, text, className) {
   const node = document.createElement(tag);
@@ -990,7 +991,7 @@ function drawSummary() {
   $('#scrape-start').disabled = !ready;
   $('#scrape-summary').textContent = !method ? 'Choose where to download from.' : !kinds.length ? 'Choose at least one kind of media.'
     : !games ? (scrapeScope() === 'selected' ? 'Select games on the Games tab, or choose a system.' : 'No games here yet.')
-    : `${kinds.length} kind${kinds.length === 1 ? '' : 's'} of media · ${games.toLocaleString()} game${games === 1 ? '' : 's'} · ${chosenSource().name} · ${method === 'pc' ? 'downloaded on this PC, then transferred to the PS5' : 'downloaded on the PS5'}${$('#scrape-overwrite').checked ? ' · replacing' : ''}`;
+    : `${kinds.length} kind${kinds.length === 1 ? '' : 's'} of media · ${games.toLocaleString()} game${games === 1 ? '' : 's'} · ${chosenSource().name} · ${method === 'pc' ? 'downloaded on this PC, then transferred to the PS5' : 'downloaded on the PS5'}${$('#scrape-overwrite').checked ? ' · replacing what you have' : ' · only what’s missing'}`;
 }
 async function openMedia() {
   try {
@@ -1010,7 +1011,13 @@ async function openMedia() {
 }
 $('#scrape-open').addEventListener('click', () => { location.hash = 'media'; });
 for (const node of $$('input[name="scrape-method"], input[name="scrape-scope"]')) node.addEventListener('change', () => { drawMethod(); });
-for (const id of ['#scrape-system', '#scrape-overwrite']) $(id).addEventListener('change', drawSummary);
+$('#scrape-system').addEventListener('change', drawSummary);
+const EXISTING_HINTS = {
+  keep: 'Only media your games don’t have yet is downloaded: a game with box art gets no box art again. Files on your PS5 and details already filled in stay as they are. Fastest, and uses the least of your daily quota.',
+  replace: 'Every kind you chose is downloaded again and replaces the files on your PS5 (and the details), for example to switch region or source. Details you edited yourself are never replaced. Uses more of your daily quota.' };
+function drawExisting() { $('#scrape-existing-hint').textContent = EXISTING_HINTS[$('#scrape-overwrite').checked ? 'replace' : 'keep']; drawSummary(); }
+for (const radio of $$('input[name="scrape-existing"]')) radio.addEventListener('change', drawExisting);
+drawExisting();
 $('#kinds-recommended').addEventListener('click', () => setKinds(RECOMMENDED));
 $('#kinds-all').addEventListener('click', () => setKinds(chosenSource().kinds));
 $('#kinds-none').addEventListener('click', () => setKinds([]));
@@ -1074,7 +1081,99 @@ function drawJob(job) {
   $('#job-problems-title').textContent = `Games that need you (${job.problems.length}) · choose a match, search, or skip`;
   if (box.open || !problems.childElementCount) drawProblems(job);
   if (!running && jobTimer) { clearInterval(jobTimer); jobTimer = null; library = { systems: [] }; }
+  // The recap once the job has stopped, fetched again whenever what it did changes.
+  const stamp = `${job.id}|${job.state}|${JSON.stringify(job.counts)}|${job.downloaded.files}|${job.transferred.files}`;
+  if (running) $('#job-recap').hidden = true;
+  else if (stamp !== recapStamp) { recapStamp = stamp; loadRecap(job.id); }
 }
+
+// The recap: per kind of media, then per system and game, what was downloaded, what was
+// already there and what is missing (and why, when the game was not found).
+const RECAP_FILTERS = [['all', 'All games'], ['got', 'Got new media'], ['missed', 'Missing something'], ['notfound', 'Not found'], ['had', 'Unchanged']];
+async function loadRecap(id) {
+  try { recap = (await api('/api/scraper/recap?id=' + encodeURIComponent(id), { signal: AbortSignal.timeout(30000) })).recap; } catch { return; }
+  recapLimit = {}; drawRecap();
+}
+function kindName(id) { return scraperSettings?.catalog.find(k => k.id === id)?.name || id; }
+function recapMatches(game) {
+  const notFound = ['unmatched', 'ambiguous', 'failed'].includes(game.state);
+  if (recapKind && !(game.got.includes(recapKind) || game.missed.includes(recapKind) || game.had.includes(recapKind))) return false;
+  const wanted = recapKind ? [recapKind] : null, has = list => wanted ? list.some(k => wanted.includes(k)) : list.length > 0;
+  if (recapFilter === 'got' && !has(game.got)) return false;
+  if (recapFilter === 'missed' && (!has(game.missed) || notFound)) return false;
+  if (recapFilter === 'notfound' && !notFound) return false;
+  if (recapFilter === 'had' && (game.got.length || notFound)) return false;
+  const query = $('#recap-search').value.trim().toLowerCase();
+  return !query || game.label.toLowerCase().includes(query) || game.matched.toLowerCase().includes(query);
+}
+function drawRecap() {
+  const box = $('#job-recap');
+  if (!recap || !recap.systems.length) { box.hidden = true; return; }
+  box.hidden = false;
+  const source = scraperSettings?.sources.find(s => s.id === recap.source);
+  // Per kind: counts and a bar; a click narrows the list to that kind.
+  $('#recap-kinds').replaceChildren(...recap.kinds.map(kind => {
+    const t = recap.totals[kind], all = t.got + t.had + t.missed || 1, tile = element('button', undefined, 'recap-kind'); tile.type = 'button';
+    tile.setAttribute('aria-pressed', recapKind === kind);
+    const title = element('span', undefined, 'kind-title'); title.append(svgIcon(KIND_ICONS[kind] || KIND_ICONS.cover), element('span', kindName(kind)));
+    const counts = element('span', undefined, 'kind-counts');
+    const n = (value, label, cls) => { const s = element('span', undefined, cls); s.append(element('b', value.toLocaleString()), document.createTextNode(' ' + label)); return s; };
+    counts.append(n(t.got, 'new', 'n-got'), n(t.had, 'kept', 'n-had'), n(t.missed, 'missing', 'n-missed'));
+    const bar = element('span', undefined, 'recap-bar');
+    for (const [k, cls] of [['got', 'b-got'], ['had', 'b-had'], ['missed', 'b-missed']]) { const i = element('i', undefined, cls); i.style.width = `${t[k] / all * 100}%`; bar.append(i); }
+    tile.append(title, counts, bar);
+    tile.title = source && !source.kinds.includes(kind) ? `${source.name} does not offer ${kindName(kind).toLowerCase()}.` : `Show only ${kindName(kind).toLowerCase()}`;
+    tile.addEventListener('click', () => { recapKind = recapKind === kind ? '' : kind; recapLimit = {}; drawRecap(); });
+    return tile;
+  }));
+  $('#recap-filter').replaceChildren(...RECAP_FILTERS.map(([id, label]) => {
+    const chip = element('button', label, 'chip'); chip.type = 'button'; chip.setAttribute('role', 'radio'); chip.setAttribute('aria-checked', recapFilter === id);
+    chip.addEventListener('click', () => { recapFilter = id; recapLimit = {}; drawRecap(); });
+    return chip;
+  }));
+  const open = new Set($$('.recap-system[open]').map(d => d.dataset.system));
+  const groups = [];
+  for (const system of recap.systems) {
+    const games = system.games.filter(recapMatches);
+    if (!games.length) continue;
+    const details = element('details', undefined, 'recap-system'); details.dataset.system = system.id;
+    if (open.has(system.id) || recap.systems.length === 1) details.open = true;
+    const got = games.filter(g => g.got.length).length, missing = games.filter(g => g.missed.length).length;
+    const summary = element('summary'); summary.append(element('strong', system.name), element('span', `${games.length.toLocaleString()} game${games.length === 1 ? '' : 's'} · ${got.toLocaleString()} with new media · ${missing.toLocaleString()} missing some`));
+    const list = element('div', undefined, 'recap-games'), limit = recapLimit[system.id] || 100;
+    const draw = () => {
+      list.replaceChildren(...games.slice(0, limit).map(recapRow));
+      if (games.length > limit) {
+        const more = element('button', `Show ${Math.min(100, games.length - limit)} more of ${(games.length - limit).toLocaleString()}`, 'secondary recap-more'); more.type = 'button';
+        more.addEventListener('click', () => { recapLimit[system.id] = limit + 100; drawRecap(); });
+        list.append(more);
+      }
+    };
+    details.addEventListener('toggle', () => { if (details.open && !list.childElementCount) draw(); }, { once: false });
+    if (details.open) draw();
+    details.append(summary, list); groups.push(details);
+  }
+  $('#recap-systems').replaceChildren(...(groups.length ? groups : [element('p', 'No game matches this view.', 'list-message')]));
+}
+function recapRow(game) {
+  const row = element('div', undefined, 'recap-game'), name = element('div', undefined, 'game-name');
+  name.append(element('span', game.label));
+  // The name it was matched as, when it says more than the file's name without its tags.
+  const bare = game.label.replace(/\s*[([][^)\]]*[)\]]/g, '').trim();
+  if (game.matched && game.matched !== game.label && game.matched !== bare) name.append(element('small', `Matched as ${game.matched}`));
+  const pills = element('div', undefined, 'pills'), kinds = recapKind ? [recapKind] : recap.kinds;
+  for (const kind of kinds) {
+    const state = game.got.includes(kind) ? 'got' : game.had.includes(kind) ? 'had' : game.missed.includes(kind) ? 'missed' : '';
+    if (!state) continue;
+    const pill = element('span', kindName(kind), `kind-pill ${state}`);
+    pill.title = `${kindName(kind)}: ${{ got: 'downloaded by this job', had: 'already there, kept', missed: 'missing' }[state]}`;
+    pills.append(pill);
+  }
+  row.append(name, pills);
+  if (['unmatched', 'ambiguous', 'failed', 'partial'].includes(game.state) && game.message) row.append(element('p', game.message, 'note'));
+  return row;
+}
+$('#recap-search').addEventListener('input', () => { recapLimit = {}; drawRecap(); });
 function drawProblems(job) {
   const problems = $('#job-problems'); problems.replaceChildren();
   for (const p of job.problems) {

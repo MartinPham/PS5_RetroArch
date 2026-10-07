@@ -7,6 +7,7 @@
 #include "scraper_json.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
@@ -362,8 +363,14 @@ struct Item
     std::string matched, message;
     std::vector<std::string> candidates;
     unsigned found = 0, missing = 0, tasks_open = 0;
-    bool started = false; /* this job began fetching for it (an interruption may follow) */
+    bool started = false;         /* this job began fetching for it (an interruption may follow) */
+    std::vector<std::string> got; /* the kinds this job stored for it (the recap) */
 };
+void note_got(Item &item, const std::string &kind)
+{
+    if (std::find(item.got.begin(), item.got.end(), kind) == item.got.end())
+        item.got.push_back(kind);
+}
 struct Task
 {
     unsigned id, item;
@@ -494,7 +501,8 @@ void save_job(Job &job, bool force)
                 '\t' + escape_field(item.game.path) + '\t' + escape_field(item.game.label) + '\t' +
                 escape_field(item.game.crc32) + '\t' + escape_field(item.matched) + '\t' +
                 escape_field(item.message) + '\t' + (item.started ? "1" : "0") + '\t' +
-                escape_field(candidates_text(item.candidates)) + '\n';
+                escape_field(candidates_text(item.candidates)) + '\t' +
+                escape_field(kinds_text(item.got)) + '\n';
     }
     make_folders(jobs_folder());
     write_atomic(jobs_folder() + '/' + job.id + ".job", text);
@@ -560,7 +568,7 @@ std::shared_ptr<Job> load_job(const std::string &path)
                 }
             }
         }
-        else if (f.size() >= 8 && f.size() <= 10 && f[0] == "item")
+        else if (f.size() >= 8 && f.size() <= 11 && f[0] == "item")
         {
             Item item;
             item.state = state_from(f[1]);
@@ -573,8 +581,10 @@ std::shared_ptr<Job> load_job(const std::string &path)
             item.message = f[7];
             item.started = f.size() >= 9 && f[8] == "1";
             /* The choices offered stay offered after a restart. */
-            if (f.size() == 10)
+            if (f.size() >= 10)
                 item.candidates = candidates_from(f[9]);
+            if (f.size() >= 11)
+                item.got = kinds_from(f[10]);
             job->items.push_back(item);
         }
     }
@@ -769,7 +779,7 @@ void save_meta(const Item &item, const Options &options, const Fields &details =
 /* One download into the store, PS5 mode: 1 when stored, 0 when the source has none,
  * -1 on failure (why set). Retried on network trouble. */
 int download(Http &http, const Game &game, const std::string &kind, const std::string &url,
-             Job &job, std::string &why, const std::string &ext = ".png")
+             Job &job, unsigned index, std::string &why, const std::string &ext = ".png")
 {
     const std::string destination = media_destination(game, kind, ext.c_str());
     make_folders(destination.substr(0, destination.find_last_of('/')));
@@ -795,6 +805,7 @@ int download(Http &http, const Game &game, const std::string &kind, const std::s
             std::lock_guard<std::mutex> guard(lock);
             ++job.downloaded_files;
             job.downloaded_bytes += response.bytes;
+            note_got(job.items[index], kind);
             return 1;
         }
         unlink(temporary.c_str());
@@ -1238,7 +1249,7 @@ void process_screenscraper(Http &http, Job &job, unsigned index)
         /* Over https only, as the API itself (a sniffer on the network reads nothing). */
         if (screenscraper_base.rfind("https://", 0) == 0 && url.rfind("http://", 0) == 0)
             url.insert(4, "s");
-        const int result = download(http, item.game, kind, url, job, why, ext);
+        const int result = download(http, item.game, kind, url, job, index, why, ext);
         if (result < 0)
             return finish(State::failed, why.empty() ? "The download failed." : why);
         (result > 0 ? hits : misses)++;
@@ -1324,7 +1335,7 @@ void process(Http &http, Job &job, unsigned index)
                 const std::string url = libretro_url(item.game.database, kind, name);
                 const int result = options.mode == "pc"
                                        ? probe(http, url, why)
-                                       : download(http, item.game, kind, url, job, why);
+                                       : download(http, item.game, kind, url, job, index, why);
                 if (result < 0)
                     return -1;
                 if (result > 0)
@@ -1926,6 +1937,74 @@ std::string job_json(const std::string &id)
            ",\"leased\":" + std::to_string(leased) + "},\"problems\":[" + problems + "]}}";
 }
 
+std::string recap_json(const std::string &id)
+{
+    std::shared_ptr<Job> job;
+    std::vector<Item> items;
+    {
+        std::lock_guard<std::mutex> guard(lock);
+        job = jobs.count(id) ? jobs.at(id) : nullptr;
+        if (!job)
+            return "{\"recap\":null}";
+        items = job->items;
+    }
+    const auto &kinds = job->options.kinds;
+    auto list = [](const std::vector<std::string> &values)
+    {
+        std::string out;
+        for (const auto &value : values)
+            out += std::string(out.empty() ? "" : ",") + quote(value);
+        return '[' + out + ']';
+    };
+    std::map<std::string, std::array<unsigned, 3>> totals; /* kind: got, had, missed */
+    std::vector<std::string> order;                        /* systems, as first met */
+    std::map<std::string, std::string> names, games;
+    for (const auto &item : items)
+    {
+        const std::string &system = item.game.system;
+        if (!names.count(system))
+        {
+            order.push_back(system);
+            names[system] = item.game.system_name.empty() ? system : item.game.system_name;
+        }
+        /* What the store holds now, set against what this job stored: the rest was there. */
+        std::vector<std::string> got, had, missed;
+        const bool settled = item.state != State::pending && item.state != State::working &&
+                             item.state != State::transferring;
+        for (const auto &kind : kinds)
+        {
+            const bool stored = !stored_media(item.game.system, item.game.key, kind).empty();
+            const bool fetched =
+                std::find(item.got.begin(), item.got.end(), kind) != item.got.end();
+            auto &total = totals[kind];
+            if (fetched && stored)
+                got.push_back(kind), ++total[0];
+            else if (stored)
+                had.push_back(kind), ++total[1];
+            else if (settled)
+                missed.push_back(kind), ++total[2];
+        }
+        std::string &out = games[system];
+        out += std::string(out.empty() ? "" : ",") + "{\"label\":" + quote(item.game.label) +
+               ",\"key\":" + quote(item.game.key) + ",\"state\":" + quote(state_name(item.state)) +
+               ",\"matched\":" + quote(clean_title(item.matched)) +
+               ",\"message\":" + quote(item.message) + ",\"got\":" + list(got) +
+               ",\"had\":" + list(had) + ",\"missed\":" + list(missed) + '}';
+    }
+    std::string systems, total_text;
+    for (const auto &system : order)
+        systems += std::string(systems.empty() ? "" : ",") + "{\"id\":" + quote(system) +
+                   ",\"name\":" + quote(names[system]) + ",\"games\":[" + games[system] + "]}";
+    for (const auto &kind : kinds)
+        total_text += std::string(total_text.empty() ? "" : ",") + quote(kind) +
+                      ":{\"got\":" + std::to_string(totals[kind][0]) +
+                      ",\"had\":" + std::to_string(totals[kind][1]) +
+                      ",\"missed\":" + std::to_string(totals[kind][2]) + '}';
+    return "{\"recap\":{\"id\":" + quote(job->id) + ",\"source\":" + quote(job->options.source) +
+           ",\"kinds\":" + list(kinds) + ",\"totals\":{" + total_text + "},\"systems\":[" +
+           systems + "]}}";
+}
+
 bool cancel(const std::string &id)
 {
     std::lock_guard<std::mutex> guard(lock);
@@ -2128,6 +2207,7 @@ void pc_delivered(const std::string &id, unsigned task, bool ok, uint64_t bytes)
         job->transferred_bytes += bytes;
         auto &item = job->items[t.item];
         ++item.found;
+        note_got(item, t.kind);
         if (--item.tasks_open == 0)
         {
             item.state = item.missing ? State::partial : State::done;

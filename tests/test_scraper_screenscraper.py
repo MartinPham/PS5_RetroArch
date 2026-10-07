@@ -287,6 +287,14 @@ class ScreenScraper(unittest.TestCase):
         for path in self.root.rglob('*'):
             if path.is_file() and path.name != 'screenscraper.cfg':
                 self.assertNotIn(PASSWORD.encode(), path.read_bytes(), str(path))
+        # The recap: what each game got, per kind, and what is missing.
+        recap = json.loads(self.request('GET', f'/api/scraper/recap?id={job_id}')[1])['recap']
+        self.assertEqual(recap['totals'], {k: {'got': 3, 'had': 0, 'missed': 2} for k in ('cover', 'screenshot', 'video')})
+        games = {g['label']: g for g in recap['systems'][0]['games']}
+        self.assertEqual(games['Super Metroid (Japan, USA) (En,Ja)']['got'], ['cover', 'screenshot', 'video'])
+        self.assertEqual(games['Super Metroid (Japan, USA) (En,Ja)']['matched'], 'Super Metroid')
+        self.assertEqual((games['Totally Unknown Homebrew']['state'], games['Totally Unknown Homebrew']['missed']),
+                         ('unmatched', ['cover', 'screenshot', 'video']))
         # The ambiguous game: two titles offered as "Name [id]", one chosen.
         ambiguous = next(p for p in job['problems'] if p['state'] == 'ambiguous')
         self.assertEqual(sorted(ambiguous['candidates']), ['Chrono Trigger [1002]', 'Chrono Trigger: Jet Bike Special [1003]'])
@@ -305,8 +313,13 @@ class ScreenScraper(unittest.TestCase):
             self.source.reset(); self.source.max_threads = '1'
         self.sign_in()
         shutil.rmtree(library / 'covers')
-        self.wait(self.start(kinds='cover'))
+        second = self.wait(self.start(kinds='cover,screenshot'))
         self.assertEqual(self.source.most_busy, 1)
+        # Covers fetched again, screenshots kept: the recap tells them apart (the ambiguous
+        # game is asked again in a new job: its screenshot kept, its cover missing).
+        totals = json.loads(self.request('GET', f'/api/scraper/recap?id={second["id"]}')[1])['recap']['totals']
+        self.assertEqual(totals['cover'], {'got': 3, 'had': 0, 'missed': 2})
+        self.assertEqual(totals['screenshot'], {'got': 0, 'had': 4, 'missed': 1})
 
     def test_a_quota_pauses_the_job_until_resumed(self):
         self.assertEqual(self.sign_in()[0], 200)

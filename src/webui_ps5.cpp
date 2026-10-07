@@ -1263,6 +1263,8 @@ MHD_Result scraper_route(MHD_Connection *c, const std::string &url, const std::s
         ps5_scraper::sign_out(source);
         return respond(c, 200, ps5_scraper::account_json(source));
     }
+    if (method == "GET" && url == "/api/scraper/recap")
+        return respond(c, 200, ps5_scraper::recap_json(arg(c, "id")));
     if (method == "GET" && url == "/api/scraper/job")
         return respond(c, 200, ps5_scraper::job_json(arg(c, "id")));
     if (method == "POST" && url == "/api/scraper/start")

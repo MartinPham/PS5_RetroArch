@@ -85,6 +85,9 @@ bool start(const Options &options, const std::vector<Selection> &selection, std:
 bool resume(const std::string &id, std::string &why);
 /* The current (or named) job as JSON, items in trouble listed. */
 std::string job_json(const std::string &id);
+/* What a job did for each game, by system: the kinds it stored, those already there,
+ * those missing, with totals per kind (JSON, for the page's recap). */
+std::string recap_json(const std::string &id);
 bool cancel(const std::string &id);
 /* An item waiting on the user: action "choose" (value: a candidate), "search"
  * (value: words to search for), or "skip". */
