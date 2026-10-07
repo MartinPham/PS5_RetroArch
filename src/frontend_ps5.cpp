@@ -14,6 +14,7 @@ extern "C"
 #include <cstring>
 #include <ps5platform/libc.h>
 #include <initializer_list>
+#include <string>
 #include <sys/stat.h>
 
 namespace
@@ -21,15 +22,58 @@ namespace
 constexpr const char *saved_config = "/app0/config/retroarch.cfg";
 
 // The top of the file browser, Load Content included (patches/series, 0097):
-// INTERNAL, the title's own folder, and EXTERNAL, where the console mounts USB
-// drives, an extended storage drive and any other external storage. Each shows
-// its name, and opening it opens its folder.
+// INTERNAL, the title's own folder, then the USB and extended storage drives
+// mounted into the title's sandbox. A sandbox shows the drives under /mnt only
+// when something mounts them into it: ShadowMountPlus 1.7beta4 and later does,
+// for every PPSA title, for as long as it runs. A drive slot is offered only if a
+// drive is mounted there; without any, the browser keeps EXTERNAL, the bare /mnt,
+// as before. The console's own /data is never offered (owner's decision), though
+// ShadowMountPlus mounts it too. Each shows its name.
 struct Root
 {
     const char *path;
     const char *name;
 };
-constexpr Root roots[] = {{"/app0", "INTERNAL"}, {"/mnt", "EXTERNAL"}};
+constexpr Root internal_root{"/app0", "INTERNAL"};
+constexpr Root storage_roots[] = {{"/mnt/usb0", "USB 0"},      {"/mnt/usb1", "USB 1"},
+                                  {"/mnt/usb2", "USB 2"},      {"/mnt/usb3", "USB 3"},
+                                  {"/mnt/usb4", "USB 4"},      {"/mnt/usb5", "USB 5"},
+                                  {"/mnt/usb6", "USB 6"},      {"/mnt/usb7", "USB 7"},
+                                  {"/mnt/ext0", "EXTENDED 0"}, {"/mnt/ext1", "EXTENDED 1"}};
+constexpr Root external_root{"/mnt", "EXTERNAL"};
+
+// Whether a directory opens, and how many entries it holds besides . and ..
+bool opens(const char *path, size_t *entries = nullptr, int *error = nullptr)
+{
+    errno = 0;
+    DIR *dir = ps5_opendir(path);
+    size_t count = 0;
+    if (dir)
+    {
+        while (const struct dirent *entry = ps5_readdir(dir))
+            if (std::strcmp(entry->d_name, ".") != 0 && std::strcmp(entry->d_name, ".."))
+                ++count;
+        ps5_closedir(dir);
+    }
+    if (entries)
+        *entries = count;
+    if (error)
+        *error = dir ? 0 : errno;
+    return dir != nullptr;
+}
+
+// A drive slot holds a drive when its root is another filesystem than /mnt
+// itself; an empty slot directory is the same filesystem.
+bool available(const Root &root)
+{
+    size_t entries = 0;
+    if (!opens(root.path, &entries))
+        return false;
+    struct stat slot{}, parent{};
+    if (stat(root.path, &slot) == 0 && stat("/mnt", &parent) == 0)
+        return slot.st_dev != parent.st_dev;
+    return entries != 0;
+}
 
 void set_directory(default_dirs slot, const char *path)
 {
@@ -100,20 +144,28 @@ void initialize(void *)
     set_directory(DEFAULT_DIR_OVERLAY, "/app0/overlays");
     set_directory(DEFAULT_DIR_LOGS, "/app0");
     std::fprintf(stderr, "frontend ps5: config=%s browser=/app0 cores=/app0/cores\n", saved_config);
-    // Startup summary: known roots only; never log the user's file names.
-    for (const char *path : {"/app0", "/app0/cores", "/mnt", "/mnt/usb0"})
+    // Startup summary: what this sandbox exposes, roots and mount names only;
+    // never the user's file names.
+    for (const char *path : {"/app0", "/app0/cores", "/data", "/mnt"})
     {
-        errno = 0;
-        DIR *dir = ps5_opendir(path);
         size_t entries = 0;
-        if (dir)
-        {
-            while (ps5_readdir(dir))
-                ++entries;
-            ps5_closedir(dir);
-        }
+        int error = 0;
+        const bool opened = opens(path, &entries, &error);
         std::fprintf(stderr, "frontend ps5: directory %s opened=%d entries=%zu errno=%d\n", path,
-                     dir != nullptr, entries, errno);
+                     opened, entries, error);
+    }
+    for (const Root &root : storage_roots)
+        std::fprintf(stderr, "frontend ps5: storage %s (%s) %s\n", root.path, root.name,
+                     available(root) ? "available" : "absent");
+    if (DIR *dir = ps5_opendir("/mnt"))
+    {
+        std::string names;
+        while (const struct dirent *entry = ps5_readdir(dir))
+            if (entry->d_name[0] != '.' && names.size() < 400)
+                names += std::string(names.empty() ? "" : " ") + entry->d_name;
+        ps5_closedir(dir);
+        std::fprintf(stderr, "frontend ps5: /mnt holds %s\n",
+                     names.empty() ? "nothing" : names.c_str());
     }
 }
 
@@ -128,9 +180,21 @@ int drives(void *data, bool content)
     auto *list = static_cast<file_list_t *>(data);
     const auto label = content ? MENU_ENUM_LABEL_FILE_DETECT_CORE_LIST_PUSH_DIR
                                : MENU_ENUM_LABEL_FILE_BROWSER_DIRECTORY;
-    for (const Root &root : roots)
+    const auto add = [&](const Root &root)
+    {
         if (menu_entries_append(list, root.path, "", label, FILE_TYPE_DIRECTORY, 0, 0, nullptr))
             file_list_set_alt_at_offset(list, list->size - 1, root.name);
+    };
+    add(internal_root);
+    bool any = false;
+    for (const Root &root : storage_roots)
+        if (available(root))
+        {
+            add(root);
+            any = true;
+        }
+    if (!any)
+        add(external_root);
     return 0;
 }
 } // namespace

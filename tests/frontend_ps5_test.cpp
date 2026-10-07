@@ -11,11 +11,13 @@ namespace
 std::string fixture;
 std::vector<std::string> root_paths;
 std::vector<std::string> root_names;
+// Drive slots that hold a mounted drive: their stat reports another device.
+std::vector<std::string> mounted;
 std::string physical(const char *path)
 {
     std::string p(path);
     if (p == "/" || p == "/app0" || p.find("/app0/") == 0 || p == "/data" ||
-        p.find("/mnt/usb") == 0)
+        p.find("/data/") == 0 || p == "/mnt" || p.find("/mnt/") == 0)
         return fixture + p;
     return p;
 }
@@ -40,7 +42,11 @@ extern "C"
     }
     int __wrap_stat(const char *p, struct stat *s)
     {
-        return __real_stat(physical(p).c_str(), s);
+        const int result = __real_stat(physical(p).c_str(), s);
+        for (const std::string &slot : mounted)
+            if (result == 0 && slot == p)
+                s->st_dev += 1;
+        return result;
     }
     int __wrap_mkdir(const char *p, mode_t mode)
     {
@@ -129,11 +135,26 @@ int main(int argc, char **argv)
     assert(frontend_ctx_ps5.environment_get);
     frontend_ctx_ps5.environment_get(&count, argv, nullptr, &untouched);
     assert(count == argc && untouched == 0x1234);
-    // The browser's top is two named roots, the title's folder and the mounts.
+    // Without anything mounted into the sandbox, the browser's top is the title's
+    // folder and the bare mounts, as before: an empty drive slot is not a drive.
     file_list_t list{};
     assert(frontend_ctx_ps5.parse_drive_list(&list, true) == 0);
     assert((root_paths == std::vector<std::string>{"/app0", "/mnt"}));
     assert((root_names == std::vector<std::string>{"INTERNAL", "EXTERNAL"}));
-    std::puts("frontend_ps5: config seed/preservation, directories, argv and the INTERNAL and "
-              "EXTERNAL roots PASS");
+    // With /data and a USB drive in the sandbox (ShadowMountPlus 1.7beta4), the
+    // drive is a root of its own, by name, and EXTERNAL gives way to it; /data is
+    // never offered.
+    std::filesystem::create_directories(fixture + "/data/roms");
+    std::ofstream(fixture + "/mnt/usb0/game.bin") << "x";
+    std::filesystem::create_directories(fixture + "/mnt/ext0");
+    mounted = {"/mnt/usb0"};
+    root_paths.clear();
+    root_names.clear();
+    list = {};
+    assert(frontend_ctx_ps5.parse_drive_list(&list, false) == 0);
+    assert((root_paths == std::vector<std::string>{"/app0", "/mnt/usb0"}));
+    assert((root_names == std::vector<std::string>{"INTERNAL", "USB 0"}));
+    frontend_ctx_ps5.init(nullptr); // the startup summary walks every root
+    std::puts("frontend_ps5: config seed/preservation, directories, argv, the INTERNAL and "
+              "EXTERNAL roots, and the mounted storage roots PASS");
 }

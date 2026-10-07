@@ -195,7 +195,8 @@
 0096-frontend-thread-stacks
 
 # 0097  the browser's top is the frontend's roots, INTERNAL (the title's folder)
-#       and EXTERNAL (the console's mounts): Load Content lists them alone, a
+#       and the drives the sandbox exposes (src/frontend_ps5.cpp: USB and
+#       extended drives, or EXTERNAL): Load Content lists them alone, a
 #       root shows its name, and a root's parent is the roots, not the
 #       filesystem's /
 #       menu/menu_displaylist.c, menu/cbs/menu_cbs_get_value.c,

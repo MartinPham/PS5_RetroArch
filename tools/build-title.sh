@@ -75,6 +75,16 @@ if [[ ${PS5_WITH_RPCS3:-0} == 1 ]]; then
     core_names+=(rpcs3)
     echo "==> [title] RPCS3 staged (PS5_WITH_RPCS3=1, your own build only)"
 fi
+# PS5_REUSE_STAGED_CORES="mame ..." (development builds only): stage those cores as
+# their last build left them in build/cores/stage instead of building them again.
+# For deploying a title change while a long core build (MAME's, over an hour) runs
+# elsewhere; the reused core keeps the title's import table covering it. A release
+# always builds every core.
+reuse_cores=" ${PS5_REUSE_STAGED_CORES:-} "
+if [[ -n ${PS5_REUSE_STAGED_CORES:-} && -n ${PS5_RELEASE_TAG:-} ]]; then
+    echo "error: PS5_REUSE_STAGED_CORES with release $PS5_RELEASE_TAG; a release builds every core" >&2
+    exit 2
+fi
 echo "==> [title] step 1/3: the frontend"
 "$root/tools/build-retroarch.sh"
 core_files=()
@@ -88,7 +98,15 @@ for core_name in "${core_names[@]}"; do
         vice_x64sc) script=vice ;;
         *) script=${core_name//_/-} ;;
     esac
-    bash "$root/tools/build-$script.sh"
+    if [[ $reuse_cores == *" $core_name "* ]]; then
+        for staged in "$root/build/cores/stage/cores/${core_name}_libretro.so" \
+                "$root/build/cores/stage/info/${core_name}_libretro.info"; do
+            [[ -f $staged ]] || { echo "error: no staged $staged to reuse" >&2; exit 2; }
+        done
+        echo "==> [title] $core_name: reusing the staged core (PS5_REUSE_STAGED_CORES), not built"
+    else
+        bash "$root/tools/build-$script.sh"
+    fi
     core_files+=("$root/build/cores/stage/cores/${core_name}_libretro.so")
 done
 python3 "$root/tools/core-imports.py" "${core_files[@]}"

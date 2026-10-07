@@ -219,9 +219,12 @@ obtained backups**: games you own, and BIOS or firmware dumped from hardware you
 own. Piracy is not condoned.
 
 Ordinary scripted updates preserve content and saved settings. Back up your
-files before replacing or removing a title. The file browser has **INTERNAL**
-for the title folder and **EXTERNAL** for `/mnt`; the current title sandbox hides
-external mounts, so EXTERNAL may be empty.
+files before replacing or removing a title. The file browser opens on **INTERNAL**,
+the title folder. With [ShadowMountPlus](https://github.com/drakmor/ShadowMountPlus)
+1.7beta4 or later running, it also lists each USB drive (**USB 0** to **USB 7**,
+`/mnt/usb0` onward) and extended storage (**EXTENDED 0** and **1**, `/mnt/ext0` and
+`/mnt/ext1`), only when a drive is mounted there. Without it, the sandbox hides them
+and **EXTERNAL** (`/mnt`) may be empty.
 
 ## What has been verified
 
