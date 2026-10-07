@@ -5,9 +5,12 @@
 #include "ps5_library.h"
 #include "scraper_http.h"
 #include "scraper_json.h"
+#include "unzip.h"
 
 #include <algorithm>
 #include <array>
+#include <functional>
+#include <unordered_map>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
@@ -1494,23 +1497,756 @@ void process_libretro(Http &http, Job &job, unsigned index, const Options &optio
 /* ---- the chain of sources ------------------------------------------------------------ */
 std::string source_name(const std::string &source)
 {
-    return source == "screenscraper" ? "ScreenScraper" : source == "libretro" ? "libretro" : source;
+    return source == "screenscraper" ? "ScreenScraper"
+           : source == "launchbox"   ? "LaunchBox"
+           : source == "libretro"    ? "libretro"
+                                     : source;
 }
 bool source_offers(const std::string &source, const std::string &kind)
 {
     if (kind == "details")
         return source != "libretro";
-    return source == "libretro" ? libretro_folders.count(kind) > 0
-                                : screenscraper_types.count(kind) > 0;
+    if (source == "libretro")
+        return libretro_folders.count(kind) > 0;
+    if (source == "launchbox")
+        return kind == "cover" || kind == "backcover" || kind == "box3d" || kind == "screenshot" ||
+               kind == "title" || kind == "logo" || kind == "physical" || kind == "fanart";
+    return screenscraper_types.count(kind) > 0;
 }
 bool holds(const std::vector<std::string> &list, const std::string &value)
 {
     return std::find(list.begin(), list.end(), value) != list.end();
 }
+/* ---- LaunchBox Games Database ---------------------------------------------------------- */
+/* No account and no API: the whole database is one download (Metadata.zip, about 110 MB:
+ * games, alternate names, images, and MAME's romset names). The console fetches it once
+ * a month and keeps a small index a platform (library/.launchbox/<platform>.index); the
+ * images are public files on its image server. */
+std::string launchbox_metadata = "https://gamesdb.launchbox-app.com/Metadata.zip";
+std::string launchbox_images = "https://images.launchbox-app.com";
+/* The library's systems as LaunchBox names its platforms, in the order they are asked. */
+const std::map<std::string, std::vector<std::string>> launchbox_platforms = {
+    {"3do", {"3DO Interactive Multiplayer"}},
+    {"amiga", {"Commodore Amiga"}},
+    {"amigacd32", {"Commodore Amiga CD32"}},
+    {"amstradcpc", {"Amstrad CPC"}},
+    {"arcade", {"Arcade"}},
+    {"atari2600", {"Atari 2600"}},
+    {"atari5200", {"Atari 5200"}},
+    {"atari7800", {"Atari 7800"}},
+    {"atari800", {"Atari 800"}},
+    {"atarijaguar", {"Atari Jaguar"}},
+    {"atarijaguarcd", {"Atari Jaguar CD"}},
+    {"atarilynx", {"Atari Lynx"}},
+    {"atarist", {"Atari ST"}},
+    {"atomiswave", {"Sammy Atomiswave", "Arcade"}},
+    {"c64", {"Commodore 64"}},
+    {"cdimono1", {"Philips CD-i"}},
+    {"channelf", {"Fairchild Channel F"}},
+    {"colecovision", {"ColecoVision"}},
+    {"cps", {"Arcade"}},
+    {"dos", {"MS-DOS"}},
+    {"dreamcast", {"Sega Dreamcast"}},
+    {"famicom", {"Nintendo Entertainment System"}},
+    {"fbneo", {"Arcade", "SNK Neo Geo MVS"}},
+    {"fds", {"Nintendo Famicom Disk System"}},
+    {"fmtowns", {"Fujitsu FM Towns Marty"}},
+    {"gameandwatch", {"Nintendo Game & Watch"}},
+    {"gamegear", {"Sega Game Gear"}},
+    {"gb", {"Nintendo Game Boy"}},
+    {"gba", {"Nintendo Game Boy Advance"}},
+    {"gbc", {"Nintendo Game Boy Color"}},
+    {"gc", {"Nintendo GameCube"}},
+    {"genesis", {"Sega Genesis"}},
+    {"intellivision", {"Mattel Intellivision"}},
+    {"mame", {"Arcade"}},
+    {"mastersystem", {"Sega Master System"}},
+    {"megadrive", {"Sega Genesis"}},
+    {"msx", {"Microsoft MSX"}},
+    {"msx2", {"Microsoft MSX2"}},
+    {"n3ds", {"Nintendo 3DS"}},
+    {"n64", {"Nintendo 64"}},
+    {"naomi", {"Sega Naomi", "Arcade"}},
+    {"nds", {"Nintendo DS"}},
+    {"neogeo", {"SNK Neo Geo MVS", "SNK Neo Geo AES", "Arcade"}},
+    {"neogeocd", {"SNK Neo Geo CD"}},
+    {"nes", {"Nintendo Entertainment System"}},
+    {"ngp", {"SNK Neo Geo Pocket"}},
+    {"ngpc", {"SNK Neo Geo Pocket Color"}},
+    {"odyssey2", {"Magnavox Odyssey 2"}},
+    {"openbor", {"OpenBOR"}},
+    {"pc88", {"NEC PC-8801"}},
+    {"pc98", {"NEC PC-9801"}},
+    {"pcengine", {"NEC TurboGrafx-16"}},
+    {"pcenginecd", {"NEC TurboGrafx-CD"}},
+    {"pcfx", {"NEC PC-FX"}},
+    {"pico8", {"PICO-8"}},
+    {"plus4", {"Commodore Plus 4"}},
+    {"pokemini", {"Nintendo Pokemon Mini"}},
+    {"ps2", {"Sony Playstation 2"}},
+    {"ps3", {"Sony Playstation 3"}},
+    {"psp", {"Sony PSP"}},
+    {"psvita", {"Sony Playstation Vita"}},
+    {"psx", {"Sony Playstation"}},
+    {"satellaview", {"Nintendo Satellaview"}},
+    {"saturn", {"Sega Saturn"}},
+    {"scummvm", {"ScummVM"}},
+    {"sega32x", {"Sega 32X"}},
+    {"segacd", {"Sega CD"}},
+    {"segapico", {"Sega Pico"}},
+    {"snes", {"Super Nintendo Entertainment System"}},
+    {"supergrafx", {"PC Engine SuperGrafx"}},
+    {"vectrex", {"GCE Vectrex"}},
+    {"vic20", {"Commodore VIC-20"}},
+    {"virtualboy", {"Nintendo Virtual Boy"}},
+    {"wii", {"Nintendo Wii"}},
+    {"wiiu", {"Nintendo Wii U"}},
+    {"wonderswan", {"WonderSwan"}},
+    {"wonderswancolor", {"WonderSwan Color"}},
+    {"x1", {"Sharp X1"}},
+    {"x68000", {"Sharp X68000"}},
+    {"xbox", {"Microsoft Xbox"}},
+    {"zxspectrum", {"Sinclair ZX Spectrum"}},
+};
+/* Systems whose games are romsets ("mslug3"): their titles come from MAME's names. */
+bool arcade_system(const std::string &system)
+{
+    static const std::set<std::string> arcade = {"arcade", "mame",  "fbneo",     "cps",
+                                                 "neogeo", "naomi", "atomiswave"};
+    return arcade.count(system) > 0;
+}
+/* Its image types for each of our kinds, in order of preference. */
+const std::map<std::string, std::vector<std::string>> launchbox_types = {
+    {"cover", {"Box - Front", "Box - Front - Reconstructed", "Fanart - Box - Front"}},
+    {"backcover", {"Box - Back", "Box - Back - Reconstructed", "Fanart - Box - Back"}},
+    {"box3d", {"Box - 3D"}},
+    {"screenshot", {"Screenshot - Gameplay"}},
+    {"title", {"Screenshot - Game Title"}},
+    {"logo", {"Clear Logo"}},
+    {"physical", {"Disc", "Cart - Front", "Fanart - Disc", "Fanart - Cart - Front"}},
+    {"fanart", {"Fanart - Background"}},
+};
+std::vector<std::string> launchbox_regions(const std::string &region)
+{
+    if (region == "eu")
+        return {"Europe", "United Kingdom", "Germany", "France", "Spain", "Italy", "World", ""};
+    if (region == "jp")
+        return {"Japan", "World", ""};
+    if (region == "wor")
+        return {"World", "", "North America", "United States", "Europe", "Japan"};
+    return {"North America", "United States", "World", "", "Canada"};
+}
+std::string launchbox_folder()
+{
+    return library_root() + "/.launchbox";
+}
+std::string platform_file(const std::string &platform)
+{
+    std::string name;
+    for (char c : platform)
+        name += std::isalnum((unsigned char)c) ? char(std::tolower((unsigned char)c)) : '_';
+    return launchbox_folder() + '/' + name + ".index";
+}
+
+/* A streaming reader of the database's XML: records two levels down (<Game>, <GameImage>,
+ * <GameAlternateName>, <MameFile>), their fields one level further; nothing kept but the
+ * record being read. */
+struct XmlRecords
+{
+    std::function<void(const std::string &, const Fields &)> on_record;
+    int depth = 0;
+    bool in_tag = false;
+    std::string tag, text, record;
+    Fields fields;
+    static std::string decode(const std::string &s)
+    {
+        std::string out;
+        for (size_t i = 0; i < s.size(); ++i)
+        {
+            if (s[i] != '&')
+            {
+                out += s[i];
+                continue;
+            }
+            const size_t end = s.find(';', i);
+            if (end == std::string::npos || end - i > 10)
+            {
+                out += s[i];
+                continue;
+            }
+            const std::string entity = s.substr(i + 1, end - i - 1);
+            if (entity == "amp")
+                out += '&';
+            else if (entity == "lt")
+                out += '<';
+            else if (entity == "gt")
+                out += '>';
+            else if (entity == "quot")
+                out += '"';
+            else if (entity == "apos")
+                out += '\'';
+            else if (!entity.empty() && entity[0] == '#')
+            {
+                const unsigned code =
+                    unsigned(entity.size() > 1 && (entity[1] == 'x' || entity[1] == 'X')
+                                 ? std::strtoul(entity.c_str() + 2, nullptr, 16)
+                                 : std::strtoul(entity.c_str() + 1, nullptr, 10));
+                if (code < 0x80)
+                    out += char(code);
+                else if (code < 0x800)
+                    out += char(0xC0 | code >> 6), out += char(0x80 | (code & 0x3F));
+                else if (code < 0x10000)
+                    out += char(0xE0 | code >> 12), out += char(0x80 | (code >> 6 & 0x3F)),
+                        out += char(0x80 | (code & 0x3F));
+                else
+                    out += char(0xF0 | code >> 18), out += char(0x80 | (code >> 12 & 0x3F)),
+                        out += char(0x80 | (code >> 6 & 0x3F)), out += char(0x80 | (code & 0x3F));
+            }
+            else
+            {
+                out += s.substr(i, end - i + 1);
+            }
+            i = end;
+        }
+        return out;
+    }
+    void element(const std::string &raw)
+    {
+        if (raw.empty() || raw[0] == '?' || raw[0] == '!')
+            return;
+        const bool closing = raw[0] == '/', empty = raw.back() == '/';
+        std::string name = raw.substr(closing ? 1 : 0);
+        if (empty)
+            name.pop_back();
+        name = name.substr(0, name.find_first_of(" \t\r\n"));
+        if (closing)
+        {
+            if (depth == 3)
+                fields[name] = decode(text);
+            else if (depth == 2 && on_record)
+                on_record(record, fields);
+            --depth;
+            return;
+        }
+        ++depth;
+        text.clear();
+        if (depth == 2)
+        {
+            record = name;
+            fields.clear();
+        }
+        if (empty)
+        {
+            if (depth == 3)
+                fields[name] = "";
+            --depth;
+        }
+    }
+    void feed(const char *data, size_t size)
+    {
+        for (size_t i = 0; i < size; ++i)
+        {
+            const char c = data[i];
+            if (in_tag)
+            {
+                if (c == '>')
+                {
+                    in_tag = false;
+                    element(tag);
+                    tag.clear();
+                }
+                else
+                    tag += c;
+            }
+            else if (c == '<')
+                in_tag = true;
+            else if (depth == 3)
+                text += c;
+        }
+    }
+};
+/* Reads one file of the zip through the reader; false when it is not there. */
+bool read_zipped(const std::string &zip, const char *name, XmlRecords &reader)
+{
+    unzFile file = unzOpen(zip.c_str());
+    if (!file)
+        return false;
+    bool ok = unzLocateFile(file, name, 0) == UNZ_OK && unzOpenCurrentFile(file) == UNZ_OK;
+    if (ok)
+    {
+        std::vector<char> buffer(1 << 20);
+        int got;
+        while ((got = unzReadCurrentFile(file, buffer.data(), unsigned(buffer.size()))) > 0 &&
+               !cancelling)
+            reader.feed(buffer.data(), size_t(got));
+        ok = got == 0;
+        unzCloseCurrentFile(file);
+    }
+    unzClose(file);
+    return ok;
+}
+
+std::mutex launchbox_lock;
+/* The index, built from a fresh database when it is missing or a month old. */
+bool launchbox_prepare(Http &http, Job &job, std::string &why)
+{
+    std::lock_guard<std::mutex> guard(launchbox_lock);
+    const std::string folder = launchbox_folder(), done = folder + "/index.done";
+    struct stat st{};
+    if (stat(done.c_str(), &st) == 0 && std::time(nullptr) - st.st_mtime < 30 * 24 * 3600)
+        return true;
+    /* Another worker of this job failed while this one waited: it waits for the resume. */
+    {
+        std::lock_guard<std::mutex> job_guard(lock);
+        if (job.state != "running")
+            return false;
+    }
+    auto say = [&](const std::string &message)
+    {
+        std::lock_guard<std::mutex> job_guard(lock);
+        job.message = message;
+    };
+    make_folders(folder);
+    const std::string zip = folder + "/Metadata.zip", partial = folder + "/.partial-metadata";
+    say("Getting the LaunchBox database (about 110 MB, once a month)…");
+    const int fd = open(partial.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (fd < 0)
+    {
+        why = "The console could not write to its storage.";
+        return false;
+    }
+    const Response response = http.get(launchbox_metadata, uint64_t(1) << 30, &cancelling, fd);
+    const bool complete =
+        response.status == 200 && response.error.empty() && !response.cancelled && fsync(fd) == 0;
+    close(fd);
+    if (!complete || rename(partial.c_str(), zip.c_str()) != 0)
+    {
+        unlink(partial.c_str());
+        why = response.status ? "LaunchBox answered " + std::to_string(response.status) + '.'
+                              : "LaunchBox could not be reached: " + response.error;
+        return false;
+    }
+    say("Reading the LaunchBox database…");
+    /* The platforms the library can have, a file each: G (a game), A (another name of
+     * it), I (an image) lines, tab-separated. */
+    std::map<std::string, std::FILE *> files;
+    for (const auto &entry : launchbox_platforms)
+        for (const auto &platform : entry.second)
+            if (!files.count(platform))
+                files[platform] = std::fopen((platform_file(platform) + ".new").c_str(), "w");
+    std::unordered_map<std::string, std::FILE *> by_id; /* a game's id: its platform's file */
+    auto line = [](std::FILE *file, std::initializer_list<std::string> parts)
+    {
+        bool first = true;
+        for (const auto &part : parts)
+        {
+            if (!first)
+                std::fputc('\t', file);
+            std::fputs(escape_field(part).c_str(), file);
+            first = false;
+        }
+        std::fputc('\n', file);
+    };
+    XmlRecords games;
+    games.on_record = [&](const std::string &record, const Fields &f)
+    {
+        auto get = [&](const char *key)
+        {
+            auto it = f.find(key);
+            return it == f.end() ? std::string() : it->second;
+        };
+        if (record == "Game")
+        {
+            auto file = files.find(get("Platform"));
+            if (file == files.end() || !file->second)
+                return;
+            by_id[get("DatabaseID")] = file->second;
+            line(file->second, {"G", get("DatabaseID"), get("Name"),
+                                get("ReleaseDate").empty() ? get("ReleaseYear")
+                                                           : get("ReleaseDate").substr(0, 10),
+                                get("Developer"), get("Publisher"), get("Genres"),
+                                get("MaxPlayers"), get("CommunityRating"), get("Overview")});
+        }
+        else if (record == "GameAlternateName")
+        {
+            auto file = by_id.find(get("DatabaseID"));
+            if (file != by_id.end())
+                line(file->second, {"A", get("DatabaseID"), get("AlternateName")});
+        }
+        else if (record == "GameImage")
+        {
+            auto file = by_id.find(get("DatabaseID"));
+            if (file == by_id.end())
+                return;
+            const std::string type = get("Type");
+            for (const auto &kind : launchbox_types)
+                if (holds(kind.second, type))
+                {
+                    line(file->second,
+                         {"I", get("DatabaseID"), type, get("Region"), get("FileName")});
+                    break;
+                }
+        }
+    };
+    bool ok = read_zipped(zip, "Metadata.xml", games);
+    for (auto &file : files)
+        if (file.second)
+            ok = std::fclose(file.second) == 0 && ok;
+    /* MAME's romset names, for arcade games: "mslug3" is "Metal Slug 3". */
+    std::FILE *names = std::fopen((folder + "/arcade.names.new").c_str(), "w");
+    XmlRecords mame;
+    mame.on_record = [&](const std::string &record, const Fields &f)
+    {
+        if (record == "MameFile" && names && f.count("FileName") && f.count("Name"))
+            line(names, {f.at("FileName"), f.at("Name")});
+    };
+    ok = names && read_zipped(zip, "Mame.xml", mame) && ok;
+    if (names)
+        ok = std::fclose(names) == 0 && ok;
+    unlink(zip.c_str());
+    if (!ok || cancelling)
+    {
+        why = cancelling ? "Cancelled." : "The LaunchBox database could not be read.";
+        return false;
+    }
+    for (const auto &file : files)
+        rename((platform_file(file.first) + ".new").c_str(), platform_file(file.first).c_str());
+    rename((folder + "/arcade.names.new").c_str(), (folder + "/arcade.names").c_str());
+    write_atomic(done, now_text() + '\n');
+    say("");
+    return true;
+}
+
+/* A platform's index in memory, read once per server. */
+struct LaunchboxGame
+{
+    std::string id, name, released, developer, publisher, genres, players, rating, overview;
+};
+struct LaunchboxImage
+{
+    std::string type, region, file;
+};
+struct LaunchboxIndex
+{
+    std::vector<LaunchboxGame> games;
+    std::unordered_map<std::string, size_t> by_id;
+    std::unordered_map<std::string, std::vector<std::string>> by_title; /* words: ids */
+    std::unordered_map<std::string, std::vector<LaunchboxImage>> images;
+    std::vector<std::string> names; /* "Name [id]", for closest() */
+};
+std::string title_key(const std::string &title)
+{
+    std::string key;
+    for (const auto &word : words(title))
+        key += (key.empty() ? "" : " ") + word;
+    return key;
+}
+std::map<std::string, std::shared_ptr<LaunchboxIndex>> launchbox_indexes;
+std::shared_ptr<LaunchboxIndex> launchbox_index(const std::string &platform)
+{
+    std::lock_guard<std::mutex> guard(launchbox_lock);
+    auto found = launchbox_indexes.find(platform);
+    if (found != launchbox_indexes.end())
+        return found->second;
+    auto index = std::make_shared<LaunchboxIndex>();
+    if (std::FILE *file = std::fopen(platform_file(platform).c_str(), "r"))
+    {
+        std::string text;
+        char buffer[1 << 16];
+        size_t got;
+        while ((got = std::fread(buffer, 1, sizeof buffer, file)) > 0)
+            text.append(buffer, got);
+        std::fclose(file);
+        size_t start = 0;
+        while (start < text.size())
+        {
+            size_t end = text.find('\n', start);
+            if (end == std::string::npos)
+                end = text.size();
+            std::vector<std::string> f;
+            for (size_t s = start; s <= end;)
+            {
+                size_t e = text.find('\t', s);
+                if (e == std::string::npos || e > end)
+                    e = end;
+                f.push_back(unescape_field(text.substr(s, e - s)));
+                s = e + 1;
+            }
+            start = end + 1;
+            if (f[0] == "G" && f.size() >= 10)
+            {
+                index->by_id[f[1]] = index->games.size();
+                index->games.push_back({f[1], f[2], f[3], f[4], f[5], f[6], f[7], f[8], f[9]});
+                index->by_title[title_key(f[2])].push_back(f[1]);
+                index->names.push_back(f[2] + " [" + f[1] + ']');
+            }
+            else if (f[0] == "A" && f.size() >= 3)
+                index->by_title[title_key(f[2])].push_back(f[1]);
+            else if (f[0] == "I" && f.size() >= 5)
+                index->images[f[1]].push_back({f[2], f[3], f[4]});
+        }
+    }
+    launchbox_indexes[platform] = index;
+    return index;
+}
+std::map<std::string, std::string> arcade_names;
+std::string arcade_name(const std::string &romset)
+{
+    std::lock_guard<std::mutex> guard(launchbox_lock);
+    if (arcade_names.empty())
+    {
+        const std::string text = read_text(launchbox_folder() + "/arcade.names");
+        size_t start = 0;
+        while (start < text.size())
+        {
+            size_t end = text.find('\n', start);
+            if (end == std::string::npos)
+                end = text.size();
+            const std::string row = text.substr(start, end - start);
+            const size_t tab = row.find('\t');
+            if (tab != std::string::npos)
+                arcade_names[unescape_field(row.substr(0, tab))] =
+                    unescape_field(row.substr(tab + 1));
+            start = end + 1;
+        }
+    }
+    auto found = arcade_names.find(romset);
+    return found == arcade_names.end() ? "" : found->second;
+}
+/* The title a game is known by: an arcade romset's name, else its label. */
+std::string launchbox_title(const Game &game)
+{
+    if (arcade_system(game.system))
+    {
+        const std::string named = arcade_name(game.key);
+        if (!named.empty())
+            return named;
+    }
+    return game.label;
+}
+/* Games by name in the system's platforms, as "Name [id]" candidates. */
+std::vector<std::string> launchbox_search(const std::string &system, const std::string &words_of,
+                                          const std::string &region)
+{
+    std::vector<std::string> out;
+    const auto platforms = launchbox_platforms.find(system);
+    if (platforms == launchbox_platforms.end())
+        return out;
+    for (const auto &platform : platforms->second)
+        for (const auto &name : closest(launchbox_index(platform)->names, words_of, region))
+            if (!holds(out, name) && out.size() < 8)
+                out.push_back(name);
+    return out;
+}
+
+void process_launchbox(Http &http, Job &job, unsigned index, const Options &options)
+{
+    Item item;
+    {
+        std::lock_guard<std::mutex> guard(lock);
+        item = job.items[index];
+    }
+    auto finish = [&](State state, const std::string &message)
+    {
+        std::lock_guard<std::mutex> guard(lock);
+        auto &target = job.items[index];
+        target.state = state;
+        target.message = message;
+        target.matched = item.matched;
+        target.candidates = item.candidates;
+        target.found = item.found;
+        target.missing = item.missing;
+        save_job(job, false);
+    };
+    const auto platforms = launchbox_platforms.find(item.game.system);
+    if (platforms == launchbox_platforms.end())
+        return finish(State::unmatched, "LaunchBox has no platform for these games.");
+    std::vector<std::string> needed;
+    for (const auto &kind : options.kinds)
+        if (launchbox_types.count(kind) && wanted(item.game, kind, options))
+            needed.push_back(kind);
+    const bool details_wanted =
+        options.details && (options.overwrite || !has_details(item.game.system, item.game.key));
+    if (needed.empty() && !details_wanted)
+        return item.started ? finish(State::done, "")
+                            : finish(State::skipped, "Already in the library.");
+    std::string why;
+    if (!launchbox_prepare(http, job, why))
+    {
+        if (!why.empty())
+            pause_job(job, why + " Resume to try again.");
+        return finish(State::pending, "");
+    }
+    {
+        std::lock_guard<std::mutex> guard(lock);
+        if (!job.items[index].started)
+        {
+            job.items[index].started = true;
+            save_job(job, true);
+        }
+    }
+    /* The game: one chosen by the user, else its title (an alternate name counts), else
+     * the closest names, the same title taken unasked. */
+    const LaunchboxGame *game = nullptr;
+    std::shared_ptr<LaunchboxIndex> holder;
+    auto find_id = [&](const std::string &id)
+    {
+        for (const auto &platform : platforms->second)
+        {
+            auto in = launchbox_index(platform);
+            auto at = in->by_id.find(id);
+            if (at != in->by_id.end())
+            {
+                holder = in;
+                game = &in->games[at->second];
+                return;
+            }
+        }
+    };
+    const std::string chosen = candidate_id(item.matched);
+    if (!chosen.empty())
+        find_id(chosen);
+    else
+    {
+        const std::string title = launchbox_title(item.game);
+        const std::string key = title_key(title);
+        for (const auto &platform : platforms->second)
+        {
+            auto in = launchbox_index(platform);
+            auto hit = in->by_title.find(key);
+            if (hit != in->by_title.end() && !hit->second.empty())
+            {
+                find_id(hit->second.front());
+                break;
+            }
+        }
+        if (!game)
+        {
+            item.candidates =
+                launchbox_search(item.game.system, clean_title(title), options.region);
+            const std::string exact = same_title(item.candidates, title, options.region);
+            if (exact.empty())
+                return finish(item.candidates.empty() ? State::unmatched : State::ambiguous,
+                              item.candidates.empty()
+                                  ? "Not found at LaunchBox. Search by name or skip."
+                                  : "Choose the right game, search, or skip.");
+            find_id(candidate_id(exact));
+            item.candidates.clear();
+        }
+    }
+    if (!game)
+        return finish(State::unmatched, "Not found at LaunchBox. Search by name or skip.");
+    item.matched = game->name + " [" + game->id + ']';
+    Fields details;
+    details["source_id"] = game->id;
+    if (details_wanted)
+    {
+        details["name"] = game->name;
+        details["description"] = game->overview;
+        details["developer"] = game->developer;
+        details["publisher"] = game->publisher;
+        details["released"] = game->released;
+        std::string genre = game->genres;
+        for (size_t at; (at = genre.find(';')) != std::string::npos;)
+            genre.replace(at, 1, ",");
+        details["genre"] = genre;
+        details["players"] = game->players;
+        if (!game->rating.empty())
+        {
+            char rating[16];
+            std::snprintf(rating, sizeof rating, "%.2f", std::atof(game->rating.c_str()) / 5.0);
+            details["rating"] = rating;
+        }
+    }
+    const auto &images = holder->images[game->id];
+    const auto regions = launchbox_regions(options.region);
+    unsigned hits = 0, misses = 0;
+    std::vector<std::pair<std::string, std::string>> tasks; /* kind, file (PC mode) */
+    for (const auto &kind : needed)
+    {
+        const LaunchboxImage *pick = nullptr;
+        for (const auto &type : launchbox_types.at(kind))
+        {
+            for (const auto &region : regions)
+            {
+                for (const auto &image : images)
+                    if (image.type == type && image.region == region)
+                    {
+                        pick = &image;
+                        break;
+                    }
+                if (pick)
+                    break;
+            }
+            for (const auto &image : images)
+                if (!pick && image.type == type)
+                    pick = &image;
+            if (pick)
+                break;
+        }
+        const std::string ext = pick ? pick->file.substr(pick->file.find_last_of('.')) : "";
+        if (!pick || (ext != ".png" && ext != ".jpg" && ext != ".jpeg"))
+        {
+            ++misses;
+            continue;
+        }
+        const std::string url = launchbox_images + '/' + url_encode(pick->file);
+        if (options.mode == "pc")
+        {
+            tasks.emplace_back(kind, url);
+            continue;
+        }
+        const int result = download(http, item.game, kind, url, job, index, why, ext);
+        if (result < 0)
+            return finish(State::failed, why.empty() ? "The download failed." : why);
+        (result > 0 ? hits : misses)++;
+    }
+    if (cancelling)
+        return finish(State::pending, "");
+    save_meta(item, options, details);
+    if (details_wanted && has_details(item.game.system, item.game.key))
+    {
+        std::lock_guard<std::mutex> guard(lock);
+        note_got(job.items[index], "details");
+    }
+    if (options.mode == "pc" && !tasks.empty())
+    {
+        std::lock_guard<std::mutex> guard(lock);
+        auto &target = job.items[index];
+        target.state = State::transferring;
+        target.matched = item.matched;
+        target.found = 0;
+        target.missing = misses;
+        target.tasks_open = unsigned(tasks.size());
+        for (const auto &entry : tasks)
+        {
+            Task task;
+            task.id = unsigned(job.tasks.size());
+            task.item = index;
+            task.kind = entry.first;
+            task.url = entry.second;
+            const std::string ext = entry.second.substr(entry.second.find_last_of('.'));
+            task.destination = media_destination(item.game, entry.first, ext.c_str());
+            job.tasks.push_back(task);
+        }
+        target.message = "Waiting for the PC helper.";
+        wake.notify_all();
+        return;
+    }
+    item.found = hits;
+    item.missing = misses;
+    finish(misses ? State::partial : State::done,
+           misses ? "LaunchBox has " + std::to_string(hits) + " of " +
+                        std::to_string(hits + misses) + " media."
+                  : "");
+}
+
 void process_one(Http &http, Job &job, unsigned index, const Options &options)
 {
     if (options.source == "screenscraper")
         process_screenscraper(http, job, index, options);
+    else if (options.source == "launchbox")
+        process_launchbox(http, job, index, options);
     else
         process_libretro(http, job, index, options);
 }
@@ -1788,6 +2524,11 @@ void configure(const std::string &root, const std::string &base)
         libretro_base = base;
     if (const char *ss = std::getenv("PS5_SCRAPER_SCREENSCRAPER_BASE")) /* the tests' */
         screenscraper_base = ss;
+    if (const char *lb = std::getenv("PS5_SCRAPER_LAUNCHBOX_BASE")) /* the tests' */
+    {
+        launchbox_metadata = std::string(lb) + "/Metadata.zip";
+        launchbox_images = std::string(lb) + "/images";
+    }
     if (std::atoi(account_fields()["maxthreads"].c_str()) > 0)
         screenscraper_threads = unsigned(std::atoi(account_fields()["maxthreads"].c_str()));
     /* HTTPS is verified against the certificates the title ships (the daemon's curl). */
@@ -2020,9 +2761,11 @@ std::string settings_json()
           "manual", "video"}},
         {"launchbox",
          "LaunchBox Games Database",
-         "Box art, screenshots, logos and fan art, with descriptions. Coming.",
+         "Free, no account. Box art (front, back, 3D), screenshots, title screens, logos, "
+         "discs and cartridges, fan art and the games' details; arcade romsets by name. Its "
+         "database (about 110 MB) is fetched once a month.",
          false,
-         false,
+         true,
          {"cover", "backcover", "box3d", "screenshot", "title", "logo", "physical", "fanart"}},
         {"emumovies",
          "EmuMovies",
@@ -2185,7 +2928,7 @@ bool start(const Options &requested, const std::vector<Selection> &selection, st
         return false;
     }
     for (const auto &source : options.sources)
-        if (source != "libretro" && source != "screenscraper")
+        if (source != "libretro" && source != "screenscraper" && source != "launchbox")
         {
             why = "This source is not available yet.";
             return false;
@@ -2453,7 +3196,7 @@ bool resolve(const std::string &id, unsigned index, const std::string &action,
         if (action == "choose")
         {
             if (value.empty() || (source == "libretro" && value.find('/') != std::string::npos) ||
-                (source == "screenscraper" && candidate_id(value).empty()))
+                (source != "libretro" && candidate_id(value).empty()))
             {
                 why = "Choose one of the names offered.";
                 return false;
@@ -2488,7 +3231,16 @@ bool resolve(const std::string &id, unsigned index, const std::string &action,
                                                               : job->options.source;
     }
     std::vector<std::string> found;
-    if (source == "screenscraper")
+    if (source == "launchbox")
+    {
+        std::string system_id;
+        {
+            std::lock_guard<std::mutex> guard(lock);
+            system_id = job->items[index].game.system;
+        }
+        found = launchbox_search(system_id, value, region);
+    }
+    else if (source == "screenscraper")
     {
         std::string system_id;
         {
@@ -2622,7 +3374,8 @@ void pc_delivered(const std::string &id, unsigned task, bool ok, uint64_t bytes)
         if (--item.tasks_open == 0)
         {
             item.state = item.missing ? State::partial : State::done;
-            item.message = item.missing ? "libretro has " + std::to_string(item.found) + " of " +
+            item.message = item.missing ? source_name(job->options.source) + " has " +
+                                              std::to_string(item.found) + " of " +
                                               std::to_string(item.found + item.missing) + " images."
                                         : "";
             finished = item;
