@@ -32,6 +32,8 @@
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <poll.h>
+#include <pthread.h>
+#include <atomic>
 #include <string>
 #include <sys/mount.h>
 #include <sys/socket.h>
@@ -241,6 +243,13 @@ int main()
     const double started = now_s();
     double idle_since = started, installed_at = 0, last_serve_try = 0;
     unsigned serve_failures = 0;
+    /* The WebUI starts on a thread of its own (reading the library and the saved scraping
+     * jobs takes seconds): the title's hello is answered meanwhile. 0 idle, 1 starting,
+     * 2 serving, 3 failed. */
+    static std::atomic<int> start_state{0};
+    static std::string start_folder;
+    pthread_t starter{};
+    bool starter_running = false;
     say("started; listening for the title on 127.0.0.1:%d", PS5_WEBUI_LINK_PORT);
 
     for (;;)
@@ -358,16 +367,46 @@ int main()
         else if (idle_since == 0)
             idle_since = now;
 
-        if (!serving && !root.empty() && !stale && now - last_serve_try >= 1.0)
+        if (start_state == 2 || start_state == 3)
         {
-            last_serve_try = now;
-            serving = ps5_webui_start(root.c_str(), PS5_WEBUI_HTTP_PORT, false);
+            if (starter_running)
+                pthread_join(starter, nullptr);
+            starter_running = false;
+            serving = start_state == 2;
+            start_state = 0;
             if (serving)
                 say("serving the WebUI on %d from %s (%u s busy before)", PS5_WEBUI_HTTP_PORT,
                     root.c_str(), serve_failures);
             else if (serve_failures++ == 0)
                 say("%d is busy (another daemon's last transfer?); trying every second",
                     PS5_WEBUI_HTTP_PORT);
+        }
+        if (!serving && start_state == 0 && !root.empty() && !stale && now - last_serve_try >= 1.0)
+        {
+            last_serve_try = now;
+            start_state = 1;
+            start_folder = root;
+            /* A payload's default thread stack is small; the library scan needs more. */
+            pthread_attr_t attributes;
+            pthread_attr_init(&attributes);
+            pthread_attr_setstacksize(&attributes, 4u << 20);
+            starter_running =
+                pthread_create(
+                    &starter, &attributes,
+                    [](void *) -> void *
+                    {
+#ifdef PS5_WEBUI_TEST_START_DELAY_MS /* the tests: a start as slow as a big library's */
+                        usleep(PS5_WEBUI_TEST_START_DELAY_MS * 1000);
+#endif
+                        start_state =
+                            ps5_webui_start(start_folder.c_str(), PS5_WEBUI_HTTP_PORT, false) ? 2
+                                                                                              : 3;
+                        return nullptr;
+                    },
+                    nullptr) == 0;
+            pthread_attr_destroy(&attributes);
+            if (!starter_running)
+                start_state = 3;
         }
         if (serving && !install_sent && ps5_update::exit_requested())
         {
@@ -419,6 +458,8 @@ int main()
         if (stop)
             break;
     }
+    if (starter_running)
+        pthread_join(starter, nullptr); /* a start under way ends before the stop */
     for (const auto &link : links)
         close(link.fd);
     if (listener >= 0)

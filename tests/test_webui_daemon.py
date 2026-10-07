@@ -168,6 +168,30 @@ class WebuiDaemon(unittest.TestCase):
         first.close()
         self.assertEqual(self.daemon.wait(timeout=10), 0)
 
+    def test_hellos_are_answered_while_the_webui_starts(self):
+        # Reading the library and the saved scraping jobs took 6-9 s on the console; the
+        # title waits 5 s for its answer. The start runs beside the links now.
+        slow = self.homebrew / 'daemon-slow'
+        if not slow.exists():
+            webui_build.build(slow, 'daemon/webui_daemon.cpp',
+                              (f'PS5_WEBUI_HOMEBREW="{self.homebrew}"', f'PS5_WEBUI_LINK_PORT={self.link_port}',
+                               f'PS5_WEBUI_HTTP_PORT={self.http_port}', f'PS5_WEBUI_IDLE_SECONDS={IDLE}',
+                               'PS5_WEBUI_TEST_START_DELAY_MS=7000'),
+                              ('-O1', '-g', '-Wall', '-Wextra', '-Werror'))
+        self.stop()
+        self.daemon = subprocess.Popen([str(slow)], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+        self.assertTrue(wait_for(self.listening), 'the daemon did not listen for links')
+        started = time.monotonic()
+        title, reply = self.hello('retroarch')
+        self.assertEqual(reply, 'ok')
+        picker, reply = self.hello('picker')
+        self.assertEqual(reply, 'ok')
+        self.assertLess(time.monotonic() - started, 1.5)  # both answered long before the WebUI
+        self.assertIsNone(self.serving())
+        self.assertTrue(wait_for(self.serving, 15), 'the WebUI never started')
+        self.assertEqual(self.status()['frontend'], 'picker')
+        title.close(); picker.close()
+
     def test_no_title_folder(self):
         link, reply = self.hello('picker', 'PPSA00002')
         link.close()

@@ -561,13 +561,12 @@ void save_job(Job &job, bool force)
     make_folders(jobs_folder());
     write_atomic(jobs_folder() + '/' + job.id + ".job", text);
 }
-std::shared_ptr<Job> load_job(const std::string &path)
+std::shared_ptr<Job> load_job(const std::string &path, const std::vector<Game> &games)
 {
     const std::string text = read_text(path);
     if (text.rfind("PS5 RetroArch scraper job 1\n", 0) != 0)
         return nullptr;
     auto job = std::make_shared<Job>();
-    const auto games = load_games();
     std::map<std::string, const Game *> by_path;
     for (const auto &game : games)
         by_path[game.path] = &game;
@@ -2623,6 +2622,7 @@ void configure(const std::string &root, const std::string &base)
     sweep_partials(library_root(), 3);
     /* A job the last server left running goes on: PS5 mode by itself, PC mode when the
      * helper is back. */
+    std::vector<Game> games;
     if (DIR *dir = opendir(jobs_folder().c_str()))
     {
         while (const dirent *entry = readdir(dir))
@@ -2630,7 +2630,10 @@ void configure(const std::string &root, const std::string &base)
             const std::string name = entry->d_name;
             if (name.size() < 5 || name.compare(name.size() - 4, 4, ".job") != 0)
                 continue;
-            auto job = load_job(jobs_folder() + '/' + name);
+            /* The library, read once for every job (a scan is seconds on a big one). */
+            if (games.empty())
+                games = load_games();
+            auto job = load_job(jobs_folder() + '/' + name, games);
             if (!job)
                 continue;
             jobs[job->id] = job;

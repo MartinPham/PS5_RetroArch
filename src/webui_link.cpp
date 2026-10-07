@@ -221,6 +221,7 @@ void *run(void *)
         return nullptr;
     }
     bool loader_tried = false;
+    unsigned unanswered = 0;
     for (;;)
     {
         int fd = connect_local(PS5_WEBUI_LINK_PORT);
@@ -256,10 +257,16 @@ void *run(void *)
         std::string pending, reply;
         if (!write_all(fd, hello.data(), hello.size()) || !read_line(fd, pending, reply, 5000))
         {
+            /* A daemon busy starting (or loaded) answers late: asked again, never given up
+             * on while it is there, so the title is never left unlinked (it would stop). */
             close(fd);
-            say("webui link: the daemon did not answer the hello");
-            break;
+            if (++unanswered == 1 || unanswered % 10 == 0)
+                say("webui link: the daemon did not answer the hello (%u); asking again",
+                    unanswered);
+            usleep(1000000);
+            continue;
         }
+        unanswered = 0;
         if (reply == "stale")
         {
             /* A daemon of another build of the title (one just updated): it stops once
