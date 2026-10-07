@@ -75,6 +75,18 @@ std::string account_json(const std::string &source);
 bool sign_in(const std::string &source, const std::string &user, const std::string &password,
              std::string &why);
 bool sign_out(const std::string &source);
+/* One game, for its page: its details and, for every kind of media, whether it is
+ * stored (type, size, uploaded by the user) and the file types it accepts; "" for no
+ * such game. */
+std::string game_json(const std::string &system, const std::string &game);
+/* A media file the user uploads for a game: where to write it (a hidden file beside its
+ * final name); false with why for a type the frontends cannot show. Once committed,
+ * uploaded() makes it the kind's only file and marks it the user's: no scrape replaces it. */
+bool upload_target(const std::string &system, const std::string &game, const std::string &kind,
+                   const std::string &type, std::string &temporary, std::string &destination,
+                   std::string &why);
+void uploaded(const std::string &system, const std::string &game, const std::string &kind,
+              const std::string &destination);
 /* A stored media file's path for the WebUI, or "" (kind: cover, screenshot...). */
 std::string media_file(const std::string &system, const std::string &game, const std::string &kind);
 

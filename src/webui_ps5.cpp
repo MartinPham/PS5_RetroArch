@@ -71,10 +71,11 @@ struct BatchState;
 enum class Transfer
 {
     none,
-    single, // PUT /api/upload
-    batch,  // PUT /api/upload/batch
-    part,   // PUT /api/upload/part
-    scraped // PUT /api/scraper/pc/media: a file the PC helper downloaded
+    single,  // PUT /api/upload
+    batch,   // PUT /api/upload/batch
+    part,    // PUT /api/upload/part
+    scraped, // PUT /api/scraper/pc/media: a file the PC helper downloaded
+    media    // PUT /api/library/media: a media file the user chose for a game
 };
 struct Request
 {
@@ -88,6 +89,7 @@ struct Request
     size_t body_limit = 16384;
     std::string job;
     unsigned task = 0;
+    std::string media_system, media_game, media_kind, media_why; // Transfer::media
     unsigned error = 0;
     const char *message = "";
     bool counted = false; // in transfers_in_flight
@@ -1189,6 +1191,33 @@ void prepare_scraped(MHD_Connection *c, Request &r)
         r.message = "This download is no longer wanted.";
     }
 }
+// A media file the user uploads for one game (src/scraper.h): written under a hidden
+// name beside its final one and renamed into place when whole.
+void prepare_media(MHD_Connection *c, Request &r)
+{
+    r.transfer = Transfer::media;
+    r.media_system = arg(c, "system");
+    r.media_game = arg(c, "game");
+    r.media_kind = arg(c, "kind");
+    std::string type = arg(c, "type"), why;
+    for (char &ch : type)
+        ch = char(std::tolower((unsigned char)ch));
+    if (!content_length(c, r.expected) || r.expected == 0 || r.expected > (uint64_t(1) << 30))
+    {
+        r.error = 413;
+        r.message = "A media file is at most 1 GiB.";
+        return;
+    }
+    if (!ps5_scraper::upload_target(r.media_system, r.media_game, r.media_kind, type, r.temporary,
+                                    r.destination, why) ||
+        !r.writer.create(r.temporary))
+    {
+        r.temporary.clear();
+        r.error = 415;
+        r.media_why = why.empty() ? "The console could not store this file." : why;
+        r.message = r.media_why.c_str();
+    }
+}
 std::string query(MHD_Connection *c, const char *key, const char *fallback)
 {
     const char *value = arg(c, key);
@@ -1221,6 +1250,30 @@ MHD_Result scraper_route(MHD_Connection *c, const std::string &url, const std::s
     };
     if (method == "GET" && url == "/api/library")
         return respond(c, 200, ps5_scraper::library_json());
+    if (method == "GET" && url == "/api/library/game")
+    {
+        const std::string game = ps5_scraper::game_json(arg(c, "system"), arg(c, "game"));
+        return game.empty() ? error(c, 404, "This game is not in the library.")
+                            : respond(c, 200, game);
+    }
+    if (r.transfer == Transfer::media)
+    {
+        const bool flushed = r.writer.flush();
+        const uint64_t got = r.writer.written();
+        const int fd = r.writer.release();
+        bool ok = flushed && fd >= 0 && got == r.expected && r.received == r.expected;
+        if (ok)
+            ok = ps5_transfer::commit(fd, r.temporary, r.destination, true, true) ==
+                 ps5_transfer::Commit::done;
+        if (fd >= 0)
+            close(fd);
+        if (!ok)
+            return error(c, 507, "The file could not be stored. Check free space and try again.");
+        chmod(r.destination.c_str(), 0777);
+        r.temporary.clear();
+        ps5_scraper::uploaded(r.media_system, r.media_game, r.media_kind, r.destination);
+        return respond(c, 201, ps5_scraper::game_json(r.media_system, r.media_game));
+    }
     if (method == "GET" && url == "/api/library/media")
     {
         const std::string file =
@@ -1234,6 +1287,7 @@ MHD_Result scraper_route(MHD_Connection *c, const std::string &url, const std::s
                            : ext == "gif"                  ? "image/gif"
                            : ext == "mp4"                  ? "video/mp4"
                            : ext == "webm"                 ? "video/webm"
+                           : ext == "pdf"                  ? "application/pdf"
                                                            : "application/octet-stream";
         return serve_file(c, file, type, false);
     }
@@ -1597,6 +1651,8 @@ MHD_Result handle(void *, MHD_Connection *c, const char *url, const char *method
             prepare_part(c, *r);
         else if (std::strcmp(method, "PUT") == 0 && std::strcmp(url, "/api/scraper/pc/media") == 0)
             prepare_scraped(c, *r);
+        else if (std::strcmp(method, "PUT") == 0 && std::strcmp(url, "/api/library/media") == 0)
+            prepare_media(c, *r);
         if (std::strcmp(url, "/api/scraper/start") == 0)
             r->body_limit = 4 << 20; // one line a game chosen
         if (r->error)
@@ -1658,7 +1714,7 @@ MHD_Result handle(void *, MHD_Connection *c, const char *url, const char *method
     }
     if (r.error && !(r.transfer == Transfer::batch && r.batch && r.error == 400))
         return error(c, r.error, r.message);
-    if (r.transfer == Transfer::scraped || is_scraper_route(url))
+    if (r.transfer == Transfer::scraped || r.transfer == Transfer::media || is_scraper_route(url))
         return scraper_route(c, url, method, r);
     if (r.transfer != Transfer::none || is_transfer_route(url))
         return transfer_route(c, url, method, r);

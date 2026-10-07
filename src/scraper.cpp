@@ -731,6 +731,20 @@ std::string media_destination(const Game &game, const std::string &kind, const c
 {
     return library_root() + '/' + game.system + '/' + kind_folders.at(kind) + '/' + game.key + ext;
 }
+/* The kinds the user put in place themselves (the .meta's "uploaded" list). */
+std::vector<std::string> uploaded_kinds(const std::string &system, const std::string &key)
+{
+    return kinds_from(read_fields(meta_path(system, key))["uploaded"]);
+}
+/* A kind a job fetches for a game: one it lacks, or any when replacing; never one the
+ * user uploaded (a scrape does not undo the user's choice). */
+bool wanted(const Game &game, const std::string &kind, const Options &options)
+{
+    if (!options.overwrite)
+        return stored_media(game.system, game.key, kind).empty();
+    const auto mine = uploaded_kinds(game.system, game.key);
+    return std::find(mine.begin(), mine.end(), kind) == mine.end();
+}
 /* What is written of a game's metadata (fields edited by hand are kept). */
 void save_meta(const Item &item, const Options &options, const Fields &details = {})
 {
@@ -1109,7 +1123,7 @@ void process_screenscraper(Http &http, Job &job, unsigned index)
         return finish(State::unmatched, "ScreenScraper has no system for these games.");
     std::vector<std::string> needed;
     for (const auto &kind : options.kinds)
-        if (options.overwrite || stored_media(item.game.system, item.game.key, kind).empty())
+        if (wanted(item.game, kind, options))
             needed.push_back(kind);
     const bool details_wanted =
         options.overwrite ||
@@ -1296,7 +1310,7 @@ void process(Http &http, Job &job, unsigned index)
     /* What is already stored is kept (unless overwrite): nothing to fetch for it. */
     std::vector<std::string> needed;
     for (const auto &kind : kinds)
-        if (options.overwrite || stored_media(item.game.system, item.game.key, kind).empty())
+        if (wanted(item.game, kind, options))
             needed.push_back(kind);
     if (needed.empty() && !kinds.empty())
     {
@@ -1568,6 +1582,115 @@ bool busy()
 {
     std::lock_guard<std::mutex> guard(lock);
     return active && active->state == "running";
+}
+
+/* What a kind of media accepts from the user: the types every frontend reads. */
+const std::vector<std::string> &accepted_types(const std::string &kind)
+{
+    static const std::vector<std::string> images = {"png", "jpg", "jpeg"}, video = {"mp4", "webm"},
+                                          manual = {"pdf"};
+    return kind == "video" ? video : kind == "manual" ? manual : images;
+}
+bool find_game(const std::string &system, const std::string &key, Game &out)
+{
+    if (!safe_part(system) || !safe_part(key))
+        return false;
+    for (const auto &game : load_games())
+        if (game.system == system && game.key == key)
+        {
+            out = game;
+            return true;
+        }
+    return false;
+}
+
+std::string game_json(const std::string &system, const std::string &key)
+{
+    Game game;
+    if (!find_game(system, key, game))
+        return "";
+    const Fields meta = read_fields(meta_path(system, key));
+    const auto mine = uploaded_kinds(system, key);
+    std::string kinds;
+    for (const auto &kind : kind_catalog)
+    {
+        const std::string file = stored_media(system, key, kind.id);
+        struct stat st{};
+        const bool present = !file.empty() && stat(file.c_str(), &st) == 0;
+        std::string accepts;
+        const std::string id = kind.id;
+        for (const auto &type : accepted_types(id))
+            accepts += std::string(accepts.empty() ? "" : ",") + quote(type);
+        kinds += std::string(kinds.empty() ? "" : ",") + "{\"id\":" + quote(kind.id) +
+                 ",\"name\":" + quote(kind.name) + ",\"description\":" + quote(kind.description) +
+                 ",\"accepts\":[" + accepts + "],\"present\":" + (present ? "true" : "false");
+        if (present)
+            kinds +=
+                ",\"type\":" + quote(file.substr(file.find_last_of('.') + 1)) +
+                ",\"bytes\":" + std::to_string(st.st_size) +
+                ",\"changed\":" + std::to_string(st.st_mtime) + ",\"uploaded\":" +
+                (std::find(mine.begin(), mine.end(), kind.id) != mine.end() ? "true" : "false");
+        kinds += '}';
+    }
+    std::string details;
+    for (const char *field : {"name", "description", "developer", "publisher", "genre", "players",
+                              "rating", "released", "source", "scraped"})
+        if (meta.count(field) && !meta.at(field).empty())
+            details += std::string(details.empty() ? "" : ",") + quote(field) + ':' +
+                       quote(meta.at(field));
+    return "{\"system\":" + quote(system) + ",\"system_name\":" + quote(game.system_name) +
+           ",\"key\":" + quote(key) + ",\"label\":" + quote(game.label) +
+           ",\"path\":" + quote(game.path) + ",\"details\":{" + details + "},\"kinds\":[" + kinds +
+           "]}";
+}
+
+bool upload_target(const std::string &system, const std::string &key, const std::string &kind,
+                   const std::string &type, std::string &temporary, std::string &destination,
+                   std::string &why)
+{
+    Game game;
+    if (!kind_folders.count(kind))
+    {
+        why = "No such kind of media.";
+        return false;
+    }
+    const auto &types = accepted_types(kind);
+    if (std::find(types.begin(), types.end(), type) == types.end())
+    {
+        std::string list;
+        for (const auto &t : types)
+            list += (list.empty() ? "" : ", ") + t;
+        why = kind_name(kind) + " takes " + list + " files (what every frontend can show).";
+        return false;
+    }
+    if (!find_game(system, key, game))
+    {
+        why = "This game is not in the library.";
+        return false;
+    }
+    destination = media_destination(game, kind, ('.' + type).c_str());
+    const std::string folder = destination.substr(0, destination.find_last_of('/'));
+    make_folders(folder);
+    temporary = folder + "/.partial-" + nonce();
+    return true;
+}
+
+void uploaded(const std::string &system, const std::string &key, const std::string &kind,
+              const std::string &destination)
+{
+    /* The new file is the kind's only one (a lookup takes the first type it finds). */
+    const std::string stem = destination.substr(0, destination.find_last_of('.'));
+    for (const char *ext : {".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".webm", ".pdf"})
+        if (stem + ext != destination)
+            unlink((stem + ext).c_str());
+    make_folders(library_root() + '/' + system + "/metadata");
+    Fields meta = read_fields(meta_path(system, key));
+    auto mine = kinds_from(meta["uploaded"]);
+    if (std::find(mine.begin(), mine.end(), kind) == mine.end())
+        mine.push_back(kind);
+    meta["uploaded"] = kinds_text(mine);
+    meta["media." + kind] = destination.substr(library_root().size() + 1);
+    write_atomic(meta_path(system, key), fields_text(meta));
 }
 
 std::string library_json()

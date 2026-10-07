@@ -61,6 +61,32 @@ const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
     assert.equal(await page.locator('.recap-game .kind-pill').count(), 2, 'one kind shown when one is picked');
     await page.goto(process.env.WEBUI_TEST_URL + '/#games');
     await page.waitForFunction(() => document.querySelectorAll('.game-cover img').length === 4);
+    // A card opens the game: one row a kind of media, missing ones greyed, each replaceable.
+    await page.locator('.game-card', { hasText: 'Donkey Kong Country 2' }).locator('.game-cover').click();
+    const sheet = page.locator('#game-sheet');
+    await sheet.waitFor({ state: 'visible' });
+    await page.waitForFunction(() => document.querySelectorAll('.media-row-item').length === 10);
+    assert.equal(await page.locator('.media-row-item:not(.missing)').count(), 3);
+    assert.equal(await page.locator('.media-row-item.missing').count(), 7);
+    assert.equal(await page.locator('.media-row-item[data-kind="cover"] .preview img').count(), 1);
+    assert.match(await page.locator('#sheet-media-count').innerText(), /3 of 10 kinds/);
+    const fanart = page.locator('.media-row-item[data-kind="fanart"]');
+    assert.equal(await fanart.locator('button').innerText(), 'Add…');
+    // A type no frontend shows is refused on the page; a PNG is sent and shown at once.
+    await fanart.locator('input[type=file]').setInputFiles({ name: 'art.gif', mimeType: 'image/gif', buffer: Buffer.from('GIF89a') });
+    assert.match(await fanart.locator('.state').innerText(), /takes PNG, JPG, JPEG files/);
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+    await fanart.locator('input[type=file]').setInputFiles({ name: 'my fan art.png', mimeType: 'image/png', buffer: png });
+    await page.waitForFunction(() => !document.querySelector('.media-row-item[data-kind="fanart"]').classList.contains('missing'));
+    assert.match(await page.locator('.media-row-item[data-kind="fanart"] .state').innerText(), /PNG · .* · your file, kept when downloading again/);
+    assert.match(await page.locator('#sheet-media-count').innerText(), /4 of 10 kinds/);
+    await page.keyboard.press('Escape');
+    await sheet.waitFor({ state: 'hidden' });
+    assert.match(await page.locator('.game-card', { hasText: 'Donkey Kong Country 2' }).locator('.media-badges').innerText(), /Fan art/);
+    // The checkbox still selects without opening.
+    await page.locator('.game-card', { hasText: 'Donkey Kong Country 2' }).locator('.game-select').click();
+    assert.equal(await sheet.isVisible(), false);
+    await page.locator('.game-card', { hasText: 'Donkey Kong Country 2' }).locator('.game-select').click();
     // The method is remembered on the console.
     await page.goto(process.env.WEBUI_TEST_URL + '/#media');
     await page.waitForFunction(() => document.querySelector('input[name="scrape-method"][value="ps5"]').checked);
@@ -68,6 +94,6 @@ const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
     await page.setViewportSize({ width: 390, height: 844 });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), true, 'no sideways scroll on a phone');
     assert.deepEqual(errors, []);
-    console.log('PASS: method asked then remembered, media tiles, system scraped on the PS5 with live stats, ambiguous game resolved, recap by kind and game, covers shown, phone width');
+    console.log('PASS: method asked then remembered, media tiles, system scraped on the PS5 with live stats, ambiguous game resolved, recap by kind and game, covers shown, the game overlay with its media rows and an upload, phone width');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exit(1); });

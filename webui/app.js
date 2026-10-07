@@ -762,7 +762,7 @@ for (const span of $$('[data-icon]')) {
   span.append(element('b', label));
 }
 // The games and their media (src/scraper.h): the shared library every frontend reads.
-const KIND_NAMES = { cover: 'Cover', screenshot: 'Screenshot', title: 'Title', logo: 'Logo', video: 'Video' };
+const KIND_NAMES = { cover: 'Box art', backcover: 'Back', box3d: '3D box', screenshot: 'Screenshot', title: 'Title', logo: 'Logo', physical: 'Disc', fanart: 'Fan art', manual: 'Manual', video: 'Video' };
 function gameName(game) { return game.name || game.label; }
 // What tells versions of one game apart: the (region), (Rev 1), (Proto), [a1], (1992)
 // tags of its label or, failing that, of its file name. Two cards with one title are
@@ -809,8 +809,12 @@ function drawGames() {
     for (const kind of game.media) badges.append(element('span', KIND_NAMES[kind] || kind));
     const tags = element('div', undefined, 'version-tags');
     for (const tag of gameTags(game)) tags.append(tagNode(tag));
-    card.title = game.path.split('/').pop();
+    card.title = `${game.path.split('/').pop()} · open to see and change its media`;
     info.append(element('strong', gameName(game)), tags, element('small', system.name), badges);
+    // The card opens the game's media; its checkbox still selects it for a download.
+    card.tabIndex = 0; card.setAttribute('aria-haspopup', 'dialog');
+    card.addEventListener('click', event => { if (event.target !== pick) openGame(system, game); });
+    card.addEventListener('keydown', event => { if ((event.key === 'Enter' || event.key === ' ') && event.target === card) { event.preventDefault(); openGame(system, game); } });
     card.append(pick, cover, info); grid.append(card);
   }
   if (list.length > shownGames) {
@@ -834,6 +838,110 @@ async function loadGames() {
   } catch (error) { $('#games-grid').replaceChildren(element('p', error.message, 'list-message inline-error')); }
 }
 for (const id of ['#games-system', '#games-missing']) $(id).addEventListener('change', () => { shownGames = 300; drawGames(); });
+
+// A game's page: its details, then one row a kind of media, missing ones greyed, each
+// replaceable by a file from this computer (streamed to the console, then put in place).
+let sheetGame = null;
+const DETAIL_NAMES = [['developer', 'Developer'], ['publisher', 'Publisher'], ['released', 'Released'], ['genre', 'Genre'], ['players', 'Players'], ['rating', 'Rating']];
+async function openGame(system, game) {
+  sheetGame = { system, game, info: null };
+  const dialog = $('#game-sheet');
+  $('#sheet-title').textContent = gameName(game);
+  $('#sheet-tags').replaceChildren(...gameTags(game).map(tagNode));
+  $('#sheet-sub').textContent = `${system.name} · ${game.path.split('/').pop()}`;
+  $('#sheet-details').hidden = true;
+  $('#sheet-media').replaceChildren(element('p', 'Loading…', 'list-message'));
+  drawSheetCover();
+  if (!dialog.open) dialog.showModal();
+  try { sheetGame.info = await api(`/api/library/game?system=${encodeURIComponent(system.id)}&game=${encodeURIComponent(game.key)}`); }
+  catch (error) { $('#sheet-media').replaceChildren(element('p', error.message, 'list-message inline-error')); return; }
+  drawSheet();
+}
+function sheetMediaUrl(kind) {
+  const { system, game, info } = sheetGame, entry = info?.kinds.find(k => k.id === kind);
+  return `/api/library/media?system=${encodeURIComponent(system.id)}&game=${encodeURIComponent(game.key)}&kind=${kind}&v=${entry?.changed || ''}`;
+}
+function drawSheetCover() {
+  const box = $('#sheet-cover'), { system, game, info } = sheetGame;
+  const has = info ? info.kinds.find(k => k.id === 'cover')?.present : game.media.includes('cover');
+  if (!has) { box.replaceChildren(icon('file')); return; }
+  const img = document.createElement('img'); img.alt = ''; img.src = info ? sheetMediaUrl('cover') : mediaUrl(system.id, game, 'cover');
+  img.addEventListener('error', () => img.replaceWith(icon('file'))); box.replaceChildren(img);
+}
+function drawSheet() {
+  const { info } = sheetGame, details = info.details;
+  // Details, when a source gave them.
+  const box = $('#sheet-details'); box.replaceChildren();
+  if (details.description) {
+    const text = element('p', details.description, 'description'); box.append(text);
+    if (details.description.length > 420) { const more = element('button', 'Read more', 'text-button'); more.type = 'button'; more.addEventListener('click', () => { text.classList.toggle('open'); more.textContent = text.classList.contains('open') ? 'Show less' : 'Read more'; }); box.append(more); }
+  }
+  const facts = DETAIL_NAMES.filter(([k]) => details[k]);
+  if (facts.length) {
+    const dl = element('dl');
+    for (const [k, label] of facts) dl.append(element('dt', label), element('dd', k === 'rating' ? `${Math.round(Number(details[k]) * 100)}%` : details[k]));
+    box.append(dl);
+  }
+  box.hidden = !box.childElementCount;
+  const present = info.kinds.filter(k => k.present).length;
+  $('#sheet-media-count').textContent = `${present} of ${info.kinds.length} kinds`;
+  $('#sheet-media').replaceChildren(...info.kinds.map(mediaRow));
+  drawSheetCover();
+}
+function mediaRow(kind) {
+  const row = element('div', undefined, `media-row-item${kind.present ? '' : ' missing'}`), preview = element('div', undefined, 'preview');
+  row.dataset.kind = kind.id;
+  if (!kind.present) preview.append(svgIcon(KIND_ICONS[kind.id] || KIND_ICONS.cover));
+  else if (kind.id === 'video') { const v = document.createElement('video'); v.src = sheetMediaUrl(kind.id); v.controls = true; v.preload = 'metadata'; v.muted = true; preview.append(v); }
+  else if (kind.type === 'pdf') { const a = element('a'); a.href = sheetMediaUrl(kind.id); a.target = '_blank'; a.rel = 'noopener'; a.append(svgIcon(KIND_ICONS.manual), element('span', 'Open PDF')); preview.append(a); }
+  else {
+    const img = document.createElement('img'); img.loading = 'lazy'; img.alt = `${kind.name}`; img.src = sheetMediaUrl(kind.id);
+    img.addEventListener('error', () => img.replaceWith(svgIcon(KIND_ICONS[kind.id] || KIND_ICONS.cover))); preview.append(img);
+  }
+  const what = element('div', undefined, 'what'), title = element('strong');
+  title.append(svgIcon(KIND_ICONS[kind.id] || KIND_ICONS.cover), element('span', kind.name));
+  const state = kind.present ? element('span', `${kind.type.toUpperCase()} · ${bytes(kind.bytes)}${kind.uploaded ? ' · your file, kept when downloading again' : ''}`, `state${kind.uploaded ? ' mine' : ''}`)
+    : element('span', `Missing · add a ${kind.accepts.join(', ').toUpperCase()} file`, 'state');
+  what.append(title, element('p', kind.description, 'muted'), state);
+  const actions = element('div', undefined, 'actions'), choose = element('button', kind.present ? 'Replace…' : 'Add…', 'secondary');
+  choose.type = 'button';
+  const input = document.createElement('input'); input.type = 'file'; input.hidden = true;
+  input.accept = kind.accepts.map(type => '.' + type).join(',');
+  choose.addEventListener('click', () => input.click());
+  input.addEventListener('change', () => { if (input.files[0]) uploadMedia(kind, input.files[0], row); input.value = ''; });
+  actions.append(choose, input);
+  // A file dropped on the row replaces that kind.
+  row.addEventListener('dragover', event => { event.preventDefault(); row.classList.add('drop'); });
+  row.addEventListener('dragleave', () => row.classList.remove('drop'));
+  row.addEventListener('drop', event => { event.preventDefault(); row.classList.remove('drop'); const file = event.dataTransfer.files[0]; if (file) uploadMedia(kind, file, row); });
+  row.append(preview, what, actions);
+  return row;
+}
+function uploadMedia(kind, file, row) {
+  const type = (file.name.split('.').pop() || '').toLowerCase();
+  const state = row.querySelector('.state');
+  if (!kind.accepts.includes(type)) { state.textContent = `${kind.name} takes ${kind.accepts.join(', ').toUpperCase()} files (what every frontend can show).`; state.className = 'state inline-error'; return; }
+  const { system, game } = sheetGame, bar = document.createElement('progress'); bar.max = 100; bar.value = 0;
+  row.classList.add('busy'); state.textContent = `Sending ${file.name} · ${bytes(file.size)}`; state.className = 'state'; state.after(bar);
+  const request = new XMLHttpRequest();
+  request.open('PUT', `/api/library/media?system=${encodeURIComponent(system.id)}&game=${encodeURIComponent(game.key)}&kind=${kind.id}&type=${encodeURIComponent(type)}`);
+  request.setRequestHeader('X-RetroArch-Token', token);
+  request.upload.addEventListener('progress', event => { if (event.lengthComputable) bar.value = event.loaded / event.total * 100; });
+  request.addEventListener('load', () => {
+    let data = {}; try { data = JSON.parse(request.responseText); } catch {}
+    if (request.status !== 201) { row.classList.remove('busy'); bar.remove(); state.textContent = data.error || `The upload failed (${request.status}). Try again.`; state.className = 'state inline-error'; return; }
+    sheetGame.info = data;
+    // The card and its media list follow, for every frontend reads the same file.
+    game.media = data.kinds.filter(k => k.present).map(k => k.id); game.scraped = String(Date.now());
+    drawSheet(); drawGames();
+    announce(`${kind.name} of ${gameName(game)} replaced.`);
+  });
+  request.addEventListener('error', () => { row.classList.remove('busy'); bar.remove(); state.textContent = 'The connection was lost. Try again.'; state.className = 'state inline-error'; });
+  request.send(file);
+}
+$('#sheet-close').addEventListener('click', () => $('#game-sheet').close());
+$('#game-sheet').addEventListener('click', event => { if (event.target === $('#game-sheet')) $('#game-sheet').close(); });
+$('#game-sheet').addEventListener('close', () => { for (const v of $$('#sheet-media video')) v.pause(); });
 $('#games-search').addEventListener('input', () => { shownGames = 300; drawGames(); });
 $('#refresh-games').addEventListener('click', loadGames);
 

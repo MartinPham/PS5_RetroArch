@@ -360,6 +360,54 @@ class Scraper(unittest.TestCase):
         self.assertFalse(old.exists())
         self.assertTrue(young.exists())  # maybe a stale daemon's file still being written
 
+    def test_a_game_shows_its_media_and_takes_the_users_own(self):
+        dk = 'Donkey Kong Country 2 - Diddy\'s Kong Quest (USA)'
+        key = Path(self.games[dk]).stem
+        self.wait(self.start(lines=[f'snes\t{self.games[dk]}']))
+        status, body = self.request('GET', f'/api/library/game?system=snes&game={urllib.parse.quote(key)}')
+        self.assertEqual(status, 200, body)
+        game = json.loads(body)
+        kinds = {k['id']: k for k in game['kinds']}
+        self.assertEqual(len(kinds), 10)  # every kind, present or not
+        self.assertEqual((kinds['cover']['present'], kinds['cover']['type'], kinds['cover']['uploaded']), (True, 'png', False))
+        self.assertEqual((kinds['fanart']['present'], kinds['video']['accepts']), (False, ['mp4', 'webm']))
+        self.assertEqual(game['details']['name'], "Donkey Kong Country 2 - Diddy's Kong Quest")
+        query = f'system=snes&game={urllib.parse.quote(key)}'
+        mine = b'\xff\xd8\xff' + b'my own cover' * 1000
+        # A type no frontend shows, a game not in the library, a kind that does not exist,
+        # an address outside the library, and no token: all refused, nothing written.
+        for path, expected in ((f'/api/library/media?{query}&kind=cover&type=gif', 415),
+                               ('/api/library/media?system=snes&game=Nope&kind=cover&type=png', 415),
+                               (f'/api/library/media?{query}&kind=config&type=png', 415),
+                               ('/api/library/media?system=..&game=..%2Fconfig&kind=cover&type=png', 415)):
+            status, body = self.request('PUT', path, mine)
+            self.assertEqual(status, expected, (path, body))
+        self.assertIn('takes png, jpg, jpeg files', json.loads(self.request('PUT', f'/api/library/media?{query}&kind=cover&type=gif', mine)[1])['error'])
+        token, self.token = self.token, ''
+        self.assertEqual(self.request('PUT', f'/api/library/media?{query}&kind=cover&type=jpg', mine)[0], 403)
+        self.token = token
+        self.assertTrue(self.stored(dk, 'cover').exists())
+        # The user's cover: it replaces the scraped one, the only file of its kind.
+        status, body = self.request('PUT', f'/api/library/media?{query}&kind=cover&type=JPG', mine)
+        self.assertEqual(status, 201, body)
+        cover = {k['id']: k for k in json.loads(body)['kinds']}['cover']
+        self.assertEqual((cover['type'], cover['bytes'], cover['uploaded']), ('jpg', len(mine), True))
+        self.assertFalse(self.stored(dk, 'cover').exists())  # the .png
+        self.assertEqual(self.request('GET', f'/api/library/media?{query}&kind=cover')[1], mine)
+        meta = (self.root / 'library/snes/metadata' / f'{key}.meta').read_text()
+        self.assertIn('uploaded = "cover"', meta)
+        self.assertIn('media.cover = "snes/covers/', meta)
+        # A missing kind added; a scrape replacing everything leaves the user's files.
+        fanart = b'\x89PNG' + b'fan art' * 500
+        self.assertEqual(self.request('PUT', f'/api/library/media?{query}&kind=fanart&type=png', fanart)[0], 201)
+        before = len(self.media_gets())
+        self.wait(self.start(lines=[f'snes\t{self.games[dk]}'], overwrite=True))
+        self.assertEqual(len(self.media_gets()), before + 2)  # screenshot and title, not the cover
+        self.assertEqual(self.request('GET', f'/api/library/media?{query}&kind=cover')[1], mine)
+        self.assertEqual((self.root / 'library/snes/fanarts' / f'{key}.png').read_bytes() if (self.root / 'library/snes/fanarts').exists()
+                         else self.request('GET', f'/api/library/media?{query}&kind=fanart')[1], fanart)
+        self.assertFalse(list((self.root / 'library').rglob('.partial-*')))
+
     def test_games_page_in_a_browser(self):
         playwright = next((str(p) for p in (Path.home() / '.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright-core',
                                             Path('/usr/lib/chatgpt/resources/cua_node/lib/node_modules/playwright-core')) if p.exists()),
