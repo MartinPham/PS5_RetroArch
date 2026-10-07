@@ -373,6 +373,7 @@ struct Item
     std::string candidates_source;              /* whose names the candidates are */
     unsigned pass = 0;              /* the funnel's source it waits for (an index of sources) */
     std::string held, held_message; /* an earlier source's ambiguous/unmatched/failed */
+    unsigned holder = 0; /* the worker holding it (1...), whatever its state says (not saved) */
 };
 /* Each source's name for a game, "source=name" separated by the unit separator. */
 std::string matches_text(const std::map<std::string, std::string> &matches)
@@ -2486,8 +2487,10 @@ void process(Http &http, Job &job, unsigned index)
  * 1 MiB stack and one connection a host). ScreenScraper keeps to its own limit
  * (ScreenscraperSlot); the other sources never wait for it. */
 constexpr unsigned worker_count = 32;
+std::atomic<unsigned> worker_numbers{0};
 void worker()
 {
+    const unsigned me = ++worker_numbers; /* never 0: 0 is "no worker" */
     Http http("PS5-RetroArch-Scraper/1");
     for (;;)
     {
@@ -2503,20 +2506,22 @@ void worker()
                 {
                     auto &items = active->items;
                     const unsigned pass = active->pass;
-                    auto next =
-                        std::find_if(items.begin(), items.end(), [pass](const Item &i)
-                                     { return i.state == State::pending && i.pass <= pass; });
+                    auto next = std::find_if(
+                        items.begin(), items.end(), [pass](const Item &i)
+                        { return i.state == State::pending && i.pass <= pass && !i.holder; });
                     if (next != items.end())
                     {
                         next->state = State::working;
+                        next->holder = me;
                         job = active;
                         index = unsigned(next - items.begin());
                         break;
                     }
-                    /* Nothing left to take: the job ends once nothing is in flight. */
-                    const bool flight = std::any_of(
-                        items.begin(), items.end(), [](const Item &i)
-                        { return i.state == State::working || i.state == State::transferring; });
+                    /* Nothing left to take: the job ends once nothing is in flight (a game a
+                     * worker holds may show a source's result while the funnel moves it on). */
+                    const bool flight =
+                        std::any_of(items.begin(), items.end(), [](const Item &i)
+                                    { return i.holder || i.state == State::transferring; });
                     if (!flight)
                     {
                         /* A pass over: the next source's, if a game waits for it. */
@@ -2538,6 +2543,11 @@ void worker()
             }
         }
         process(http, *job, index);
+        std::lock_guard<std::mutex> guard(lock);
+        /* Only its own hold: another worker may have taken the game on already. */
+        if (job->items[index].holder == me)
+            job->items[index].holder = 0;
+        wake.notify_all();
     }
 }
 /* Each worker on a 1 MiB stack: a payload's default thread stack is small (src/scraper_http.cpp).
@@ -3089,10 +3099,10 @@ bool resume(const std::string &id, std::string &why)
     }
     cancelling = false;
     active = it->second;
-    /* A game still "working" is in a worker's hands (it puts it back itself); a job read
-     * from disk has none (they are saved as pending). */
+    /* A game in a worker's hands is left to it (it puts it back itself). */
     for (auto &item : active->items)
-        if (item.state == State::transferring || item.state == State::failed)
+        if (!item.holder && (item.state == State::working || item.state == State::transferring ||
+                             item.state == State::failed))
         {
             /* A failed game goes down the funnel again from its top (what it has is kept). */
             if (item.state == State::failed && active->options.sources.size() > 1)
