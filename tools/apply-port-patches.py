@@ -3711,6 +3711,13 @@ EDITS += [
     ('menu/menu_driver.c', '   struct menu_state *menu_st     = &menu_driver_state;\n   if (     menu_st->driver_ctx\n         && menu_st->driver_ctx->entry_action)', '   struct menu_state *menu_st     = &menu_driver_state;\n   /* patches/series, 0115: WebUI modal input */\n   if (ps5_webui_qr_visible())\n   {\n      if (action == MENU_ACTION_CANCEL || action == MENU_ACTION_OK)\n         ps5_webui_qr_close();\n      return 0;\n   }\n   if (     menu_st->driver_ctx\n         && menu_st->driver_ctx->entry_action)', 'patches/series, 0115: WebUI modal input'),
 ]
 
+# Move 0115's binding out of the custom-keyboard-only branch. Preserve its
+# marker so both fresh and already-patched trees converge on the same result.
+EDITS += [
+    ('menu/cbs/menu_cbs_ok.c', '   /* patches/series, 0115: WebUI action binding */\n   if (string_is_equal(label, "ps5_webui"))\n   {\n      BIND_ACTION_OK(cbs, action_ok_ps5_webui);\n      return 0;\n   }\n   BIND_ACTION_OK(cbs, action_ok_lookup_setting);', '   /* patches/series, 0115: WebUI action binding; moved by 0116 to the entry initializer. */\n      BIND_ACTION_OK(cbs, action_ok_lookup_setting);', 'moved by 0116 to the entry initializer'),
+    ('menu/cbs/menu_cbs_ok.c', '   BIND_ACTION_OK(cbs, action_ok_lookup_setting);\n\n   if (menu_cbs_init_bind_ok_compare_label(cbs, label) == 0)', '   /* patches/series, 0116: WebUI entry action */\n   if (string_is_equal(label, "ps5_webui"))\n   {\n      BIND_ACTION_OK(cbs, action_ok_ps5_webui);\n      return 0;\n   }\n   BIND_ACTION_OK(cbs, action_ok_lookup_setting);\n\n   if (menu_cbs_init_bind_ok_compare_label(cbs, label) == 0)', 'patches/series, 0116: WebUI entry action'),
+]
+
 # Changes that are withdrawn rather than deleted, by marker.
 #
 # An entry here names an insertion this driver no longer needs, and the

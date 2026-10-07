@@ -65,7 +65,10 @@ const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
     assert.equal(await page.locator('.recap-game').count(), 2);
     assert.equal(await page.locator('.recap-game .kind-pill').count(), 2, 'one kind shown when one is picked');
     await page.goto(process.env.WEBUI_TEST_URL + '/#games');
-    await page.waitForFunction(() => document.querySelectorAll('.game-cover img').length === 4);
+    await page.waitForFunction(() => {
+      const covers = [...document.querySelectorAll('.game-cover img')];
+      return covers.length === 4 && covers.every(img => img.complete && img.naturalWidth > 0);
+    });
     // A card opens the game: one row a kind of media, missing ones greyed, each replaceable.
     await page.locator('.game-card', { hasText: 'Donkey Kong Country 2' }).locator('.game-cover').click();
     const sheet = page.locator('#game-sheet');
@@ -96,7 +99,10 @@ const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
     await page.waitForFunction(() => document.querySelectorAll('.game-card').length === 5);
     assert.equal(await page.locator('input[name="games-view"][value="box3d"]').isChecked(), true);
     await page.locator('label:has(input[name="games-view"][value="cover"])').click();
-    await page.waitForFunction(() => document.querySelectorAll('.game-cover img').length === 4);
+    await page.waitForFunction(() => {
+      const covers = [...document.querySelectorAll('.game-cover img')];
+      return covers.length === 4 && covers.every(img => img.complete && img.naturalWidth > 0);
+    });
     // The checkbox still selects without opening.
     await page.locator('.game-card', { hasText: 'Donkey Kong Country 2' }).locator('.game-select').click();
     assert.equal(await sheet.isVisible(), false);

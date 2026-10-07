@@ -144,7 +144,7 @@ int main() {
                 files[name] = files[name].replace(anchor, replacement, 1)
         before = files.copy()
         for name, anchor, replacement, marker in edits:
-            if "0115" in replacement and marker not in files[name]:
+            if any(step in replacement for step in ("0115", "0116")) and marker not in files[name]:
                 files[name] = files[name].replace(anchor, replacement, 1)
         self.assertEqual(before, files)
         xmb = files['menu/drivers/xmb.c']
@@ -154,6 +154,87 @@ int main() {
         self.assertLess(tabs.index('XMB_SYSTEM_TAB_WEBUI'), tabs.index('XMB_SYSTEM_TAB_SETTINGS'))
         rgui = files['menu/menu_displaylist.c'].split('case DISPLAYLIST_MAIN_MENU:', 1)[1]
         self.assertLess(rgui.index('"ps5_webui"'), rgui.index('RUNLOOP_FLAG_CORE_RUNNING'))
+
+    def test_retroarch_entry_opens_modal_and_cancel_closes(self):
+        edits = runpy.run_path(str(ROOT / 'tools/apply-port-patches.py'))['EDITS']
+        files = {}
+        for name, anchor, replacement, marker in edits:
+            if name not in files:
+                files[name] = (ROOT / 'vendor/retroarch' / name).read_text()
+            if marker not in files[name]:
+                self.assertIn(anchor, files[name], marker)
+                files[name] = files[name].replace(anchor, replacement, 1)
+
+        def function(source, signature):
+            return source[source.index(signature):].split('\n}', 1)[0] + '\n}\n'
+
+        callbacks = files['menu/cbs/menu_cbs_ok.c']
+        code = r"""
+#include <assert.h>
+#include <string.h>
+#include "ps5_webui_qr.h"
+void qr_test_network(const char *, unsigned, int, long);
+typedef int (*ok_cb)(const char *, const char *, unsigned, size_t, size_t);
+typedef struct { ok_cb action_ok; } menu_file_list_cbs_t;
+#define BIND_ACTION_OK(cbs, name) ((cbs)->action_ok = (name))
+#define string_is_equal(a, b) ((a) && (b) && strcmp((a), (b)) == 0)
+static int fallback_calls;
+static int action_ok_lookup_setting(const char *p, const char *l, unsigned t, size_t i, size_t e)
+{ fallback_calls++; return 23; }
+static int menu_cbs_init_bind_ok_compare_label(menu_file_list_cbs_t *c, const char *l)
+{ return -1; }
+static int menu_cbs_init_bind_ok_compare_type(menu_file_list_cbs_t *c, const char *l,
+                                             const char *m, unsigned t)
+{ return -1; }
+"""
+        code += function(callbacks, 'static int action_ok_ps5_webui(')
+        code += function(callbacks, 'int menu_cbs_init_bind_ok(')
+        code += r"""
+enum menu_action { MENU_ACTION_NOOP, MENU_ACTION_OK, MENU_ACTION_CANCEL, MENU_ACTION_RIGHT };
+typedef struct { menu_file_list_cbs_t cbs; } menu_entry_t;
+static int forwarded;
+static int entry_action(void *data, menu_entry_t *entry, size_t i, enum menu_action action)
+{
+    forwarded++;
+    if (action == MENU_ACTION_OK)
+        return entry->cbs.action_ok("WebUI", "ps5_webui", 0, i, 0);
+    return 17;
+}
+struct driver { int (*entry_action)(void *, menu_entry_t *, size_t, enum menu_action); };
+struct menu_state { struct driver *driver_ctx; void *userdata; };
+static struct driver driver = {entry_action};
+static struct menu_state menu_driver_state = {&driver, NULL};
+"""
+        code += function(files['menu/menu_driver.c'], 'int menu_entry_action(')
+        code += r"""
+int main(void)
+{
+    qr_test_network("192.0.2.42", 1, 0, 500);
+    menu_entry_t entry = {0};
+    assert(menu_cbs_init_bind_ok(NULL, "", "ps5_webui", 9, 0, 0, "", 0) == -1);
+    assert(menu_cbs_init_bind_ok(&entry.cbs, "WebUI", "ps5_webui", 9, 0, 0, "main_menu", 9) == 0);
+    assert(entry.cbs.action_ok == action_ok_ps5_webui);
+    assert(menu_entry_action(&entry, 0, MENU_ACTION_OK) == 0);
+    assert(ps5_webui_qr_visible() && forwarded == 1 && fallback_calls == 0);
+    assert(strcmp(ps5_webui_qr_current()->url, "http://192.0.2.42:6769/") == 0);
+    assert(menu_entry_action(&entry, 0, MENU_ACTION_RIGHT) == 0);
+    assert(ps5_webui_qr_visible() && forwarded == 1);
+    assert(menu_entry_action(&entry, 0, MENU_ACTION_CANCEL) == 0);
+    assert(!ps5_webui_qr_visible() && forwarded == 1);
+    assert(menu_entry_action(&entry, 0, MENU_ACTION_RIGHT) == 17 && forwarded == 2);
+    assert(menu_entry_action(&entry, 0, MENU_ACTION_OK) == 0 && ps5_webui_qr_visible());
+    assert(menu_entry_action(&entry, 0, MENU_ACTION_OK) == 0 && !ps5_webui_qr_visible());
+    assert(menu_cbs_init_bind_ok(&entry.cbs, "", "other", 5, 0, 0, "", 0) == -1);
+    assert(entry.cbs.action_ok == action_ok_lookup_setting);
+    assert(entry.cbs.action_ok("", "other", 0, 0, 0) == 23 && fallback_calls == 1);
+}
+"""
+        file = Path(self.tmp.name) / 'menu-action.c'
+        file.write_text(code)
+        binary = file.with_suffix('')
+        subprocess.run(['cc', '-std=c11', '-Isrc', str(file), str(Path(self.tmp.name) / 'qr.so'),
+                        '-o', str(binary)], cwd=ROOT, check=True)
+        subprocess.run([str(binary)], check=True, cwd=self.tmp.name)
 
     def test_upstream_encoder_is_unmodified(self):
         folder = ROOT / 'third_party/qrcodegen'

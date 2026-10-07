@@ -462,9 +462,14 @@ class Scraper(unittest.TestCase):
         shutil.copytree(ROOT / 'webui', self.root / 'webui', dirs_exist_ok=True)
         # Page files newer than the running server: the page asks for a restart.
         (self.root / 'webui/version.json').write_text('{"build": "newer-than-the-server"}\n')
-        # Covers the page can decode: real PNGs from the fake source for this test.
-        run = subprocess.run(['node', 'tests/webui_scraper_browser.cjs'], cwd=ROOT, capture_output=True, text=True, timeout=300,
-                             env={**os.environ, 'PLAYWRIGHT_PATH': playwright, 'WEBUI_TEST_URL': f'http://127.0.0.1:{self.port}'})
+        # Covers must decode: the transfer-only fixture is text, and the page
+        # replaces failed images, racing the browser's cover-count assertion.
+        import base64
+        from unittest.mock import patch
+        png = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4////fwAJ+wP9KobjigAAAABJRU5ErkJggg==')
+        with patch(__name__ + '.image', return_value=png):
+            run = subprocess.run(['node', 'tests/webui_scraper_browser.cjs'], cwd=ROOT, capture_output=True, text=True, timeout=300,
+                                 env={**os.environ, 'PLAYWRIGHT_PATH': playwright, 'WEBUI_TEST_URL': f'http://127.0.0.1:{self.port}'})
         self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
 
 
