@@ -54,6 +54,12 @@ command -v ccache >/dev/null && cc="ccache $cc"
 flags="-O2 -march=znver2 -fPIC -ffunction-sections -fdata-sections"
 
 echo "==> [curl] mbedTLS $mbedtls_version"
+# Thread-safe: curl shares one random generator (CTR-DRBG, prediction resistance on) among
+# all its connections and counts on mbedTLS's own locks for it. Without them, the WebUI
+# daemon's 32 scraper workers starting HTTPS handshakes together crashed it in
+# mbedtls_entropy_func (2026-10-07, klog/webui-down.txt).
+(cd "$build/mbedtls" && python3 scripts/config.py set MBEDTLS_THREADING_C &&
+    python3 scripts/config.py set MBEDTLS_THREADING_PTHREAD)
 make -C "$build/mbedtls/library" -j"${JOBS:-16}" CC="$cc" AR="$sdk/bin/prospero-ar" \
     CFLAGS="$flags" libmbedtls.a libmbedx509.a libmbedcrypto.a > "$build/mbedtls.log" 2>&1 ||
     { grep -E "error" "$build/mbedtls.log" | head -20 >&2; exit 1; }
