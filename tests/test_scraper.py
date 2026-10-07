@@ -46,6 +46,8 @@ class FakeLibretro(http.server.ThreadingHTTPServer):
     def __init__(self):
         super().__init__(('127.0.0.1', 0), Handler)
         self.log, self.delay, self.lock = [], 0.0, threading.Lock()
+        self.busy = self.most_busy = 0  # requests at once (how parallel a job is)
+        self.times = []  # when each request came (the order of a funnel's passes)
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -56,6 +58,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
         parts = urllib.parse.unquote(self.path).strip('/').split('/')
         with self.server.lock:
             self.server.log.append((self.command, self.headers.get('User-Agent', ''), '/'.join(parts[1:])))
+            self.server.times.append(time.time())
+            self.server.busy += 1
+            self.server.most_busy = max(self.server.most_busy, self.server.busy)
+        try:
+            self.reply(parts, body)
+        finally:
+            with self.server.lock:
+                self.server.busy -= 1
+
+    def reply(self, parts, body):
         time.sleep(self.server.delay)
         if len(parts) == 2 and parts[0] == DB and parts[1] in FOLDERS:  # the folder's listing
             data = ''.join(f'<a href="{urllib.parse.quote(n)}.png">{n}.png</a>\n' for n, f in SOURCE.items() if parts[1] in f).encode()
@@ -113,6 +125,7 @@ class Scraper(unittest.TestCase):
         self.source.delay = 0.0
         with self.source.lock:
             self.source.log.clear()
+            self.source.times.clear()
         self.start_server()
 
     def write_playlist(self, games):
@@ -249,26 +262,30 @@ class Scraper(unittest.TestCase):
         games = {f'Filler Game {i:02} (USA)': f'/app0/content/SNES/Filler Game {i:02} (USA).sfc' for i in range(24)}
         self.games = games
         self.write_playlist(games)
-        self.source.delay = 0.05
+        self.source.delay = 0.4  # 32 workers take every game at once: slow enough to cut
         job_id = self.start(kinds='cover,screenshot,title')
-        self.wait(job_id, lambda j: j['counts'].get('done', 0) >= 4)
+        self.wait(job_id, lambda j: j['downloaded']['files'] >= 4)
         self.assertEqual(json.loads(self.request('POST', f'/api/scraper/cancel?id={job_id}')[1]), {'cancelled': True})
         cancelled = self.wait(job_id, lambda j: j['state'] == 'cancelled')
         done_then = cancelled['counts'].get('done', 0)
-        time.sleep(0.5)
-        self.assertFalse(list((self.root / 'library').rglob('.partial-*')))  # a cut download left nothing
+        # A cut download leaves nothing (curl notices a cancel within a second).
+        end = time.time() + 3
+        while list((self.root / 'library').rglob('.partial-*')) and time.time() < end:
+            time.sleep(0.1)
+        self.assertFalse(list((self.root / 'library').rglob('.partial-*')))
         # Resume, then restart the server mid-way: it goes on by itself.
         self.assertEqual(self.request('POST', f'/api/scraper/resume?id={job_id}')[0], 200)
-        self.wait(job_id, lambda j: j['counts'].get('done', 0) >= done_then + 4)
+        self.wait(job_id, lambda j: j['downloaded']['files'] >= cancelled['downloaded']['files'] + 4)
         self.stop_server()
         self.start_server()
         job = self.wait(job_id, timeout=120)
         self.assertEqual((job['state'], job['counts']), ('done', {'done': 24}))
-        # Every image fetched once, but those a cancel or a restart cut (at most one a worker each time).
+        # Every image fetched once, but those a cancel or a restart cut (at most one a worker,
+        # 32 of them, each time).
         gets = self.media_gets()
         repeats = len(gets) - len(set(gets))
         self.assertEqual(len(set(gets)), 72)
-        self.assertLessEqual(repeats, 8)
+        self.assertLessEqual(repeats, 64)
         for label in games:
             for kind in ('cover', 'screenshot', 'title'):
                 self.assertTrue(self.stored(label, kind).exists())

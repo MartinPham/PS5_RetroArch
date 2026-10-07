@@ -70,6 +70,7 @@ class FakeScreenScraper(http.server.ThreadingHTTPServer):
     def reset(self):
         self.quota_hit = False
         self.calls, self.urls, self.busy, self.most_busy, self.max_threads = [], [], 0, 0, '2'
+        self.times = []
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -87,7 +88,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         endpoint = url.path.rsplit('/', 1)[-1]
         server = self.server
         with server.lock:
-            server.calls.append((endpoint, q)); server.urls.append(self.path)
+            server.calls.append((endpoint, q)); server.urls.append(self.path); server.times.append(time.time())
             server.busy += 1; server.most_busy = max(server.most_busy, server.busy)
         try:
             time.sleep(0.05)
@@ -162,6 +163,7 @@ class ScreenScraper(unittest.TestCase):
             self.source.reset()
         with self.libretro.lock:
             self.libretro.log.clear()
+            self.libretro.times.clear()
         self.start_server()
 
     def start_server(self, developer=True):
@@ -364,14 +366,25 @@ class ScreenScraper(unittest.TestCase):
         self.assertEqual(status, 201, body)
         return json.loads(body)['job']['id']
 
+    def first_lookup(self):
+        """When ScreenScraper was first asked about a game (not the sign-in)."""
+        with self.source.lock:
+            return min(at for at, (endpoint, _) in zip(self.source.times, self.source.calls) if endpoint != 'ssuserInfos.php')
+
     def ss_media(self):
         with self.source.lock:
             return [q['media'] for e, q in self.source.calls if e == 'medias.php']
 
     def test_a_chain_asks_the_next_source_only_for_what_is_missing(self):
         self.assertEqual(self.sign_in()[0], 200)
+        with self.libretro.lock:
+            self.libretro.times.clear()
+        with self.source.lock:
+            self.source.times.clear()
         job_id = self.chain()
         job = self.wait(job_id)
+        # A funnel: libretro's pass over every game ends before ScreenScraper's begins.
+        self.assertLess(max(self.libretro.times), self.first_lookup())
         self.assertEqual(job['sources'], 'libretro,screenscraper')
         self.assertEqual(job['counts'], {'ambiguous': 1, 'done': 3, 'unmatched': 1}, job)
         # libretro gave the box art and screenshots; ScreenScraper only the videos (and
@@ -403,12 +416,28 @@ class ScreenScraper(unittest.TestCase):
         recap = json.loads(self.request('GET', f'/api/scraper/recap?id={job_id}')[1])['recap']
         self.assertEqual(recap['totals']['video'], {'got': 4, 'had': 0, 'missed': 1})
 
+    def test_a_one_game_account_holds_back_only_screenscraper(self):
+        # A free account asks about one game at a time; libretro, first, is not held back.
+        with self.source.lock:
+            self.source.max_threads = '1'
+        self.assertEqual(self.sign_in()[0], 200)
+        with self.libretro.lock:
+            self.libretro.delay, self.libretro.most_busy = 0.3, 0
+        try:
+            self.wait(self.chain(kinds='cover,video', details=False))
+        finally:
+            with self.libretro.lock:
+                self.libretro.delay = 0.0
+        self.assertGreater(self.libretro.most_busy, 1)
+        self.assertEqual(self.source.most_busy, 1)
+        self.assertLess(max(self.libretro.times), self.first_lookup())  # its pass first
+
     def test_a_chain_paused_by_a_quota_does_not_ask_again_what_it_found(self):
         self.assertEqual(self.sign_in()[0], 200)
         with self.source.lock:
             self.source.quota_hit = True
         job_id = self.chain(kinds='cover,video', details=False)
-        job = self.wait(job_id, lambda j: j['state'] == 'paused')
+        job = self.wait(job_id, lambda j: j['state'] == 'paused' and not j['counts'].get('working'))
         self.assertIn('quota for today is used up', job['message'])
         served = lambda: [p for m, a, p in self.libretro.log if m == 'GET' and p.endswith('.png') and p.split('/')[-1][:-4] in base.SOURCE]
         with self.libretro.lock:
@@ -436,7 +465,8 @@ class ScreenScraper(unittest.TestCase):
         with self.source.lock:
             self.source.quota_hit = True
         job_id = self.start(kinds='cover')
-        job = self.wait(job_id, lambda j: j['state'] == 'paused')
+        # Paused: every game back to waiting once the workers holding one let go.
+        job = self.wait(job_id, lambda j: j['state'] == 'paused' and not j['counts'].get('working'))
         self.assertIn('quota for today is used up', job['message'])
         self.assertEqual(job['counts'].get('pending'), 5)
         with self.source.lock:

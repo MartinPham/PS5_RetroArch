@@ -22,7 +22,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-WORKERS = 4
+WORKERS = 16  # downloads at once: small files wait on the network, not the PC
 CHUNK = 1 << 20
 
 

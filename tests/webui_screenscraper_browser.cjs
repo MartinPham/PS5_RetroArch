@@ -43,7 +43,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
     assert.equal(await item.locator('.signed-check').count(), 1);
     assert.equal(await toggle.getAttribute('aria-checked'), 'true');
     assert.equal(await order.innerText(), '2');
-    assert.match(await page.locator('#scrape-source-hint').innerText(), /asks libretro thumbnails first; whatever it lacks goes to ScreenScraper/);
+    assert.match(await page.locator('#scrape-source-hint').innerText(), /libretro thumbnails goes through every game first, at full speed; then ScreenScraper only for what is still missing/);
     assert.equal(await page.locator('.kind-tile:disabled').count(), 0);
     assert.match(await page.locator('.kind-tile', { hasText: 'Box art (front)' }).getAttribute('title'), /Asked of libretro thumbnails, then ScreenScraper/);
     assert.equal(await page.locator('#scrape-language-pick').isVisible(), true);

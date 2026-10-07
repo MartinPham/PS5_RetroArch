@@ -1106,7 +1106,7 @@ function drawSources() {
   const chosen = chosenSource(), names = chainSources().map(s => s.name);
   $('#scrape-source-hint').textContent = !names.length ? 'Turn on at least one source.'
     : names.length === 1 ? chosen.description
-    : `Each game asks ${names[0]} first; whatever it lacks goes to ${names.slice(1).join(', then ')}. Free sources first save the quota of limited ones.`;
+    : `${names[0]} goes through every game first, at full speed; then ${names.slice(1).join(', then ')} only for what is still missing. Free sources first save the quota of limited ones.`;
   const signed = chainSources().find(s => s.account && s.signed_in);
   $('#scrape-account').hidden = !signed;
   if (signed) { $('#scrape-account-text').textContent = `Signed in to ${signed.name}`; $('#scrape-account-manage').onclick = () => openSignIn(signed); }
@@ -1290,7 +1290,10 @@ function drawJob(job) {
   panel.dataset.state = job.state;
   $('#job-title').textContent = running ? 'Downloading media…' : `Download ${stateText.toLowerCase()}`;
   const sourceName = (job.sources || job.source).split(',').map(id => scraperSettings?.sources.find(s => s.id === id)?.name || id).join(' → ');
-  $('#job-summary').textContent = `${METHOD_NAMES[job.mode]} · ${sourceName} · ${total.toLocaleString()} games` + (job.message ? ` · ${job.message}` : '');
+  // The funnel: which source's pass runs, and how many games wait for the ones below.
+  const chain = (job.sources || job.source).split(',').filter(Boolean);
+  const passText = chain.length > 1 && running ? ` · pass ${job.pass + 1} of ${chain.length}: ${scraperSettings?.sources.find(s => s.id === chain[job.pass])?.name || chain[job.pass]}${job.waiting ? ` · ${job.waiting.toLocaleString()} game${job.waiting === 1 ? '' : 's'} waiting for the next source` : ''}` : '';
+  $('#job-summary').textContent = `${METHOD_NAMES[job.mode]} · ${sourceName} · ${total.toLocaleString()} games${passText}` + (job.message ? ` · ${job.message}` : '');
   countTo($('#stat-done'), count(job, 'done')); countTo($('#stat-partial'), count(job, 'partial'));
   countTo($('#stat-kept'), count(job, 'skipped')); countTo($('#stat-attention'), count(job, 'unmatched', 'ambiguous', 'failed'));
   countTo($('#stat-files'), job.mode === 'pc' ? job.transferred.files : job.downloaded.files);
