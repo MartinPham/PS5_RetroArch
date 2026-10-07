@@ -3582,6 +3582,57 @@ static void ps5_core_option_default(struct core_option *option)
         'patches/series, 0111: all Slang samplers',
     ),
 
+    (
+        # PicoDrive's RGB565 frames (320 pixels, rows of exactly 640 bytes, so the
+        # one-memcpy path) reached the screen half-height, doubled and miscoloured
+        # on this driver (2026-10-06); Beetle PCE's, whose rows are padded and copied
+        # one by one, were right, as are 32-bit frames. Core frames now always go up
+        # as BGRA8888: the texture's format is fixed, and a 16-bit frame is widened
+        # as it is copied. PokeMini, Handy, NeoPop, Cygne, a5200 and ProSystem (all
+        # RGB565) were then right on the console.
+        'gfx/drivers/vulkan.c',
+        '   RARCH_LOG("[Vulkan] Using %s format.\\n", video->rgb32 ? "BGRA8888" : "RGB565");',
+        '   /* patches/series, 0112: core frames are BGRA8888 textures; RGB565 is widened on upload. */\n'
+        '   vk->tex_fmt           = VK_FORMAT_B8G8R8A8_UNORM;\n'
+        '   RARCH_LOG("[Vulkan] Using %s format.\\n", video->rgb32 ? "BGRA8888" : "RGB565");',
+        'patches/series, 0112: core frames are BGRA8888',
+    ),
+
+    (
+        'gfx/drivers/vulkan.c',
+        '         dst = (uint8_t*)chain->texture.mapped;\n         if (     (chain->texture.stride == pitch )',
+        '         dst = (uint8_t*)chain->texture.mapped;\n'
+        '         /* patches/series, 0112: RGB565 rows widened into the BGRA8888 texture. */\n'
+        '         if (!vk->video.rgb32)\n'
+        '         {\n'
+        '            for (y = 0; y < frame_height; y++, dst += chain->texture.stride, src += pitch)\n'
+        '            {\n'
+        '               const uint16_t *in = (const uint16_t*)src;\n'
+        '               uint32_t *out      = (uint32_t*)dst;\n'
+        '               unsigned x;\n'
+        '               for (x = 0; x < frame_width; x++)\n'
+        '               {\n'
+        '                  unsigned p = in[x];\n'
+        '                  unsigned r = (p >> 11) & 0x1f, g = (p >> 5) & 0x3f, b = p & 0x1f;\n'
+        '                  out[x] = 0xff000000u | ((r << 3 | r >> 2) << 16) | ((g << 2 | g >> 4) << 8) | (b << 3 | b >> 2);\n'
+        '               }\n'
+        '            }\n'
+        '         }\n'
+        '         else if (     (chain->texture.stride == pitch )',
+        'patches/series, 0112: RGB565 rows widened',
+    ),
+
+    (
+        # Not in vulkan_get_current_sw_framebuffer itself: withdrawn 0077 replaces
+        # that whole function while the edits apply.
+        'runloop.c',
+        '         if (\n                  video_st->poke\n               && video_st->poke->get_current_software_framebuffer\n',
+        '         /* patches/series, 0112: core frame textures are BGRA8888, so a 16-bit core is not lent one. */\n'
+        '         if (\n                  video_st->pix_fmt != RETRO_PIXEL_FORMAT_RGB565\n'
+        '               && video_st->poke\n               && video_st->poke->get_current_software_framebuffer\n',
+        'patches/series, 0112: core frame textures are BGRA8888',
+    ),
+
 ]
 
 # Changes that are withdrawn rather than deleted, by marker.

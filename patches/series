@@ -257,3 +257,5 @@
 0110  Expand overlay strips to both triangles for the existing list pipeline; retain UVs and alpha.
 
 0111  Normalize padded software frames before Slang sampling so history, feedback, LUTs and multipass Original use consistent coordinates.
+
+0112  Core frames are BGRA8888 textures: an RGB565 core's rows are widened on upload, and such a core is not lent the frontend's framebuffer.
