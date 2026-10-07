@@ -12,7 +12,9 @@
  *
  *   - the games are the entries of the playlists in /app0/playlists (RetroArch's
  *     own history, favourites and media playlists left out), read in name order, each
- *     game once, as the first playlist that lists it has it;
+ *     game once, as the first playlist that lists it has it; then, with
+ *     ps5_library_load_content, the games in the content folders that no playlist
+ *     lists (issue 25: a game copied into content/ shows without a scan);
  *   - a game's system is the first of these that names a known platform: the
  *     RetroArch database its entry was scanned against, the playlist's name, the
  *     folder the game is in, the database of the core its entry names; else its own
@@ -100,6 +102,15 @@ extern "C"
      * library, not an error. ps5_library_free releases it either way. */
     int ps5_library_load(struct ps5_library *library, const char *playlists, const char *info,
                          const char *cores);
+    /* The same, and then the games in the content roots no playlist lists: each folder at
+     * a root's top that names a platform the title has a core for (its database's name,
+     * "PS1", "Sega 32X", "NEC PC-FX"...) is that system's, and in it every file a core of
+     * the platform takes, but firmware (named in a core's info, or [BIOS]...) and the
+     * track files of a folder that has a .cue, .gdi or .m3u. A DOS game is a folder,
+     * started by the program named like it; a ScummVM game is a folder, started from a
+     * data file in it. content ends with NULL; NULL or empty scans nothing. */
+    int ps5_library_load_content(struct ps5_library *library, const char *playlists,
+                                 const char *info, const char *cores, const char *const *content);
     void ps5_library_free(struct ps5_library *library);
 
     /* The platform a name stands for (a RetroArch database, a playlist's or a folder's

@@ -19,11 +19,13 @@ extern "C"
         const char *playlists, *info, *cores; /* RetroArch's */
         const char *reference;                /* ES-DE's own systems file */
         const char *data;                     /* ES-DE's data folder (ES-DE/) */
+        const char *const *content;           /* content roots, NULL-ended; or NULL */
     };
 
     /* Writes ES-DE's systems file and game lists from the library; the number of
      * systems, or -1 (a summary of what was done either way). */
-    int ps5_esde_write_library_to(const struct ps5_esde_library_paths *paths, char *summary, size_t summary_size);
+    int ps5_esde_write_library_to(const struct ps5_esde_library_paths *paths, char *summary,
+                                  size_t summary_size);
     /* The same, with the title's folders. */
     int ps5_esde_write_library(char *summary, size_t summary_size);
 

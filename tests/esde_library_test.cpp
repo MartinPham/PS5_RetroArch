@@ -95,7 +95,7 @@ int main(int argc, char **argv)
     const std::string playlists = dir + "/playlists", info = dir + "/info", cores = dir + "/cores",
                       reference = dir + "/reference.xml", data = dir + "/data";
     const struct ps5_esde_library_paths paths = {playlists.c_str(), info.c_str(), cores.c_str(),
-                                                 reference.c_str(), data.c_str()};
+                                                 reference.c_str(), data.c_str(), nullptr};
     char summary[256];
     assert(ps5_esde_write_library_to(&paths, summary, sizeof(summary)) == 2);
     assert(std::string(summary).find("2 systems, 3 games (1 with ES-DE's details kept)") == 0);

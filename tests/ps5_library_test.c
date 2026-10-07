@@ -257,7 +257,110 @@ int main(int argc, char **argv)
     assert(ps5_library_load(&library, "/nonexistent", "/nonexistent", "/nonexistent") == 0 &&
            library.system_count == 0 && library.game_count == 0);
     ps5_library_free(&library);
+
+    /* Issue 25: the games in the content folders that no playlist lists. */
+    assert(strcmp(ps5_library_platform("NEC PC-FX"), "pcfx") == 0);
+    assert(strcmp(ps5_library_platform("NeoGeo CD"), "neogeocd") == 0);
+    assert(strcmp(ps5_library_platform("NeoGeo Pocket Color"), "ngpc") == 0);
+    assert(strcmp(ps5_library_platform("Wonderswan Color"), "wonderswancolor") == 0);
+    assert(strcmp(ps5_library_platform("NEC - Super Grafx"), "supergrafx") == 0);
+    assert(strcmp(ps5_library_platform("ATARI 5200"), "atari5200") == 0);
+    assert(strcmp(ps5_library_platform("Atari Jaguar"), "atarijaguar") == 0);
+    assert(strcmp(ps5_library_platform("MS-DOS"), "dos") == 0);
+    assert(strcmp(ps5_library_platform("3DO"), "3do") == 0);
+    assert(strcmp(ps5_library_platform("Pokemon Mini"), "pokemini") == 0);
+    assert(strcmp(ps5_library_platform("Virtual Boy"), "virtualboy") == 0);
+    assert(strcmp(ps5_library_platform("ScummVM"), "scummvm") == 0);
+    assert(strcmp(ps5_library_platform("ARCADE - NeoGeo"), "neogeo") == 0);
+    core(dir, "stella", "Atari - 2600", "a26|bin"); /* its archives are RetroArch's to open */
+    core(dir, "opera", "The 3DO Company - 3DO", "iso|bin|chd|cue");
+    snprintf(path, sizeof(path), "%s/info/opera_libretro.info", dir);
+    {
+        FILE *info_file = fopen(path, "a");
+        fputs("firmware0_path = \"panafz10.bin\"\nfirmware1_path = \"panafz1.bin\"\n", info_file);
+        fclose(info_file);
+    }
+    core(dir, "dosbox_pure", "DOS", "zip|dosz|exe|com|bat|iso|cue");
+    core(dir, "scummvm", "ScummVM", "scummvm");
+    const char *content_folders[] = {"content",
+                                     "content/ATARI 2600",
+                                     "content/ATARI 2600/Hacks",
+                                     "content/3DO",
+                                     "content/3DO/Game",
+                                     "content/MS-DOS",
+                                     "content/MS-DOS/doom",
+                                     "content/ScummVM",
+                                     "content/ScummVM/Tentacle",
+                                     "content/ScummVM/Tentacle/dott",
+                                     "content/My Stuff",
+                                     "content/Saturn",
+                                     "usb",
+                                     "usb/Atari 2600"};
+    for (size_t i = 0; i < sizeof(content_folders) / sizeof(content_folders[0]); i++)
+    {
+        snprintf(path, sizeof(path), "%s/%s", dir, content_folders[i]);
+        mkdir(path, 0777);
+    }
+    const char *content_files[] = {"content/ATARI 2600/Adventure.zip",
+                                   "content/ATARI 2600/readme.txt",
+                                   "content/ATARI 2600/Hacks/Pitfall.a26",
+                                   "content/3DO/panafz10.bin",
+                                   "content/3DO/panafz10-patched.bin",
+                                   "content/3DO/[BIOS] 3DO.bin",
+                                   "content/3DO/Game/Game.cue",
+                                   "content/3DO/Game/Game.iso",
+                                   "content/MS-DOS/doom/DOOM.EXE",
+                                   "content/MS-DOS/doom/SETUP.EXE",
+                                   "content/MS-DOS/doom/DOOM.WAD",
+                                   "content/MS-DOS/Keen.zip",
+                                   "content/ScummVM/Tentacle/dosbox.conf",
+                                   "content/ScummVM/Tentacle/dott/IAFIX.BAT",
+                                   "content/ScummVM/Tentacle/dott/TENTACLE.000",
+                                   "content/My Stuff/thing.zip",
+                                   "content/Saturn/game.cue",
+                                   "usb/Atari 2600/River Raid.a26",
+                                   "content/3DO/Archived Disc.7z",
+                                   "usb/loose.a26"};
+    for (size_t i = 0; i < sizeof(content_files) / sizeof(content_files[0]); i++)
+    {
+        snprintf(path, sizeof(path), "%s/%s", dir, content_files[i]);
+        write_text(path, "x");
+    }
+    char content_root[1024], usb_root[1024];
+    snprintf(content_root, sizeof(content_root), "%s/content", dir);
+    snprintf(usb_root, sizeof(usb_root), "%s/usb", dir);
+    const char *const roots[] = {content_root, usb_root, NULL};
+    assert(ps5_library_load_content(&library, playlists, info, cores, roots) == 0);
+    /* The playlists' nine, and: Adventure, Pitfall, River Raid (the drive), the 3DO game's
+     * .cue, DOOM.EXE, Keen.zip and Tentacle (Adventure.zip though Stella takes no .zip: a
+     * cartridge system's archives are RetroArch's to open). Not: the 3DO's archived disc
+     * (a disc system's archive), readme.txt, the firmware (by the info's
+     * names, a variant of one, [BIOS]), the .iso behind the .cue, SETUP.EXE, DOOM.WAD,
+     * dosbox.conf, My Stuff (no platform), Saturn (no core), a file at a drive's top. */
+    assert(library.game_count == 9 + 7);
+    const struct ps5_library_system *atari = system_of(&library, "atari2600");
+    assert(atari && atari->game_count == 3 && strcmp(atari->folder, "/") != 0);
+    const struct ps5_library_system *panasonic = system_of(&library, "3do");
+    assert(panasonic && panasonic->game_count == 1);
+    assert(strstr(library.games[panasonic->first_game].path, "3DO/Game/Game.cue"));
+    assert(strstr(panasonic->core, "opera_libretro.so"));
+    const struct ps5_library_system *dos = system_of(&library, "dos");
+    assert(dos && dos->game_count == 2);
+    for (size_t i = 0; i < dos->game_count; i++)
+    {
+        const struct ps5_library_game *game = &library.games[dos->first_game + i];
+        assert(strstr(game->path, "doom/DOOM.EXE") ? strcmp(game->label, "doom") == 0
+                                                   : strstr(game->path, "Keen.zip") != NULL);
+    }
+    const struct ps5_library_system *scumm = system_of(&library, "scummvm");
+    assert(scumm && scumm->game_count == 1);
+    assert(strstr(library.games[scumm->first_game].path, "Tentacle/dott/TENTACLE.000") &&
+           strcmp(library.games[scumm->first_game].label, "Tentacle") == 0);
+    assert(!system_of(&library, "saturn") && !system_of(&library, "mystuff"));
+    /* A game a playlist lists is not listed twice, and keeps its playlist's place. */
+    assert(system_of(&library, "snes")->game_count == 2);
+    ps5_library_free(&library);
     puts("ps5_library: platforms, playlists, systems, cores, folders, labels, favourites, history, "
-         "runtime logs and game mode commands PASS");
+         "runtime logs, game mode commands and content folders PASS");
     return 0;
 }

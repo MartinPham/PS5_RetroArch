@@ -186,7 +186,8 @@ extern "C" int ps5_esde_write_library_to(const struct ps5_esde_library_paths *pa
                                          size_t summary_size)
 {
     struct ps5_library library;
-    if (ps5_library_load(&library, paths->playlists, paths->info, paths->cores) != 0)
+    if (ps5_library_load_content(&library, paths->playlists, paths->info, paths->cores,
+                                 paths->content) != 0)
     {
         ps5_library_free(&library);
         std::snprintf(summary, summary_size, "the library could not be read (memory)");
@@ -206,7 +207,7 @@ extern "C" int ps5_esde_write_library_to(const struct ps5_esde_library_paths *pa
     pugi::xml_document systems;
     systems.append_child(pugi::node_comment)
         .set_value(" Written by es-de.bin each time it starts, from RetroArch's playlists "
-                   "(src/ps5_library.h). "
+                   "and the content folders (src/ps5_library.h). "
                    "Changes here are lost: change the playlists in RetroArch. ");
     pugi::xml_node list = systems.append_child("systemList");
     std::set<std::string> names;
@@ -238,7 +239,7 @@ extern "C" int ps5_esde_write_library_to(const struct ps5_esde_library_paths *pa
         entry.append_child("theme").text().set(
             known != reference.end() ? known->second.theme.c_str() : system.id);
 
-        /* Its game list: what ES-DE knows of each game kept, the playlists' games only. */
+        /* Its game list: what ES-DE knows of each game kept, the library's games only. */
         const std::string folder = data + "/gamelists/" + name;
         const std::string gamelist = folder + "/gamelist.xml";
         mkdir(folder.c_str(), 0777);
@@ -307,8 +308,15 @@ extern "C" int ps5_esde_write_library_to(const struct ps5_esde_library_paths *pa
 
 extern "C" int ps5_esde_write_library(char *summary, size_t summary_size)
 {
+    /* The title's content folder, and the USB and extended storage drives a title sees
+     * when ShadowMountPlus mounts them (src/frontend_ps5.cpp lists the same in RetroArch's
+     * browser); an empty slot holds no system folder, so it adds nothing. */
+    static const char *const content[] = {"/app0/content", "/mnt/usb0", "/mnt/usb1", "/mnt/usb2",
+                                          "/mnt/usb3",     "/mnt/usb4", "/mnt/usb5", "/mnt/usb6",
+                                          "/mnt/usb7",     "/mnt/ext0", "/mnt/ext1", nullptr};
     const struct ps5_esde_library_paths paths = {
-        PS5_LIBRARY_PLAYLISTS, PS5_LIBRARY_INFO, PS5_LIBRARY_CORES,
-        "/app0/es-de/resources/systems/unix/es_systems.xml", "/app0/es-de/ES-DE"};
+        PS5_LIBRARY_PLAYLISTS, PS5_LIBRARY_INFO,
+        PS5_LIBRARY_CORES,     "/app0/es-de/resources/systems/unix/es_systems.xml",
+        "/app0/es-de/ES-DE",   content};
     return ps5_esde_write_library_to(&paths, summary, summary_size);
 }

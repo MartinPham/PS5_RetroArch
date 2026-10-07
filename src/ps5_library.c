@@ -347,6 +347,8 @@ static const struct platform platforms[] = {
     {"psp", "Sony - PlayStation Portable", NULL, "psp", "playstationportable"},
     {"psx", "Sony - PlayStation", NULL, "psx|ps1|psone|playstation|sonyplaystation",
      "playstation1"},
+    {"virtualboy", "Nintendo - Virtual Boy", NULL, "vb|virtualboy", "virtualboy"},
+    {"pokemini", "Nintendo - Pokemon Mini", NULL, "pokemini|pokemonmini", "pokemonmini|pokemini"},
     {"segacd", "Sega - Mega-CD - Sega CD", NULL, "segacd|megacd", "segacd|megacd"},
     {"sega32x", "Sega - 32X", NULL, "32x|sega32x", "sega32x"},
     {"genesis", "Sega - Mega Drive - Genesis", NULL, "genesis|megadrive|md", "megadrive|genesis"},
@@ -355,15 +357,29 @@ static const struct platform platforms[] = {
     {"sg-1000", "Sega - SG-1000", NULL, "sg1000", "sg1000"},
     {"saturn", "Sega - Saturn", NULL, "saturn", "segasaturn|saturn"},
     {"dreamcast", "Sega - Dreamcast", NULL, "dreamcast|dc", "dreamcast"},
+    {"naomi", "Sega - Naomi", NULL, "naomi", "naomi"},
+    {"atomiswave", "Atomiswave", NULL, "atomiswave", "atomiswave"},
     {"c64", "Commodore - 64", NULL, "c64|commodore64", "commodore64"},
     {"amiga", "Commodore - Amiga", NULL, "amiga", "amiga"},
     {"atari2600", "Atari - 2600", NULL, "atari2600|2600", "atari2600"},
+    {"atari5200", "Atari - 5200", NULL, "atari5200|5200", "atari5200"},
     {"atari7800", "Atari - 7800", NULL, "atari7800|7800", "atari7800"},
+    {"atarijaguar", "Atari - Jaguar", NULL, "jaguar|atarijaguar", "jaguar"},
     {"atarilynx", "Atari - Lynx", NULL, "lynx|atarilynx", "atarilynx"},
+    {"supergrafx", "NEC - PC Engine SuperGrafx", NULL, "sgx|supergrafx", "supergrafx"},
+    {"pcfx", "NEC - PC-FX", NULL, "pcfx", "pcfx"},
     {"pcengine", "NEC - PC Engine - TurboGrafx 16", NULL, "pce|pcengine|tg16|turbografx16",
      "pcengine|turbografx"},
+    {"ngpc", "SNK - Neo Geo Pocket Color", NULL, "ngpc|neogeopocketcolor",
+     "neogeopocketcolor|neogeopocketcolour"},
     {"ngp", "SNK - Neo Geo Pocket", NULL, "ngp|neogeopocket", "neogeopocket"},
+    {"wonderswancolor", "Bandai - WonderSwan Color", NULL, "wsc|wonderswancolor",
+     "wonderswancolor|wonderswancolour"},
     {"wonderswan", "Bandai - WonderSwan", NULL, "ws|wonderswan", "wonderswan"},
+    {"3do", "The 3DO Company - 3DO", NULL, "3do|panasonic3do", "3do"},
+    {"dos", "DOS", NULL, "dos|msdos", "msdos"},
+    {"scummvm", "ScummVM", NULL, "scummvm", "scummvm"},
+    {"neogeocd", "SNK - Neo Geo CD", NULL, "neogeocd|ngcd", "neogeocd"},
     {"msx", "Microsoft - MSX", NULL, "msx", "msx"},
     {"neogeo", "SNK - Neo Geo", "SNK - Neo Geo|FBNeo - Arcade Games|MAME", "neogeo|neo", "neogeo"},
     {"cps", NULL, "FBNeo - Arcade Games|MAME", "cps|cps1|cps2|cps3", "cps"},
@@ -973,8 +989,385 @@ static void read_play(struct ps5_library *library, const char *playlists)
     }
 }
 
+/* --- the content folders -------------------------------------------------------- */
+
+/* folder/name in out: 1, or 0 when it does not fit (the entry is then left out). */
+static int joined(char *out, size_t size, const char *folder, const char *name)
+{
+    const int length = snprintf(out, size, "%s/%s", folder, name);
+    return length >= 0 && (size_t)length < size;
+}
+
+/* A folder's entries, sorted, with whether each is a folder; NULL when it cannot be read. */
+struct listing
+{
+    char **names;
+    unsigned char *folders;
+    size_t count;
+};
+
+static int list_folder(const char *path, struct listing *out)
+{
+    memset(out, 0, sizeof(*out));
+    DIR *directory = opendir(path);
+    if (!directory)
+        return -1;
+    size_t capacity = 0;
+    for (struct dirent *entry; (entry = readdir(directory)) != NULL;)
+    {
+        if (entry->d_name[0] == '.')
+            continue;
+        if (out->count == capacity)
+        {
+            capacity = capacity ? capacity * 2 : 32;
+            char **names = (char **)realloc(out->names, capacity * sizeof(char *));
+            if (!names)
+                break;
+            out->names = names;
+        }
+        if (!(out->names[out->count] = strdup(entry->d_name)))
+            break;
+        out->count++;
+    }
+    closedir(directory);
+    if (out->count)
+        qsort(out->names, out->count, sizeof(char *), compare_names);
+    out->folders = (unsigned char *)calloc(out->count ? out->count : 1, 1);
+    for (size_t i = 0; out->folders && i < out->count; i++)
+    {
+        char child[PS5_LIBRARY_PATH_MAX];
+        struct stat status;
+        out->folders[i] = joined(child, sizeof(child), path, out->names[i]) &&
+                          stat(child, &status) == 0 && S_ISDIR(status.st_mode);
+    }
+    return 0;
+}
+
+static void free_listing(struct listing *listing)
+{
+    for (size_t i = 0; i < listing->count; i++)
+        free(listing->names[i]);
+    free(listing->names);
+    free(listing->folders);
+    memset(listing, 0, sizeof(*listing));
+}
+
+static void lower_extension(const char *name, char *out, size_t size)
+{
+    const char *dot = strrchr(name, '.');
+    size_t length = 0;
+    for (const char *at = dot ? dot + 1 : ""; *at && length + 1 < size; at++)
+        out[length++] = (char)tolower((unsigned char)*at);
+    out[length] = '\0';
+}
+
+struct scanning
+{
+    struct loading *loading;
+    const char *system;    /* the top folder's name: the platform it names */
+    const char *platform;  /* its id */
+    char extensions[2048]; /* the platform's cores' extensions */
+    const char *firmware;  /* every core's firmware file names, lower case, '|'-separated */
+    size_t added;
+};
+
+/* A file is firmware when a core's info names it, a variant of one (panafz10-patched.bin
+ * of panafz10.bin), or its name says so ([BIOS] ..., Kickstart ..., Lynx Boot Image). */
+static int is_firmware(const struct scanning *scanning, const char *name)
+{
+    char lower[512], stem[512];
+    size_t length = 0;
+    for (; name[length] && length + 1 < sizeof(lower); length++)
+        lower[length] = (char)tolower((unsigned char)name[length]);
+    lower[length] = '\0';
+    if (strstr(lower, "bios") || strstr(lower, "kickstart") || strstr(lower, "boot image") ||
+        strstr(lower, "boot rom"))
+        return 1;
+    for (const char *at = scanning->firmware; at && *at;)
+    {
+        const char *bar = strchr(at, '|');
+        const size_t part = bar ? (size_t)(bar - at) : strlen(at);
+        snprintf(stem, sizeof(stem), "%.*s", (int)part, at);
+        char *dot = strrchr(stem, '.');
+        if (dot && dot != stem)
+            *dot = '\0';
+        if (stem[0] && strncmp(lower, stem, strlen(stem)) == 0)
+            return 1;
+        at = bar ? bar + 1 : NULL;
+    }
+    return 0;
+}
+
+static void add_file(struct scanning *scanning, const char *path, const char *label)
+{
+    if (scanning->loading->failed || scanning->loading->library->game_count >= 50000)
+        return;
+    const struct ps5_playlist_entry entry = {path, label, "", "", scanning->system};
+    const size_t before = scanning->loading->library->game_count;
+    add_entry(scanning->loading, &entry);
+    scanning->added += scanning->loading->library->game_count - before;
+}
+
+/* The disc images' track files a folder's index (.cue, .gdi, .m3u, .ccd) stands for. */
+static int is_track(const char *extension)
+{
+    return list_has("bin|iso|img|raw|wav|sub|ape|flac|ogg|mp3", extension);
+}
+
+static int has_index(const struct listing *listing)
+{
+    char extension[16];
+    for (size_t i = 0; i < listing->count; i++)
+    {
+        lower_extension(listing->names[i], extension, sizeof(extension));
+        if (!listing->folders[i] && list_has("cue|gdi|m3u|ccd", extension))
+            return 1;
+    }
+    return 0;
+}
+
+static void scan_games(struct scanning *scanning, const char *path, int depth)
+{
+    struct listing listing;
+    if (depth > 4 || list_folder(path, &listing) != 0)
+        return;
+    const int indexed = has_index(&listing);
+    char child[PS5_LIBRARY_PATH_MAX], extension[16];
+    for (size_t i = 0; i < listing.count; i++)
+    {
+        if (!joined(child, sizeof(child), path, listing.names[i]))
+            continue;
+        if (listing.folders[i])
+            continue;
+        lower_extension(listing.names[i], extension, sizeof(extension));
+        if (!extension[0] || !list_has(scanning->extensions, extension) ||
+            (indexed && is_track(extension)) || is_firmware(scanning, listing.names[i]))
+            continue;
+        add_file(scanning, child, NULL);
+    }
+    for (size_t i = 0; i < listing.count; i++)
+        if (listing.folders[i])
+        {
+            if (!joined(child, sizeof(child), path, listing.names[i]))
+                continue;
+            scan_games(scanning, child, depth + 1);
+        }
+    free_listing(&listing);
+}
+
+/* DOS: a game is a folder, started by the program named like it (doom/DOOM.EXE), or an
+ * archive or disc image of its own. */
+static void scan_dos(struct scanning *scanning, const char *path, int depth)
+{
+    struct listing listing;
+    if (depth > 3 || list_folder(path, &listing) != 0)
+        return;
+    const char *slash = strrchr(path, '/');
+    char folder[256], stem[256], extension[16], child[PS5_LIBRARY_PATH_MAX];
+    normalize(slash ? slash + 1 : path, folder, sizeof(folder));
+    int program = 0;
+    for (size_t i = 0; depth > 0 && i < listing.count && !program; i++)
+    {
+        lower_extension(listing.names[i], extension, sizeof(extension));
+        if (listing.folders[i] || !list_has("exe|com|bat", extension))
+            continue;
+        snprintf(stem, sizeof(stem), "%s", listing.names[i]);
+        *strrchr(stem, '.') = '\0';
+        char key[256];
+        normalize(stem, key, sizeof(key));
+        if (key[0] && (strcmp(key, folder) == 0 || strstr(folder, key) == folder))
+        {
+            if (!joined(child, sizeof(child), path, listing.names[i]))
+                continue;
+            add_file(scanning, child, slash ? slash + 1 : path);
+            program = 1;
+        }
+    }
+    for (size_t i = 0; !program && i < listing.count; i++)
+    {
+        if (!joined(child, sizeof(child), path, listing.names[i]))
+            continue;
+        lower_extension(listing.names[i], extension, sizeof(extension));
+        if (listing.folders[i])
+            scan_dos(scanning, child, depth + 1);
+        else if (list_has("zip|dosz|iso|cue|chd|img|ima|vhd|m3u", extension) &&
+                 !is_firmware(scanning, listing.names[i]))
+            add_file(scanning, child, NULL);
+    }
+    free_listing(&listing);
+}
+
+/* ScummVM: a game is a folder; it is started from a data file in the shallowest folder
+ * below it that holds one (ScummVM detects the game from that file's folder). */
+static int scummvm_data(const char *path, int depth, char *out, size_t size)
+{
+    struct listing listing;
+    if (depth > 3 || list_folder(path, &listing) != 0)
+        return 0;
+    int found = 0;
+    char extension[16];
+    for (size_t i = 0; i < listing.count && !found; i++)
+    {
+        lower_extension(listing.names[i], extension, sizeof(extension));
+        if (!listing.folders[i] &&
+            !list_has("conf|cfg|ini|txt|md|nfo|pdf|doc|bat|exe|com|zip|7z|dll|url", extension))
+        {
+            snprintf(out, size, "%s/%s", path, listing.names[i]);
+            found = 1;
+        }
+    }
+    for (size_t i = 0; i < listing.count && !found; i++)
+        if (listing.folders[i])
+        {
+            char child[PS5_LIBRARY_PATH_MAX];
+            if (!joined(child, sizeof(child), path, listing.names[i]))
+                continue;
+            found = scummvm_data(child, depth + 1, out, size);
+        }
+    free_listing(&listing);
+    return found;
+}
+
+static void scan_scummvm(struct scanning *scanning, const char *path)
+{
+    struct listing listing;
+    if (list_folder(path, &listing) != 0)
+        return;
+    char child[PS5_LIBRARY_PATH_MAX], data[PS5_LIBRARY_PATH_MAX], extension[16];
+    for (size_t i = 0; i < listing.count; i++)
+    {
+        if (!joined(child, sizeof(child), path, listing.names[i]))
+            continue;
+        lower_extension(listing.names[i], extension, sizeof(extension));
+        if (listing.folders[i] && scummvm_data(child, 1, data, sizeof(data)))
+            add_file(scanning, data, listing.names[i]);
+        else if (!listing.folders[i] && strcmp(extension, "scummvm") == 0)
+            add_file(scanning, child, NULL);
+    }
+    free_listing(&listing);
+}
+
+/* The firmware every core's info names: its firmwareN_path values' file names. */
+static char *read_firmware(const char *info)
+{
+    char **names = folder_names(info, ".info");
+    size_t size = 4096, length = 0;
+    char *list = (char *)calloc(size, 1);
+    for (size_t i = 0; list && names && names[i]; i++)
+    {
+        char path[PS5_LIBRARY_PATH_MAX + 512], line[1024], value[512];
+        if (!joined(path, sizeof(path), info, names[i]))
+            continue;
+        FILE *file = fopen(path, "r");
+        while (file && fgets(line, sizeof(line), file))
+        {
+            if (strncmp(line, "firmware", 8) != 0 || !strstr(line, "_path"))
+                continue;
+            const char *equals = strchr(line, '=');
+            const char *quote = equals ? strchr(equals, '"') : NULL;
+            const char *end = quote ? strchr(quote + 1, '"') : NULL;
+            if (!end)
+                continue;
+            snprintf(value, sizeof(value), "%.*s", (int)(end - quote - 1), quote + 1);
+            const char *slash = strrchr(value, '/');
+            const char *base = slash ? slash + 1 : value;
+            const size_t base_length = strlen(base);
+            if (!base_length || length + base_length + 2 >= size)
+                continue;
+            if (length)
+                list[length++] = '|';
+            for (size_t c = 0; c < base_length; c++)
+                list[length++] = (char)tolower((unsigned char)base[c]);
+            list[length] = '\0';
+        }
+        if (file)
+            fclose(file);
+    }
+    free_names(names);
+    return list;
+}
+
+/* The extensions of the cores that run a platform: those whose info names its database,
+ * or one of the databases that run it. */
+static void platform_extensions(const struct ps5_library *library, const char *id, char *out,
+                                size_t size)
+{
+    out[0] = '\0';
+    const struct platform *platform = platform_by_id(id);
+    if (!platform)
+        return;
+    char databases[512];
+    snprintf(databases, sizeof(databases), "%s%s%s", platform->database ? platform->database : "",
+             platform->database && platform->core_databases ? "|" : "",
+             platform->core_databases ? platform->core_databases : "");
+    for (size_t c = 0; c < library->core_count; c++)
+        for (const char *at = databases; at && *at;)
+        {
+            const char *bar = strchr(at, '|');
+            char database[256];
+            snprintf(database, sizeof(database), "%.*s",
+                     (int)(bar ? (size_t)(bar - at) : strlen(at)), at);
+            if (list_has(library->cores[c].databases, database))
+            {
+                add_extensions(out, size, library->cores[c].extensions);
+                break;
+            }
+            at = bar ? bar + 1 : NULL;
+        }
+}
+
+/* One content root: each folder at its top that names a platform the title has a core
+ * for is that system's; anything else at the top is left alone. */
+static void scan_root(struct loading *loading, const char *root, const char *firmware,
+                      size_t *added)
+{
+    struct listing listing;
+    if (list_folder(root, &listing) != 0)
+        return;
+    for (size_t i = 0; i < listing.count && !loading->failed; i++)
+    {
+        if (!listing.folders[i])
+            continue;
+        const char *platform = ps5_library_platform(listing.names[i]);
+        if (!platform)
+            continue;
+        struct scanning scanning;
+        memset(&scanning, 0, sizeof(scanning));
+        scanning.loading = loading;
+        scanning.system = listing.names[i];
+        scanning.platform = platform;
+        scanning.firmware = firmware;
+        platform_extensions(loading->library, platform, scanning.extensions,
+                            sizeof(scanning.extensions));
+        if (!scanning.extensions[0])
+            continue; /* no core for it */
+        /* RetroArch opens a .zip or .7z itself for a core that does not take one, so a
+         * cartridge system's archives are games. A disc system's are not: an archived
+         * disc is a .cue and its tracks, and RetroArch extracts only the file it loads. */
+        if (!list_has(scanning.extensions, "cue") && !list_has(scanning.extensions, "chd"))
+            add_extensions(scanning.extensions, sizeof(scanning.extensions), "zip|7z");
+        char path[PS5_LIBRARY_PATH_MAX];
+        if (!joined(path, sizeof(path), root, listing.names[i]))
+            continue;
+        if (strcmp(platform, "dos") == 0)
+            scan_dos(&scanning, path, 0);
+        else if (strcmp(platform, "scummvm") == 0)
+            scan_scummvm(&scanning, path);
+        else
+            scan_games(&scanning, path, 0);
+        *added += scanning.added;
+    }
+    free_listing(&listing);
+}
+
 int ps5_library_load(struct ps5_library *library, const char *playlists, const char *info,
                      const char *cores)
+{
+    return ps5_library_load_content(library, playlists, info, cores, NULL);
+}
+
+int ps5_library_load_content(struct ps5_library *library, const char *playlists, const char *info,
+                             const char *cores, const char *const *content)
 {
     memset(library, 0, sizeof(*library));
     load_cores(library, info, cores);
@@ -991,6 +1384,17 @@ int ps5_library_load(struct ps5_library *library, const char *playlists, const c
         ps5_playlist_read(path, default_core, sizeof(default_core), add_entry, &loading);
     }
     free_names(names);
+    /* Then the games in the content folders no playlist lists. */
+    if (content && content[0] && !loading.failed)
+    {
+        char *firmware = read_firmware(info);
+        loading.playlist = "";
+        loading.default_core = "";
+        size_t added = 0;
+        for (size_t i = 0; content[i] && !loading.failed; i++)
+            scan_root(&loading, content[i], firmware, &added);
+        free(firmware);
+    }
     if (loading.failed)
         return -1;
     finish_systems(library);
