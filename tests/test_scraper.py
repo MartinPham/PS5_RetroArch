@@ -198,6 +198,7 @@ class Scraper(unittest.TestCase):
         self.start_server()
         again = next(p for p in self.job(job_id)['problems'] if p['state'] == 'ambiguous')
         self.assertEqual(again['candidates'], ambiguous['candidates'])
+        self.assertEqual(self.job(job_id)['downloaded'], job['downloaded'])  # counters kept too
         unmatched = next(p for p in job['problems'] if p['state'] == 'unmatched')
         self.assertEqual(unmatched['label'], 'Totally Unknown Homebrew')
         # The user chooses: the game's media arrives under its own name.
@@ -347,6 +348,17 @@ class Scraper(unittest.TestCase):
         paths = sorted(g['path'] for s in library['systems'] for g in s['games'])
         self.assertEqual(paths, sorted([f'/app0/content/{DB}/{listed}', f'/app0/content/{DB}/Only In The Folder (USA).sfc',
                                         f'/app0/content/{DB}/Disc (USA).cue', f'/app0/content/{DB}/Lone Image (USA).iso']))
+
+    def test_a_dead_writers_hidden_files_are_swept(self):
+        covers = self.root / 'library/snes/covers'
+        covers.mkdir(parents=True)
+        old, young = covers / '.partial-dead', covers / '.partial-busy'
+        old.write_bytes(b''); young.write_bytes(b'')
+        os.utime(old, (time.time() - 3600, time.time() - 3600))
+        self.stop_server()
+        self.start_server()
+        self.assertFalse(old.exists())
+        self.assertTrue(young.exists())  # maybe a stale daemon's file still being written
 
     def test_games_page_in_a_browser(self):
         playwright = next((str(p) for p in (Path.home() / '.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright-core',

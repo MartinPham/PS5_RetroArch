@@ -84,6 +84,7 @@ retroarch_frames=0
 game=
 pad_script=
 pad_monitor=0
+menu_capture=0
 home_launch=0
 while (( $# )); do
     case "$1" in
@@ -109,8 +110,9 @@ while (( $# )); do
         --game=*) game=${1#*=} ;;
         --pad-script=*) pad_script=${1#*=} ;;
         --pad-monitor) pad_monitor=1 ;;
+        --menu-capture=*) menu_capture=${1#*=} ;;
         --home-launch) home_launch=1 ;;
-        *) echo "usage: ${0##*/} [--no-build] [--no-deploy] [--watch SECONDS] [--gpu-profile 1..60] [--audio-test] [--core-test[=fceumm|mgba|snes9x|fbneo|genesis_plus_gx|ppsspp]] [--relaunch-test[=1..20] [--relaunch-image=PATH]] [--display-modes-test[=frames]] [--frontend-capture=SECONDS[,SECONDS...] [--frontend-scroll] [--frontend-profile] [--frontend-quit] [--frontend-launch]] [--picker-test=FRAMES:retroarch|es-de|none] [--retroarch-frames=N] [--game=CORE:PATH] [--pad-script=FILE] [--pad-monitor] [--home-launch]" >&2; exit 2 ;;
+        *) echo "usage: ${0##*/} [--no-build] [--no-deploy] [--watch SECONDS] [--gpu-profile 1..60] [--audio-test] [--core-test[=fceumm|mgba|snes9x|fbneo|genesis_plus_gx|ppsspp]] [--relaunch-test[=1..20] [--relaunch-image=PATH]] [--display-modes-test[=frames]] [--frontend-capture=SECONDS[,SECONDS...] [--frontend-scroll] [--frontend-profile] [--frontend-quit] [--frontend-launch]] [--picker-test=FRAMES:retroarch|es-de|none] [--retroarch-frames=N] [--game=CORE:PATH] [--pad-script=FILE] [--pad-monitor] [--menu-capture=FRAMES] [--home-launch]" >&2; exit 2 ;;
     esac
     shift
 done
@@ -285,7 +287,7 @@ fi
 # appeared. A run that does not ask for extras must not inherit them, so the file
 # is removed on every run - before the launch, because deleting it afterwards
 # would leave it for the next one if this run dies.
-python3 - "$title_id" "$profile" "$audio_test" "$core_test" "$relaunch_test" "$relaunch_run" "$display_modes_test" "$relaunch_image" "$frontend_capture" "$capture_run" "$frontend_scroll" "$picker_test" "$retroarch_frames" "$pad_script" "$pad_monitor" "$home_launch" "$game" <<'PY'
+python3 - "$title_id" "$profile" "$audio_test" "$core_test" "$relaunch_test" "$relaunch_run" "$display_modes_test" "$relaunch_image" "$frontend_capture" "$capture_run" "$frontend_scroll" "$picker_test" "$retroarch_frames" "$pad_script" "$pad_monitor" "$home_launch" "$game" "$menu_capture" <<'PY'
 import importlib.util, sys
 spec = importlib.util.spec_from_file_location("dt", "tools/deploy-title.py")
 dt = importlib.util.module_from_spec(spec); spec.loader.exec_module(dt)
@@ -366,6 +368,12 @@ with connect(**dt.load_settings()) as ftp:
         lines += ["-L", f"/app0/cores/{core}_libretro.so", path]
         remove_if_present(ftp, f"/data/homebrew/{sys.argv[1]}/game-shot.png")
         print(f"    RetroArch starts {core} with {path}")
+    # --menu-capture: the whole frame at that frame count, menu included (patch 0031's
+    # read-back), written to /app0/shot.ppm and collected after the run.
+    if int(sys.argv[18]):
+        lines.append(f"--ps5-capture={sys.argv[18]}")
+        remove_if_present(ftp, f"/data/homebrew/{sys.argv[1]}/shot.ppm")
+        print(f"    the frame at {sys.argv[18]} is captured, menu included")
     if int(sys.argv[13]):
         lines.append(f"--max-frames={sys.argv[13]}")
         if sys.argv[17]:
@@ -553,6 +561,31 @@ with connect(**dt.load_settings()) as ftp:
             ftp.retrbinary(f"RETR {base}/{name}", stream.write)
         remove_if_present(ftp, f"{base}/{name}")
 print(f"    pad script: {len(shots)} picture(s) saved to {out}")
+PY
+fi
+
+# --- the menu capture (--menu-capture) -----------------------------------------
+if (( menu_capture )); then
+python3 - "$title_id" "$capture_run" <<'PY'
+import importlib.util, io, sys
+from pathlib import Path
+sys.path.insert(0, "tools")
+from ps5_ftp import connect, remove_if_present
+spec = importlib.util.spec_from_file_location("dt", "tools/deploy-title.py")
+dt = importlib.util.module_from_spec(spec); spec.loader.exec_module(dt)
+out = Path("klog") / (sys.argv[2].replace("frontend-", "menu-") + ".png")
+with connect(**dt.load_settings()) as ftp:
+    data = io.BytesIO()
+    try:
+        ftp.retrbinary(f"RETR /data/homebrew/{sys.argv[1]}/shot.ppm", data.write)
+    except Exception as error:
+        print(f"    no menu capture on the console ({error})")
+        sys.exit(0)
+    remove_if_present(ftp, f"/data/homebrew/{sys.argv[1]}/shot.ppm")
+from PIL import Image
+data.seek(0)
+Image.open(data).save(out)
+print(f"    menu capture: {out}")
 PY
 fi
 

@@ -7,6 +7,11 @@ let token = '', connected = false, freeBytes = null, uploadLimit = 64 * 1024 ** 
 let currentPath = '', entries = [], folderRequest = 0, settingsValues = {};
 let sessionRequest = null, sending = false, nextTransfer = 0, frontend = 'retroarch';
 const transfers = [];
+// The Games and Download Media tabs' state: declared here, as a page opened straight on
+// either tab reaches them before the code below them has run.
+let library = { systems: [] }, selectedGames = new Map(), shownGames = 300;
+let scrapeSource = 'libretro', scrapeKinds = new Set(), scraperSettings = null;
+let jobTimer = null, jobShown = null;
 function element(tag, text, className) {
   const node = document.createElement(tag);
   if (text !== undefined) node.textContent = text;
@@ -71,15 +76,16 @@ async function reconnect() {
 }
 function pageFromHash() {
   const name = location.hash.slice(1).split('?')[0];
-  return ['content', 'games', 'transfers', 'settings'].includes(name) ? name : 'overview';
+  return ['content', 'games', 'media', 'transfers', 'settings'].includes(name) ? name : 'overview';
 }
 function navigate() {
   const page = pageFromHash();
   $$('.page').forEach(node => { node.hidden = node.id !== page; });
   $$('[data-page]').forEach(node => { if (node.dataset.page === page) node.setAttribute('aria-current', 'page'); else node.removeAttribute('aria-current'); });
-  $('#page-title').textContent = page[0].toUpperCase() + page.slice(1);
+  $('#page-title').textContent = page === 'media' ? 'Download Media' : page[0].toUpperCase() + page.slice(1);
   if (page === 'content') loadContent(currentPath);
-  if (page === 'games') { loadGames(); loadJob(); }
+  if (page === 'games') loadGames();
+  if (page === 'media') openMedia();
   $('#main').focus({ preventScroll: true });
 }
 function openFolder(path) {
@@ -715,7 +721,6 @@ navigate(); drawTransfers(); reconnect(); checkRelease();
 
 // The games and their media (src/scraper.h): the shared library every frontend reads.
 const KIND_NAMES = { cover: 'Cover', screenshot: 'Screenshot', title: 'Title', logo: 'Logo', video: 'Video' };
-let library = { systems: [] }, selectedGames = new Map(), shownGames = 300, scraperSettings = null, jobTimer = null, jobShown = null;
 function gameName(game) { return game.name || game.label; }
 // What tells versions of one game apart: the (region), (Rev 1), (Proto), [a1], (1992)
 // tags of its label or, failing that, of its file name. Two cards with one title are
@@ -790,125 +795,172 @@ for (const id of ['#games-system', '#games-missing']) $(id).addEventListener('ch
 $('#games-search').addEventListener('input', () => { shownGames = 300; drawGames(); });
 $('#refresh-games').addEventListener('click', loadGames);
 
-// The scrape panel: the download method first, remembered on the console.
-const METHOD_NAMES = { pc: 'Download through this PC and transfer to PS5', ps5: 'Download directly on PS5' };
-let scrapeSource = 'libretro', scrapeKinds = new Set();
+// The Download Media tab: a few choices, a live summary, and the job's progress.
+const METHOD_NAMES = { pc: 'Downloaded on this PC, then transferred to PS5', ps5: 'Downloaded on the PS5' };
+const METHOD_HINTS = {
+  ps5: 'Your PS5 downloads everything itself, straight to its storage. You can close this page; the job keeps going.',
+  pc: 'Downloads on this PC first, then transfers each file to your PS5. A small helper program on this PC does both; keep it running until the job is done (this page can close).',
+  '': 'PS5: the console downloads directly. This PC → PS5: this PC downloads, then transfers to the PS5. Your choice is remembered on this console.' };
 const RECOMMENDED = ['cover', 'screenshot', 'title'];
+const KIND_ICONS = { cover: 'M5 3h14v18H5Z M8 7h8 M8 11h8', backcover: 'M5 3h14v18H5Z M8 14h8 M8 17h5', box3d: 'M4 7l8-4 8 4v10l-8 4-8-4Z M4 7l8 4 8-4 M12 11v10',
+  screenshot: 'M3 5h18v14H3Z M7 15l3-4 3 3 2-2 3 3', title: 'M3 5h18v14H3Z M7 10h10 M9 14h6', logo: 'M4 12c4-8 12-8 16 0-4 8-12 8-16 0Z M9 12h6',
+  physical: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z M12 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z', fanart: 'M3 5h18v14H3Z M3 15l5-5 4 4 3-3 6 6',
+  manual: 'M5 4h10l4 4v12H5Z M8 10h8 M8 14h8', video: 'M3 6h13v12H3Z M16 10l5-3v10l-5-3' };
 function chosenSource() { return scraperSettings.sources.find(s => s.id === scrapeSource) || scraperSettings.sources[0]; }
+function svgIcon(path) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('class', 'icon'); svg.setAttribute('aria-hidden', 'true');
+  const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); p.setAttribute('d', path); svg.append(p); return svg;
+}
+function drawMethod() {
+  const method = $('input[name="scrape-method"]:checked')?.value || '';
+  $('#scrape-method-hint').textContent = METHOD_HINTS[method];
+  drawSummary();
+}
 function drawSources() {
   const box = $('#scrape-sources'); box.replaceChildren();
   for (const source of scraperSettings.sources) {
-    const card = element('label', undefined, 'source-card'), radio = document.createElement('input');
-    radio.type = 'radio'; radio.name = 'scrape-source'; radio.value = source.id; radio.checked = source.id === scrapeSource; radio.disabled = !source.available;
-    radio.addEventListener('change', () => { scrapeSource = source.id; drawKinds(); });
-    const text = element('span'), title = element('strong', source.name);
-    if (!source.available) title.append(element('em', 'Coming', 'soon-tag'));
-    if (source.account) title.append(element('em', 'Account needed', 'account-tag'));
-    text.append(title, element('small', source.description)); card.append(radio, text);
-    if (!source.available) card.classList.add('unavailable');
-    box.append(card);
+    const chip = element('button', source.name, 'chip'); chip.type = 'button';
+    chip.setAttribute('role', 'radio'); chip.setAttribute('aria-checked', source.id === scrapeSource);
+    if (!source.available) { chip.disabled = true; chip.append(element('em', 'Coming', 'soon-tag')); }
+    chip.addEventListener('click', () => { scrapeSource = source.id; drawSources(); drawKinds(); });
+    chip.addEventListener('mouseenter', () => { $('#scrape-source-hint').textContent = source.description; });
+    chip.addEventListener('focus', () => { $('#scrape-source-hint').textContent = source.description; });
+    box.append(chip);
   }
+  $('#scrape-source-hint').textContent = chosenSource().description;
 }
 function drawKinds() {
   const source = chosenSource(), box = $('#scrape-kinds'); box.replaceChildren();
   for (const kind of scraperSettings.catalog) {
-    const has = source.kinds.includes(kind.id), card = element('label', undefined, 'kind-card'), box2 = document.createElement('input');
-    box2.type = 'checkbox'; box2.value = kind.id; box2.checked = has && scrapeKinds.has(kind.id); box2.disabled = !has;
-    box2.addEventListener('change', () => { if (box2.checked) scrapeKinds.add(kind.id); else scrapeKinds.delete(kind.id); drawSummary(); });
-    const others = scraperSettings.sources.filter(s => s.id !== source.id && s.kinds.includes(kind.id)).map(s => s.name + (s.available ? '' : ' (coming)'));
-    const text = element('span');
-    text.append(element('strong', kind.name), element('small', kind.description),
-      element('small', has ? `From ${source.name}` : `Not from ${source.name}` + (others.length ? ` · from ${others.join(', ')}` : ''), has ? 'kind-source' : 'kind-source missing'));
-    if (!has) card.classList.add('unavailable');
-    card.append(box2, text); box.append(card);
+    const has = source.kinds.includes(kind.id), tile = element('button', undefined, 'kind-tile'); tile.type = 'button';
+    tile.setAttribute('aria-pressed', has && scrapeKinds.has(kind.id)); tile.disabled = !has;
+    tile.append(svgIcon(KIND_ICONS[kind.id] || KIND_ICONS.cover), element('span', kind.name));
+    if (!has) tile.append(element('em', scraperSettings.sources.some(s => s.kinds.includes(kind.id)) ? 'Coming' : '—', 'soon-tag'));
+    const others = scraperSettings.sources.filter(s => s.id !== source.id && s.kinds.includes(kind.id)).map(s => s.name);
+    const hint = `${kind.name}: ${kind.description}` + (has ? '' : ` Not from ${source.name}${others.length ? `; ${others.join(', ')} will have it` : ''}.`);
+    tile.title = hint;
+    tile.addEventListener('mouseenter', () => { $('#scrape-kind-hint').textContent = hint; });
+    tile.addEventListener('focus', () => { $('#scrape-kind-hint').textContent = hint; });
+    tile.addEventListener('click', () => {
+      if (scrapeKinds.has(kind.id)) scrapeKinds.delete(kind.id); else scrapeKinds.add(kind.id);
+      tile.setAttribute('aria-pressed', scrapeKinds.has(kind.id)); drawSummary();
+    });
+    box.append(tile);
   }
   drawSummary();
 }
 function setKinds(ids) { scrapeKinds = new Set(ids.filter(id => chosenSource().kinds.includes(id))); drawKinds(); }
+function scrapeScope() { return $('input[name="scrape-scope"]:checked')?.value || 'all'; }
 function scopeGames() {
-  if ($('input[name="scrape-scope"]:checked').value === 'selected') return selectedGames.size;
-  const system = $('#games-system').value;
-  return library.systems.filter(s => !system || s.id === system).reduce((n, s) => n + s.games.length, 0);
+  const scope = scrapeScope();
+  if (scope === 'selected') return selectedGames.size;
+  const system = $('#scrape-system').value;
+  return library.systems.filter(s => scope === 'all' || s.id === system).reduce((n, s) => n + s.games.length, 0);
 }
 function drawSummary() {
+  if (!scraperSettings) return;
   const kinds = [...scrapeKinds].filter(id => chosenSource().kinds.includes(id)), games = scopeGames();
-  const names = scraperSettings.catalog.filter(k => kinds.includes(k.id)).map(k => k.name.toLowerCase());
-  const system = $('#games-system').value, systemName = library.systems.find(s => s.id === system)?.name;
-  $('#scrape-scope-selected').textContent = `Selected games (${selectedGames.size})`;
-  $('#scrape-scope-systems').textContent = systemName ? `Every game of ${systemName}` : `Every game of all ${library.systems.length} systems`;
-  $('#scrape-summary').textContent = !kinds.length ? 'Choose at least one media type in step 3.' : !games ? 'Choose games in step 4: select some on the page, or scrape whole systems.'
-    : `Ready: ${names.join(', ')} for ${games} game${games === 1 ? '' : 's'} from ${chosenSource().name}${$('#scrape-overwrite').checked ? ', replacing what is there' : ', keeping what is already on the PS5'}.`;
+  const method = $('input[name="scrape-method"]:checked')?.value;
+  $('#scrape-system').hidden = scrapeScope() !== 'system';
+  $('#scrape-scope-selected').textContent = `Selected (${selectedGames.size})`;
+  const ready = method && kinds.length && games;
+  $('#scrape-start').disabled = !ready;
+  $('#scrape-summary').textContent = !method ? 'Choose where to download from.' : !kinds.length ? 'Choose at least one kind of media.'
+    : !games ? (scrapeScope() === 'selected' ? 'Select games on the Games tab, or choose a system.' : 'No games here yet.')
+    : `${kinds.length} kind${kinds.length === 1 ? '' : 's'} of media · ${games.toLocaleString()} game${games === 1 ? '' : 's'} · ${chosenSource().name} · ${method === 'pc' ? 'downloaded on this PC, then transferred to the PS5' : 'downloaded on the PS5'}${$('#scrape-overwrite').checked ? ' · replacing' : ''}`;
 }
-async function openScrape() {
-  $('#scrape-panel').hidden = false;
-  try { scraperSettings = await api('/api/scraper/settings'); } catch (error) { announce(error.message, true); return; }
+async function openMedia() {
+  try {
+    if (!library.systems.length) library = await api('/api/library', { signal: AbortSignal.timeout(60000) });
+    scraperSettings = await api('/api/scraper/settings');
+  } catch (error) { announce(error.message, true); return; }
   for (const radio of $$('input[name="scrape-method"]')) radio.checked = radio.value === scraperSettings.mode;
-  $('#scrape-method-saved').textContent = scraperSettings.mode ? `Last used on this console: ${METHOD_NAMES[scraperSettings.mode]}. You can change it.` : 'Choose one to continue. Your choice is remembered on this console.';
   scrapeSource = scraperSettings.sources.some(s => s.id === scraperSettings.source && s.available) ? scraperSettings.source : 'libretro';
   scrapeKinds = new Set(scraperSettings.kinds);
   $('#scrape-region').value = scraperSettings.region;
-  $('#scrape-language').value = scraperSettings.language;
-  if (!selectedGames.size) $('input[name="scrape-scope"][value="systems"]').checked = true;
-  drawSources(); drawKinds();
-  $('#scrape-panel').scrollIntoView({ block: 'start' });
+  const select = $('#scrape-system'), chosen = select.value || $('#games-system').value;
+  select.replaceChildren(...library.systems.map(s => new Option(`${s.name} (${s.games.length})`, s.id)));
+  if (chosen) select.value = chosen;
+  if (selectedGames.size) $('input[name="scrape-scope"][value="selected"]').checked = true;
+  drawMethod(); drawSources(); drawKinds(); loadJob();
 }
+$('#scrape-open').addEventListener('click', () => { location.hash = 'media'; });
+for (const node of $$('input[name="scrape-method"], input[name="scrape-scope"]')) node.addEventListener('change', () => { drawMethod(); });
+for (const id of ['#scrape-system', '#scrape-overwrite']) $(id).addEventListener('change', drawSummary);
 $('#kinds-recommended').addEventListener('click', () => setKinds(RECOMMENDED));
 $('#kinds-all').addEventListener('click', () => setKinds(chosenSource().kinds));
 $('#kinds-none').addEventListener('click', () => setKinds([]));
-for (const node of $$('input[name="scrape-scope"]')) node.addEventListener('change', drawSummary);
-$('#scrape-overwrite').addEventListener('change', drawSummary);
-$('#scrape-open').addEventListener('click', openScrape);
-$('#scrape-close').addEventListener('click', () => { $('#scrape-panel').hidden = true; });
 $('#scrape-start').addEventListener('click', async () => {
   const method = $('input[name="scrape-method"]:checked')?.value;
-  if (!method) { $('#scrape-result').textContent = 'Choose where the media should be downloaded first.'; $('.scrape-method').scrollIntoView({ block: 'center' }); return; }
-  const kinds = [...scrapeKinds].filter(id => chosenSource().kinds.includes(id));
-  if (!kinds.length) { $('#scrape-result').textContent = 'Choose at least one media type in step 3.'; return; }
-  const scope = $('input[name="scrape-scope"]:checked').value;
-  let lines = [];
-  if (scope === 'selected') lines = [...selectedGames].map(([path, system]) => `${system}\t${path}`);
-  else { const system = $('#games-system').value; lines = library.systems.filter(s => !system || s.id === system).map(s => `${s.id}\t`); }
-  if (!lines.length) { $('#scrape-result').textContent = 'Select games first, or choose every game of the systems shown.'; return; }
-  const query = new URLSearchParams({ mode: method, source: scrapeSource, kinds: kinds.join(','), region: $('#scrape-region').value, language: $('#scrape-language').value, overwrite: $('#scrape-overwrite').checked ? '1' : '0' });
-  $('#scrape-start').disabled = true; $('#scrape-result').textContent = 'Starting…';
+  if (!method) { $('#scrape-result').textContent = 'Choose where to download from.'; return; }
+  const kinds = [...scrapeKinds].filter(id => chosenSource().kinds.includes(id)), scope = scrapeScope();
+  const lines = scope === 'selected' ? [...selectedGames].map(([path, system]) => `${system}\t${path}`)
+    : library.systems.filter(s => scope === 'all' || s.id === $('#scrape-system').value).map(s => `${s.id}\t`);
+  if (!kinds.length || !lines.length) { drawSummary(); return; }
+  const query = new URLSearchParams({ mode: method, source: scrapeSource, kinds: kinds.join(','), region: $('#scrape-region').value, language: scraperSettings.language || 'en', overwrite: $('#scrape-overwrite').checked ? '1' : '0' });
+  $('#scrape-start').disabled = true; $('#scrape-result').textContent = '';
   try {
     await api('/api/scraper/settings?' + query, { method: 'POST' });
     const started = await api('/api/scraper/start?' + query, { method: 'POST', body: lines.join('\n'), headers: { 'Content-Type': 'text/plain' }, signal: AbortSignal.timeout(60000) });
-    $('#scrape-result').textContent = ''; $('#scrape-panel').hidden = true; drawJob(started.job); pollJob();
+    drawJob(started.job); pollJob(); $('#scrape-job').scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (error) { $('#scrape-result').textContent = error.message; }
-  finally { $('#scrape-start').disabled = false; }
+  finally { drawSummary(); }
 });
 
-// The job: polled while this page is open; the console keeps it whether or not it is.
+// The job: polled while this tab is open; the console keeps it whether or not it is.
 function count(job, ...states) { return states.reduce((n, s) => n + (job.counts[s] || 0), 0); }
+function countTo(node, value) {
+  const from = Number(node.dataset.value || 0); node.dataset.value = value;
+  if (from === value || matchMedia('(prefers-reduced-motion: reduce)').matches) { node.textContent = value.toLocaleString(); return; }
+  const start = performance.now();
+  const step = now => { const k = Math.min(1, (now - start) / 400); node.textContent = Math.round(from + (value - from) * k).toLocaleString(); if (k < 1) requestAnimationFrame(step); };
+  requestAnimationFrame(step);
+}
 function drawJob(job) {
   const panel = $('#scrape-job');
   if (!job) { panel.hidden = true; return; }
   panel.hidden = false; jobShown = job.id;
-  const total = job.total, settled = count(job, 'done', 'partial', 'skipped', 'unmatched', 'ambiguous', 'failed');
+  const total = job.total, running = job.state === 'running';
   const identified = total - count(job, 'pending', 'working');
-  const running = job.state === 'running';
   const stateText = { running: 'Running', cancelled: 'Cancelled', done: 'Finished', interrupted: 'Interrupted' }[job.state] || job.state;
-  $('#job-summary').textContent = `${stateText} · ${METHOD_NAMES[job.mode]} · ${settled} of ${total} games settled · ${count(job, 'done')} complete, ${count(job, 'partial')} partly, ${count(job, 'skipped')} already had media, ${count(job, 'unmatched', 'ambiguous')} need you, ${count(job, 'failed')} failed`;
-  $('#job-identified').value = total ? identified / total * 100 : 0; $('#job-identified-text').textContent = `${identified} of ${total} games`;
+  panel.dataset.state = job.state;
+  $('#job-title').textContent = running ? 'Downloading media…' : `Download ${stateText.toLowerCase()}`;
+  $('#job-summary').textContent = `${METHOD_NAMES[job.mode]} · ${job.source === 'libretro' ? 'libretro thumbnails' : job.source} · ${total.toLocaleString()} games`;
+  countTo($('#stat-done'), count(job, 'done')); countTo($('#stat-partial'), count(job, 'partial'));
+  countTo($('#stat-kept'), count(job, 'skipped')); countTo($('#stat-attention'), count(job, 'unmatched', 'ambiguous', 'failed'));
+  countTo($('#stat-files'), job.mode === 'pc' ? job.transferred.files : job.downloaded.files);
+  $('#stat-files-label').textContent = `files · ${bytes(job.mode === 'pc' ? job.transferred.bytes : job.downloaded.bytes)}`;
+  $('#job-identified').value = total ? identified / total * 100 : 0; $('#job-identified-text').textContent = `${identified.toLocaleString()} of ${total.toLocaleString()}`;
   const wanted = job.downloaded.files + job.tasks.queued + job.tasks.leased;
+  const settled = count(job, 'done', 'partial', 'skipped', 'unmatched', 'ambiguous', 'failed');
   $('#job-downloaded').value = job.mode === 'pc' ? (wanted ? job.downloaded.files / wanted * 100 : 0) : (total ? settled / total * 100 : 0);
-  $('#job-downloaded-text').textContent = `${job.downloaded.files} files · ${bytes(job.downloaded.bytes)}`;
+  $('#job-downloaded-text').textContent = `${job.downloaded.files.toLocaleString()} files · ${bytes(job.downloaded.bytes)}`;
   $('#job-transferred-row').hidden = job.mode !== 'pc';
   if (job.mode === 'pc') {
-    $('#job-transferred').value = job.downloaded.files ? job.transferred.files / Math.max(job.downloaded.files, 1) * 100 : 0;
-    $('#job-transferred-text').textContent = `${job.transferred.files} files · ${bytes(job.transferred.bytes)}`;
+    $('#job-transferred').value = job.downloaded.files ? job.transferred.files / job.downloaded.files * 100 : 0;
+    $('#job-transferred-text').textContent = `${job.transferred.files.toLocaleString()} files · ${bytes(job.transferred.bytes)}`;
   }
   $('#job-helper').hidden = job.mode !== 'pc' || !running;
   $('#job-helper-command').textContent = `python3 ps5-media-helper.py http://${location.host} ${job.id}`;
   $('#job-cancel').hidden = !running;
-  $('#job-resume').hidden = running || job.state === 'done' && !count(job, 'pending', 'failed');
+  $('#job-resume').hidden = running || (job.state === 'done' && !count(job, 'pending', 'failed'));
+  const box = $('#job-problems-box'), problems = $('#job-problems');
+  box.hidden = !job.problems.length;
+  $('#job-problems-title').textContent = `Games that need you (${job.problems.length}) · choose a match, search, or skip`;
+  if (box.open || !problems.childElementCount) drawProblems(job);
+  if (!running && jobTimer) { clearInterval(jobTimer); jobTimer = null; library = { systems: [] }; }
+}
+function drawProblems(job) {
   const problems = $('#job-problems'); problems.replaceChildren();
   for (const p of job.problems) {
     const row = element('div', undefined, 'problem-row'), text = element('div');
     text.append(element('strong', p.label), element('p', p.message, p.state === 'failed' ? 'inline-error' : 'muted'));
     const actions = element('div', undefined, 'problem-actions');
-    const resolve = async (action, value) => { try { drawJob((await api(`/api/scraper/resolve?id=${job.id}&item=${p.item}&action=${action}&value=${encodeURIComponent(value || '')}`, { method: 'POST', signal: AbortSignal.timeout(60000) })).job); pollJob(); } catch (error) { announce(error.message, true); } };
+    const resolve = async (action, value) => {
+      row.classList.add('resolving');
+      try { const { job: next } = await api(`/api/scraper/resolve?id=${job.id}&item=${p.item}&action=${action}&value=${encodeURIComponent(value || '')}`, { method: 'POST', signal: AbortSignal.timeout(60000) }); drawJob(next); drawProblems(next); pollJob(); }
+      catch (error) { row.classList.remove('resolving'); announce(error.message, true); }
+    };
     if (p.candidates.length) {
       const pick = document.createElement('select'); pick.setAttribute('aria-label', `Match for ${p.label}`);
       for (const c of p.candidates) pick.add(new Option(c, c));
@@ -916,12 +968,13 @@ function drawJob(job) {
       actions.append(pick, use);
     }
     const search = document.createElement('input'); search.type = 'search'; search.placeholder = 'Search by name'; search.value = p.label; search.setAttribute('aria-label', `Search for ${p.label}`);
+    search.addEventListener('keydown', event => { if (event.key === 'Enter') resolve('search', search.value); });
     const find = element('button', 'Search', 'secondary'); find.addEventListener('click', () => resolve('search', search.value));
     const skip = element('button', 'Skip', 'secondary'); skip.addEventListener('click', () => resolve('skip'));
     actions.append(search, find, skip); row.append(text, actions); problems.append(row);
   }
-  if (!running && jobTimer) { clearInterval(jobTimer); jobTimer = null; loadGames(); }
 }
+$('#job-problems-box').addEventListener('toggle', () => { if ($('#job-problems-box').open) loadJob(); });
 async function loadJob() {
   try { const { job } = await api('/api/scraper/job'); drawJob(job); if (job && job.state === 'running') pollJob(); } catch {}
 }

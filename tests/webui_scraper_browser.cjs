@@ -1,6 +1,7 @@
-/* The Games page in Chromium (tests/test_scraper.py starts the server and a fake libretro
- * source): the method is asked first and remembered, a whole system is scraped on the
- * PS5, the ambiguous game is resolved from the page, and covers show in the grid. */
+/* The Download Media tab in Chromium (tests/test_scraper.py starts the server and a fake
+ * libretro source): the method is asked first and remembered, the library is scraped on
+ * the PS5 with live stats, the ambiguous game is resolved from the tab, and covers show
+ * on the Games tab. */
 const assert = require('node:assert/strict');
 const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
 (async () => {
@@ -9,31 +10,43 @@ const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
     const page = await browser.newPage();
     const errors = []; page.on('pageerror', e => errors.push(e.message));
     await page.route('https://api.github.com/**', route => route.fulfill({ json: [] }));
+    // Opened straight on the tab (the state it reads is declared before it runs).
+    await page.goto(process.env.WEBUI_TEST_URL + '/#media');
+    await page.waitForFunction(() => document.querySelectorAll('.kind-tile').length === 10);
     await page.goto(process.env.WEBUI_TEST_URL + '/#games');
     await page.waitForFunction(() => document.querySelectorAll('.game-card').length === 5);
     await page.locator('#scrape-open').click();
-    await page.waitForFunction(() => document.querySelector('#scrape-method-saved').textContent.includes('Choose one'));
-    assert.equal(await page.locator('input[name="scrape-method"]:checked').count(), 0, 'no method until the user chooses');
+    await page.waitForFunction(() => location.hash === '#media' && document.querySelectorAll('.kind-tile').length === 10);
+    assert.match(await page.locator('#scrape-method-hint').innerText(), /This PC → PS5: this PC downloads, then transfers to the PS5/);
+    assert.equal(await page.locator('#scrape-start').isDisabled(), true, 'no start until a method is chosen');
+    // The source's kinds can be chosen; the others say they are coming.
+    assert.equal(await page.locator('.kind-tile[aria-pressed="true"]').count(), 3);
+    assert.equal(await page.locator('.kind-tile:disabled').count(), 6);
+    await page.locator('.kind-tile', { hasText: 'Logo' }).click();
+    assert.equal(await page.locator('.kind-tile[aria-pressed="true"]').count(), 4);
+    await page.locator('#kinds-recommended').click();
+    assert.equal(await page.locator('.kind-tile[aria-pressed="true"]').count(), 3);
+    await page.locator('.segmented label:has(input[value="ps5"])').click();
+    assert.match(await page.locator('#scrape-summary').innerText(), /3 kinds of media · 5 games · libretro thumbnails · downloaded on the PS5/);
     await page.locator('#scrape-start').click();
-    assert.match(await page.locator('#scrape-result').innerText(), /Choose where/);
-    await page.locator('input[name="scrape-method"][value="ps5"]').check();
-    await page.locator('#scrape-start').click();
-    await page.waitForFunction(() => /Finished/.test(document.querySelector('#job-summary').textContent), null, { timeout: 60000 });
-    assert.match(await page.locator('#job-summary').innerText(), /2 complete, 1 partly, 0 already had media, 2 need you/);
-    // The ambiguous game: its region's candidate offered first, chosen from the page.
+    await page.waitForFunction(() => /finished/.test(document.querySelector('#job-title').textContent), null, { timeout: 60000 });
+    await page.waitForFunction(() => document.querySelector('#stat-done').textContent === '2' && document.querySelector('#stat-attention').textContent === '2');
+    assert.equal(await page.locator('#stat-partial').innerText(), '1');
+    // The ambiguous game: its region's candidate offered first, chosen from the tab.
+    await page.locator('#job-problems-box summary').click();
     const row = page.locator('.problem-row', { hasText: 'Chrono Trigger Special Edition' });
     assert.equal(await row.locator('select').inputValue(), 'Chrono Trigger (USA)');
     await row.getByRole('button', { name: 'Use this match' }).click();
-    await page.waitForFunction(() => /Finished/.test(document.querySelector('#job-summary').textContent) && !document.querySelector('.problem-row')?.textContent.includes('Chrono'), null, { timeout: 60000 });
-    await page.locator('#refresh-games').click();
+    await page.waitForFunction(() => document.querySelector('#stat-attention').textContent === '1', null, { timeout: 60000 });
+    await page.goto(process.env.WEBUI_TEST_URL + '/#games');
     await page.waitForFunction(() => document.querySelectorAll('.game-cover img').length === 4);
-    const loaded = await page.evaluate(() => Promise.all([...document.querySelectorAll('.game-cover img')].map(img => img.decode().then(() => true, () => img.complete && img.naturalWidth === 0 ? 'not an image' : true))));
-    assert.equal(loaded.length, 4);
-    // The method is remembered on the console: shown when the next job starts.
-    await page.locator('#scrape-open').click();
-    await page.waitForFunction(() => document.querySelector('#scrape-method-saved').textContent.includes('Download directly on PS5'));
-    assert.equal(await page.locator('input[name="scrape-method"][value="ps5"]').isChecked(), true);
+    // The method is remembered on the console.
+    await page.goto(process.env.WEBUI_TEST_URL + '/#media');
+    await page.waitForFunction(() => document.querySelector('input[name="scrape-method"][value="ps5"]').checked);
+    assert.match(await page.locator('#scrape-method-hint').innerText(), /downloads everything itself/);
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), true, 'no sideways scroll on a phone');
     assert.deepEqual(errors, []);
-    console.log('PASS: method asked then remembered, system scraped on the PS5, ambiguous game resolved in the page, covers shown');
+    console.log('PASS: method asked then remembered, media tiles, system scraped on the PS5 with live stats, ambiguous game resolved, covers shown, phone width');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exit(1); });

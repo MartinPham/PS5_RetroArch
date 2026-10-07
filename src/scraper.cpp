@@ -468,7 +468,10 @@ void save_job(Job &job, bool force)
     text += "id\t" + job.id + "\ncreated\t" + job.created + "\nstate\t" + job.state + "\nmode\t" +
             job.options.mode + "\nsource\t" + job.options.source + "\nkinds\t" +
             kinds_text(job.options.kinds) + "\nregion\t" + job.options.region + "\nlanguage\t" +
-            job.options.language + "\noverwrite\t" + (job.options.overwrite ? "1" : "0") + '\n';
+            job.options.language + "\noverwrite\t" + (job.options.overwrite ? "1" : "0") +
+            "\ncounters\t" + std::to_string(job.downloaded_files) + ' ' +
+            std::to_string(job.downloaded_bytes) + ' ' + std::to_string(job.transferred_files) +
+            ' ' + std::to_string(job.transferred_bytes) + '\n';
     for (const auto &item : job.items)
     {
         /* An item mid-way is saved as pending: it is redone (its finished media kept). */
@@ -533,6 +536,17 @@ std::shared_ptr<Job> load_job(const std::string &path)
                 job->options.language = v;
             else if (k == "overwrite")
                 job->options.overwrite = v == "1";
+            else if (k == "counters") /* what was downloaded and sent, kept across restarts */
+            {
+                unsigned long long a = 0, b = 0, c = 0, d = 0;
+                if (std::sscanf(v.c_str(), "%llu %llu %llu %llu", &a, &b, &c, &d) == 4)
+                {
+                    job->downloaded_files = a;
+                    job->downloaded_bytes = b;
+                    job->transferred_files = c;
+                    job->transferred_bytes = d;
+                }
+            }
         }
         else if (f.size() >= 8 && f.size() <= 10 && f[0] == "item")
         {
@@ -1018,6 +1032,31 @@ void ensure_workers()
 }
 } // namespace
 
+/* Hidden files a writer left when it died (a crash mid-download): older than ten
+ * minutes, no live writer has them (a stale daemon finishing a file is younger). */
+static void sweep_partials(const std::string &folder, int depth)
+{
+    DIR *dir = opendir(folder.c_str());
+    if (!dir)
+        return;
+    const std::time_t now = std::time(nullptr);
+    while (const dirent *entry = readdir(dir))
+    {
+        const std::string name = entry->d_name;
+        if (name == "." || name == "..")
+            continue;
+        const std::string path = folder + '/' + name;
+        struct stat st{};
+        if (stat(path.c_str(), &st) != 0)
+            continue;
+        if (S_ISDIR(st.st_mode) && depth > 0)
+            sweep_partials(path, depth - 1);
+        else if (S_ISREG(st.st_mode) && name.rfind(".partial-", 0) == 0 && now - st.st_mtime > 600)
+            unlink(path.c_str());
+    }
+    closedir(dir);
+}
+
 void configure(const std::string &root, const std::string &base)
 {
     std::lock_guard<std::mutex> guard(lock);
@@ -1028,6 +1067,7 @@ void configure(const std::string &root, const std::string &base)
     if (is_file(root + "/webui/ca-bundle.crt"))
         set_certificates(root + "/webui/ca-bundle.crt");
     stopping = false;
+    sweep_partials(library_root(), 3);
     /* A job the last server left running goes on: PS5 mode by itself, PC mode when the
      * helper is back. */
     if (DIR *dir = opendir(jobs_folder().c_str()))
