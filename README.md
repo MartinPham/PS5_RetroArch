@@ -4,7 +4,7 @@
 
 **Your collection on the console. Your controls in the browser.**
 
-Native Vulkan rendering · Twenty-nine release cores · A local WebUI
+Native Vulkan rendering · Thirty-three release cores · A local WebUI
 
 [Download a release](https://github.com/mihawk-99/PS5_RetroArch/releases) · [Get started](#get-started) · [Supported systems](#supported-systems) · [Build from source](#build-from-source)
 
@@ -142,6 +142,10 @@ through Vulkan. These are supported systems, not a promise that every title work
 | Atari 5200 | a5200 | Software |
 | Atari 7800 | ProSystem | Software |
 | MS-DOS | DOSBox Pure | Software |
+| 3DO | Opera | Software |
+| Commodore Amiga | PUAE | Software |
+| Neo Geo CD | NeoCD | Software |
+| Point-and-click adventures (LucasArts, Sierra and more) | ScummVM | Software |
 
 Use matching arcade sets: MAME currently targets **0.289**, and FBNeo requires
 sets compatible with its pinned version. Azahar requires decrypted content.
@@ -310,7 +314,11 @@ The cores that needed changes for the console build from my forks of them
 [PS5_Stella](https://github.com/mihawk-99/PS5_Stella),
 [PS5_A5200](https://github.com/mihawk-99/PS5_A5200),
 [PS5_ProSystem](https://github.com/mihawk-99/PS5_ProSystem),
-[PS5_DOSBoxPure](https://github.com/mihawk-99/PS5_DOSBoxPure)), each pinned by revision in
+[PS5_DOSBoxPure](https://github.com/mihawk-99/PS5_DOSBoxPure),
+[PS5_Opera](https://github.com/mihawk-99/PS5_Opera),
+[PS5_PUAE](https://github.com/mihawk-99/PS5_PUAE),
+[PS5_NeoCD](https://github.com/mihawk-99/PS5_NeoCD),
+[PS5_ScummVM](https://github.com/mihawk-99/PS5_ScummVM)), each pinned by revision in
 its build script. The script uses the sibling checkout when there is one, and
 `github.com/mihawk-99/<fork>` otherwise.
 
@@ -336,7 +344,7 @@ bash tools/verify.sh
 
 The five gates are **format → unit → build → integration → evidence**. The build
 pins RetroArch 1.22.2, fetches core sources/metadata with checked hashes, builds the
-frontend and twenty-nine cores, and stages the native title in `dist/PPSA99169/`.
+frontend and thirty-three cores, and stages the native title in `dist/PPSA99169/`.
 The initial dependency/source fetch requires network access.
 
 For an already configured checkout:
@@ -356,7 +364,8 @@ bash tools/build-ppsspp.sh   # The larger cores have scripts of their own:
                              # build-beetle-wswan.sh, build-pokemini.sh,
                              # build-handy.sh, build-virtualjaguar.sh,
                              # build-stella.sh, build-a5200.sh, build-prosystem.sh,
-                             # build-dosbox-pure.sh
+                             # build-dosbox-pure.sh, build-opera.sh, build-puae.sh,
+                             # build-neocd.sh, build-scummvm.sh
 ```
 
 When adding or updating a core, rebuild the title too: the frontend's native
@@ -416,6 +425,10 @@ lists and original notices.
 | [a5200](https://github.com/libretro/a5200) | The Atari800 team and the a5200 contributors |
 | [ProSystem](https://github.com/libretro/prosystem-libretro) | Greg Stanton and contributors |
 | [DOSBox Pure](https://codeberg.org/schelling/dosbox-pure) | Bernhard Schelling, building on DOSBox by the DOSBox Team |
+| [Opera](https://github.com/libretro/opera-libretro) | The FreeDO authors, the 4DO and Opera contributors |
+| [PUAE](https://github.com/libretro/libretro-uae) | The UAE, WinUAE and PUAE authors and contributors |
+| [NeoCD](https://github.com/libretro/neocd_libretro) | Laurent Cayrol and contributors |
+| [ScummVM](https://github.com/scummvm/scummvm) | The ScummVM Team and contributors |
 | [libretro core-info](https://github.com/libretro/libretro-core-info) | Metadata maintainers and contributors |
 
 
@@ -441,11 +454,12 @@ The cores keep their own licences, and they differ:
 
 | Licence | Cores |
 | --- | --- |
-| GPL-2.0-or-later | FCEUmm, PPSSPP, Dolphin, Beetle PSX HW, Beetle Saturn, Mupen64Plus-Next (with MIT and LGPL parts), VICE, DeSmuME, Azahar (Dynarmic is 0BSD), Flycast, Beetle PCE, Beetle PC-FX, Beetle VB, Beetle NeoPop, Beetle Cygne, Stella, a5200, ProSystem, DOSBox Pure, MAME (as a whole; many files BSD-3-Clause) |
-| GPL-3.0-or-later | LRPS2 (PCSX2), PokeMini, Virtual Jaguar |
+| GPL-2.0-or-later | FCEUmm, PPSSPP, Dolphin, Beetle PSX HW, Beetle Saturn, Mupen64Plus-Next (with MIT and LGPL parts), VICE, DeSmuME, Azahar (Dynarmic is 0BSD), Flycast, Beetle PCE, Beetle PC-FX, Beetle VB, Beetle NeoPop, Beetle Cygne, Stella, a5200, ProSystem, DOSBox Pure, PUAE, MAME (as a whole; many files BSD-3-Clause) |
+| GPL-3.0-or-later | LRPS2 (PCSX2), PokeMini, Virtual Jaguar, ScummVM |
+| LGPL-3.0-or-later | NeoCD |
 | Zlib | Handy |
 | MPL-2.0 | mGBA |
-| Non-commercial licences | Snes9x, FinalBurn Neo, Genesis Plus GX, PicoDrive: they may not be sold or used commercially, and FBNeo's forbids asking for donations for a project that uses its code |
+| Non-commercial licences | Snes9x, FinalBurn Neo, Genesis Plus GX, PicoDrive, Opera (FreeDO's modified LGPL): they may not be sold or used commercially, and FBNeo's forbids asking for donations for a project that uses its code |
 
 Assets and fonts keep their licences too: the XMB theme is CC-BY-4.0 with the M+
 font licence, PPSSPP's fonts are OFL-1.1, and Dolphin's `Sys` files carry theirs.
