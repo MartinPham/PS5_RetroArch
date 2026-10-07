@@ -197,7 +197,7 @@ function drawTransfers() {
           progress = document.createElement('progress'); progress.max = 100;
           progress.setAttribute('aria-label', `Upload progress for ${transfer.name}`); details.append(progress);
           const cancel = element('button', 'Cancel', 'secondary');
-          cancel.addEventListener('click', () => { transfer.state = 'cancelled'; transfer.message = 'Cancelled'; if (transfer.xhr) transfer.xhr.abort(); transfer.file = null; drawTransfers(); });
+          cancel.addEventListener('click', () => cancelTransfer(transfer));
           row.append(cancel);
         }
         progress.value = transfer.percent || 0;
@@ -216,35 +216,175 @@ function queueFiles(files, destination) {
   }
   drawTransfers(); sendNext();
 }
+// The transfer engine (src/webui_transfer.h on the console): six lanes run at once.
+// Small files travel many to a request (a batch), large files as parts on every free
+// lane (an upload session), the rest one to a request. Every file is renamed into
+// place on the console only once whole.
+const LANES = 6, SMALL = 4 * 1024 ** 2, LARGE = 64 * 1024 ** 2, PART = 32 * 1024 ** 2;
+const BATCH_FILES = 256, BATCH_BYTES = 16 * 1024 ** 2, PART_TRIES = 3;
+let jobs = [], opening = 0; // sessions being opened: their parts are about to queue
+function cancelTransfer(transfer) {
+  if (!['queued', 'uploading'].includes(transfer.state)) return;
+  transfer.state = 'cancelled'; transfer.message = 'Cancelled';
+  for (const xhr of transfer.requests || []) xhr.abort();
+  if (transfer.session) api('/api/upload/session?id=' + encodeURIComponent(transfer.session), { method: 'DELETE' }).catch(() => {});
+  transfer.file = null; drawTransfers();
+}
+function showProgress(transfer, sent) {
+  transfer.sent = Math.min(sent, transfer.file?.size ?? sent);
+  const size = transfer.file?.size || 0, percent = size ? Math.floor(transfer.sent / size * 100) : 100;
+  if (percent === transfer.percent && transfer.state === 'uploading') return;
+  transfer.percent = percent; transfer.state = 'uploading';
+  transfer.message = percent >= 100 ? 'Finishing on the console…' : `${percent}% · ${bytes(transfer.sent)} of ${bytes(size)}`;
+  const now = Date.now(); if (now - (transfer.drawn || 0) > 150 || percent >= 100) { transfer.drawn = now; drawTransfers(); }
+}
+function finish(transfer, state, message) {
+  if (transfer.state === 'cancelled') return;
+  transfer.state = state; transfer.message = message; transfer.file = null; transfer.requests = [];
+  transfer.session = null; drawTransfers();
+}
+// One request on a lane: resolves with {status, body}, or rejects when the connection fails.
+function send(method, url, body, transfers, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    for (const transfer of transfers) (transfer.requests ||= []).push(xhr);
+    const done = () => { for (const transfer of transfers) transfer.requests = (transfer.requests || []).filter(x => x !== xhr); };
+    xhr.open(method, url); xhr.setRequestHeader('X-RetroArch-Token', token);
+    if (onProgress) xhr.upload.onprogress = event => onProgress(event.loaded);
+    xhr.onload = () => { done(); let parsed = {}; try { parsed = JSON.parse(xhr.responseText); } catch {} resolve({ status: xhr.status, body: parsed }); };
+    xhr.onerror = () => { done(); reject(new Error('Connection lost. Reconnect, then choose this file again.')); };
+    xhr.onabort = () => { done(); reject(new Error('Cancelled')); };
+    xhr.send(body);
+  });
+}
+// The batch stream: per file a u16 name length, the name (UTF-8), a u64 size and the
+// file itself, then a zero length. A Blob of the files' own Blobs: nothing is copied.
+function batchBody(transfers) {
+  const parts = [], encoder = new TextEncoder();
+  for (const transfer of transfers) {
+    const name = encoder.encode(transfer.path), head = new Uint8Array(2 + name.length + 8), view = new DataView(head.buffer);
+    view.setUint16(0, name.length, true); head.set(name, 2); view.setBigUint64(2 + name.length, BigInt(transfer.file.size), true);
+    parts.push(head, transfer.file);
+  }
+  parts.push(new Uint8Array(2));
+  return new Blob(parts);
+}
+async function runBatch(transfers) {
+  transfers = transfers.filter(transfer => transfer.state === 'queued');
+  if (!transfers.length) return;
+  const encoder = new TextEncoder(), starts = []; let at = 0;
+  for (const transfer of transfers) { at += 2 + encoder.encode(transfer.path).length + 8; starts.push(at); at += transfer.file.size; }
+  for (const transfer of transfers) showProgress(transfer, 0);
+  try {
+    const { status, body: result } = await send('PUT', '/api/upload/batch', batchBody(transfers), transfers,
+      loaded => transfers.forEach((transfer, i) => showProgress(transfer, loaded - starts[i])));
+    const failed = new Map((result.failed || []).map(entry => [entry.name, entry.error]));
+    const skipped = new Set(result.skippedNames || []);
+    for (const transfer of transfers) {
+      if (transfer.state !== 'uploading') continue;
+      if (skipped.has(transfer.path)) finish(transfer, 'failed', 'A file with this name already exists. Rename your file first.');
+      else if (failed.has(transfer.path)) finish(transfer, 'failed', `Upload failed (${failed.get(transfer.path)}). Choose the file again to retry.`);
+      else if (status === 200) finish(transfer, 'complete', `Uploaded · ${bytes(transfer.file.size)}`);
+      else finish(transfer, 'failed', result.error || result.problem || 'Upload failed. Choose the file again to retry.');
+    }
+  } catch (error) {
+    for (const transfer of transfers) if (transfer.state === 'uploading') finish(transfer, 'failed', error.message);
+    if (error.message !== 'Cancelled') setConnection(false);
+  }
+}
+async function runSingle(transfer) {
+  if (transfer.state !== 'queued') return;
+  showProgress(transfer, 0);
+  try {
+    const { status, body } = await send('PUT', '/api/upload?path=' + encodeURIComponent(transfer.path), transfer.file, [transfer], loaded => showProgress(transfer, loaded));
+    if (status === 201) finish(transfer, 'complete', `Uploaded · ${bytes(transfer.file.size)}`);
+    else finish(transfer, 'failed', body.error || 'Upload failed. Choose the file again to retry.');
+  } catch (error) { finish(transfer, error.message === 'Cancelled' ? 'cancelled' : 'failed', error.message); if (error.message !== 'Cancelled') setConnection(false); }
+}
+// A large file: a session, then its parts as jobs any lane takes. The part that
+// completes the file commits it, on its own lane: no lane ever waits on another.
+async function runLarge(transfer) {
+  if (transfer.state !== 'queued') return;
+  showProgress(transfer, 0);
+  let opened;
+  opening++;
+  try { opened = await send('POST', `/api/upload/session?path=${encodeURIComponent(transfer.path)}&size=${transfer.file.size}`, null, [transfer]); }
+  catch (error) { finish(transfer, 'failed', error.message); return; }
+  finally { opening--; }
+  if (opened.status !== 201) { finish(transfer, 'failed', opened.body.error || 'Upload failed. Choose the file again to retry.'); return; }
+  transfer.session = opened.body.id;
+  const size = transfer.file.size, part = Math.max(4 * 1024 ** 2, Math.min(opened.body.partSize || PART, Math.ceil(size / LANES)));
+  const sent = new Map(), parts = [];
+  for (let start = 0; start < size; start += part) parts.push([start, Math.min(start + part, size)]);
+  let left = parts.length, failure = null;
+  const abandon = message => {
+    if (failure) return;
+    failure = message;
+    api('/api/upload/session?id=' + encodeURIComponent(transfer.session), { method: 'DELETE' }).catch(() => {});
+    if (message !== 'Cancelled') finish(transfer, 'failed', message);
+  };
+  const commit = async () => {
+    try {
+      const { status, body } = await send('POST', '/api/upload/commit?id=' + encodeURIComponent(transfer.session), null, [transfer]);
+      if (status === 201) finish(transfer, 'complete', `Uploaded · ${bytes(size)}`);
+      else finish(transfer, 'failed', body.error || 'Upload failed. Choose the file again to retry.');
+    } catch (error) { finish(transfer, 'failed', error.message); }
+  };
+  const partJob = ([start, end]) => async () => {
+    for (let attempt = 1; !failure; attempt++) {
+      if (transfer.state !== 'uploading') { abandon('Cancelled'); return; }
+      try {
+        const { status, body } = await send('PUT', `/api/upload/part?id=${encodeURIComponent(transfer.session)}&offset=${start}`, transfer.file.slice(start, end), [transfer],
+          loaded => { sent.set(start, loaded); showProgress(transfer, [...sent.values()].reduce((a, b) => a + b, 0)); });
+        if (status === 200) { sent.set(start, end - start); break; }
+        if (attempt >= PART_TRIES || status === 404 || status === 416) { abandon(body.error || 'A part could not be written.'); return; }
+      } catch (error) {
+        if (error.message === 'Cancelled') { abandon('Cancelled'); return; }
+        if (attempt >= PART_TRIES) { abandon(error.message); return; }
+      }
+    }
+    if (!failure && --left === 0) await commit();
+  };
+  // First in the queue, so every free lane joins this file at once.
+  jobs.unshift(...parts.map(partJob));
+}
+// Turns the queued transfers into jobs: batches of small files, sessions, single files.
+function planJobs() {
+  let batch = [], batchBytes = 0;
+  const flush = () => { if (batch.length) { const group = batch; jobs.push(() => runBatch(group)); } batch = []; batchBytes = 0; };
+  for (const transfer of transfers) {
+    if (transfer.state !== 'queued' || transfer.planned) continue;
+    transfer.planned = true;
+    const size = transfer.file.size;
+    if (size < SMALL) {
+      if (batch.length >= BATCH_FILES || batchBytes + size > BATCH_BYTES) flush();
+      batch.push(transfer); batchBytes += size;
+    } else if (size >= LARGE) jobs.push(() => runLarge(transfer));
+    else jobs.push(() => runSingle(transfer));
+  }
+  flush();
+}
 async function sendNext() {
+  planJobs();
   if (sending) return;
   sending = true;
   try {
-    for (const transfer of transfers) {
-      if (transfer.state !== 'queued') continue;
-      if (!connected && !await reconnect()) { transfer.state = 'failed'; transfer.message = 'Console disconnected. Reconnect, then choose this file again.'; transfer.file = null; drawTransfers(); continue; }
-      await new Promise(resolve => {
-        const xhr = new XMLHttpRequest(); transfer.xhr = xhr; transfer.state = 'uploading';
-        transfer.message = 'Uploading…'; drawTransfers();
-        xhr.open('PUT', '/api/upload?path=' + encodeURIComponent(transfer.path));
-        xhr.setRequestHeader('X-RetroArch-Token', token);
-        let lastProgress = 0;
-        xhr.upload.onprogress = event => {
-          if (!event.lengthComputable) return;
-          transfer.percent = Math.floor(event.loaded / event.total * 100);
-          transfer.message = transfer.percent === 100 ? 'Finishing on the console…' : `${transfer.percent}% · ${bytes(event.loaded)} of ${bytes(event.total)}`;
-          if (Date.now() - lastProgress > 150 || transfer.percent === 100) { lastProgress = Date.now(); drawTransfers(); }
-        };
-        xhr.onload = () => {
-          if (xhr.status === 201) { transfer.state = 'complete'; transfer.message = `Uploaded · ${bytes(transfer.file.size)}`; }
-          else { transfer.state = 'failed'; try { transfer.message = JSON.parse(xhr.responseText).error; } catch { transfer.message = 'Upload failed. Choose the file again to retry.'; } }
-        };
-        xhr.onerror = () => { transfer.state = 'failed'; transfer.message = 'Connection lost. Reconnect, then choose this file again.'; setConnection(false); };
-        xhr.onabort = () => { transfer.state = 'cancelled'; transfer.message = 'Cancelled'; };
-        xhr.onloadend = () => { transfer.file = null; transfer.xhr = null; drawTransfers(); resolve(); };
-        xhr.send(transfer.file);
-      });
+    if (!connected && !await reconnect()) {
+      for (const transfer of transfers) if (transfer.state === 'queued') finish(transfer, 'failed', 'Console disconnected. Reconnect, then choose this file again.');
+      jobs = []; return;
     }
+    // Each lane runs one job at a time until none is left; a job is one request (or a
+    // part and its file's commit), so no lane waits on another lane's work.
+    const lane = async () => {
+      for (;;) {
+        planJobs();
+        const job = jobs.shift();
+        if (job) await job();
+        else if (opening) await new Promise(resolve => setTimeout(resolve, 25));
+        else return;
+      }
+    };
+    await Promise.all(Array.from({ length: LANES }, lane));
   } finally { sending = false; await Promise.all([loadLibrary(), loadContent(currentPath), reconnect()]); }
 }
 let pickerDestination = '';

@@ -4,6 +4,7 @@
  */
 #include "webui_ps5.h"
 #include "webui_update.h"
+#include "webui_transfer.h"
 #include "ps5_frontend_choice.h"
 #include "../vendor/retroarch/libretro-common/include/libretro.h"
 #include <microhttpd.h>
@@ -19,7 +20,9 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <map>
+#include <memory>
 #include <mutex>
+#include <netinet/tcp.h>
 #include <new>
 #include <netinet/in.h>
 #include <string>
@@ -55,20 +58,32 @@ const Setting settings[] = {
     {"menu_show_advanced_settings", "Show advanced settings", "bool", "false", 0, 0},
     {"menu_driver", "Console menu", "menu", "xmb", 0, 0},
 };
+// The server answers on a pool of threads (ps5_webui_start). Transfers write on
+// their own; everything else (settings, folders, the updater) runs under this lock,
+// as it did on the one thread before.
+std::mutex state_lock;
+ps5_transfer::Sessions sessions;
+constexpr std::time_t session_idle_seconds = 15 * 60;
+struct BatchState;
+enum class Transfer
+{
+    none,
+    single, // PUT /api/upload
+    batch,  // PUT /api/upload/batch
+    part    // PUT /api/upload/part
+};
 struct Request
 {
-    int file = -1;
+    Transfer transfer = Transfer::none;
+    ps5_transfer::Writer writer;
+    std::unique_ptr<BatchState> batch;
+    std::shared_ptr<ps5_transfer::Session> session;
+    bool replace = false;
     std::string temporary, destination, body;
-    uint64_t received = 0, expected = 0;
+    uint64_t received = 0, expected = 0, offset = 0;
     unsigned error = 0;
     const char *message = "";
-    ~Request()
-    {
-        if (file >= 0)
-            close(file);
-        if (!temporary.empty())
-            unlink(temporary.c_str());
-    }
+    ~Request();
 };
 std::string quote(const std::string &text)
 {
@@ -241,6 +256,39 @@ bool content_path(const std::string &relative, std::string &absolute, bool new_l
         start = end + 1;
     }
     return true;
+}
+// A path below content/ for a new file, its missing folders created on the way
+// (an upload of a folder's files, a batch's subfolders). The leaf is not checked.
+bool content_parents(const std::string &relative, std::string &absolute)
+{
+    if (relative.empty() || !valid_path(relative))
+        return false;
+    absolute = root_path + "/content";
+    struct stat st{};
+    if (content_stat(absolute.c_str(), &st) || !S_ISDIR(st.st_mode))
+        return false;
+    size_t start = 0;
+    for (;;)
+    {
+        const auto end = relative.find('/', start);
+        absolute += '/' + relative.substr(start, end - start);
+        if (end == std::string::npos)
+            return true;
+        if (content_stat(absolute.c_str(), &st))
+        {
+            if (errno != ENOENT || (mkdir(absolute.c_str(), 0755) && errno != EEXIST) ||
+                content_stat(absolute.c_str(), &st))
+                return false;
+        }
+        if (S_ISLNK(st.st_mode) || !S_ISDIR(st.st_mode))
+            return false;
+        start = end + 1;
+    }
+}
+bool exists(const std::string &absolute)
+{
+    struct stat st{};
+    return content_stat(absolute.c_str(), &st) == 0 || errno != ENOENT;
 }
 std::string trim(std::string s)
 {
@@ -791,17 +839,25 @@ MHD_Result list_content(MHD_Connection *c)
 // A download is read in blocks rather than handed to MHD as a descriptor: MHD sends a
 // descriptor with sendfile, which on the console stopped after its first 33 KB
 // (the daemon, 2026-10-07: curl got 33,300 of 1.9 GB and a broken transfer).
+struct DownloadSource
+{
+    int fd;
+    uint64_t start;
+};
 ssize_t read_download(void *cls, uint64_t position, char *buffer, size_t size)
 {
-    const ssize_t got = pread(static_cast<int>(reinterpret_cast<intptr_t>(cls)), buffer, size,
-                              static_cast<off_t>(position));
+    const auto *source = static_cast<DownloadSource *>(cls);
+    const ssize_t got =
+        pread(source->fd, buffer, size, static_cast<off_t>(source->start + position));
     if (got == 0)
         return MHD_CONTENT_READER_END_OF_STREAM;
     return got < 0 ? MHD_CONTENT_READER_END_WITH_ERROR : got;
 }
 void close_download(void *cls)
 {
-    close(static_cast<int>(reinterpret_cast<intptr_t>(cls)));
+    auto *source = static_cast<DownloadSource *>(cls);
+    close(source->fd);
+    delete source;
 }
 MHD_Result download(MHD_Connection *c)
 {
@@ -817,13 +873,33 @@ MHD_Result download(MHD_Connection *c)
         close(fd);
         return error(c, 400, "Choose a file to download.");
     }
-    auto *response = MHD_create_response_from_callback(
-        static_cast<uint64_t>(st.st_size), 256 * 1024, read_download,
-        reinterpret_cast<void *>(static_cast<intptr_t>(fd)), close_download);
-    if (!response)
+    // One byte range (Range: bytes=a-b), so a client can fetch a large file on several
+    // connections or resume one.
+    const uint64_t size = static_cast<uint64_t>(st.st_size);
+    uint64_t start = 0, end = size;
+    const char *range = MHD_lookup_connection_value(c, MHD_HEADER_KIND, "Range");
+    const bool partial = range && ps5_transfer::parse_range(range, size, start, end);
+    if (range && !partial && size)
     {
         close(fd);
+        return error(c, 416, "This part of the file does not exist.");
+    }
+    auto *source = new (std::nothrow) DownloadSource{fd, start};
+    auto *response = source ? MHD_create_response_from_callback(
+                                  end - start, 1024 * 1024, read_download, source, close_download)
+                            : nullptr;
+    if (!response)
+    {
+        delete source;
+        close(fd);
         return MHD_NO;
+    }
+    MHD_add_response_header(response, "Accept-Ranges", "bytes");
+    if (partial)
+    {
+        const std::string content_range = "bytes " + std::to_string(start) + '-' +
+                                          std::to_string(end - 1) + '/' + std::to_string(size);
+        MHD_add_response_header(response, "Content-Range", content_range.c_str());
     }
     const std::string disposition =
         "attachment; filename=" + quote(path.substr(path.find_last_of('/') + 1));
@@ -831,9 +907,130 @@ MHD_Result download(MHD_Connection *c)
     MHD_add_response_header(response, "Content-Type", "application/octet-stream");
     MHD_add_response_header(response, "X-Content-Type-Options", "nosniff");
     MHD_add_response_header(response, "Cache-Control", "no-store");
-    auto result = MHD_queue_response(c, 200, response);
+    auto result = MHD_queue_response(c, partial ? 206 : 200, response);
     MHD_destroy_response(response);
     return result;
+}
+// Many small files in one request (src/webui_transfer.h, the batch stream): each is
+// written under a temporary name and renamed when whole; one that exists is skipped
+// unless replace. Results are counted, not answered one by one.
+struct BatchUpload final : ps5_transfer::BatchSink
+{
+    std::string folder; // below content/, may be empty
+    bool replace = false, sync = true;
+    ps5_transfer::Writer writer;
+    std::string name, temporary, destination;
+    uint64_t size = 0;
+    unsigned written = 0, skipped = 0;
+    uint64_t bytes = 0;
+    std::vector<std::pair<std::string, std::string>> failed;
+    std::vector<std::string> skipped_names; // the first 1024
+    void skip()
+    {
+        ++skipped;
+        if (skipped_names.size() < 1024)
+            skipped_names.push_back(name);
+    }
+    bool fail(const char *why)
+    {
+        if (failed.size() < 64)
+            failed.emplace_back(name, why);
+        else
+            failed.back().second = "and more";
+        const int fd = writer.release();
+        if (fd >= 0)
+            close(fd);
+        if (!temporary.empty())
+            unlink(temporary.c_str());
+        temporary.clear();
+        return false;
+    }
+    bool begin(const std::string &record, uint64_t record_size) override
+    {
+        name = record;
+        size = record_size;
+        temporary.clear();
+        if (record_size > upload_limit ||
+            !content_parents(folder.empty() ? record : folder + '/' + record, destination))
+            return fail("invalid name");
+        if (!replace && exists(destination))
+        {
+            skip();
+            return false;
+        }
+        temporary = destination.substr(0, destination.find_last_of('/') + 1) + ".upload-" + nonce();
+        return writer.create(temporary) || fail("cannot create");
+    }
+    bool data(const char *bytes_in, size_t count) override
+    {
+        return writer.write(bytes_in, count) || fail("cannot write (storage full?)");
+    }
+    void end() override
+    {
+        const bool flushed = writer.flush();
+        const uint64_t got = writer.written();
+        const int fd = writer.release();
+        if (!flushed || fd < 0 || got != size)
+        {
+            if (fd >= 0)
+                close(fd);
+            fail("incomplete");
+            return;
+        }
+        const auto result = ps5_transfer::commit(fd, temporary, destination, replace, sync);
+        close(fd);
+        if (result == ps5_transfer::Commit::done)
+        {
+            temporary.clear();
+            ++written;
+            bytes += size;
+        }
+        else if (result == ps5_transfer::Commit::exists)
+        {
+            unlink(temporary.c_str());
+            temporary.clear();
+            skip();
+        }
+        else
+            fail("cannot finish");
+    }
+    ~BatchUpload() override
+    {
+        const int fd = writer.release();
+        if (fd >= 0)
+            close(fd);
+        if (!temporary.empty())
+            unlink(temporary.c_str());
+    }
+};
+struct BatchState
+{
+    BatchUpload upload;
+    ps5_transfer::BatchReader reader{upload};
+};
+Request::~Request()
+{
+    if (transfer == Transfer::part && session)
+    {
+        std::lock_guard<std::mutex> guard(session->lock);
+        if (--session->writers == 0 && session->closing && session->fd >= 0)
+        {
+            close(session->fd);
+            session->fd = -1;
+        }
+    }
+    if (!temporary.empty())
+        unlink(temporary.c_str());
+}
+bool content_length(MHD_Connection *c, uint64_t &length)
+{
+    const char *value = MHD_lookup_connection_value(c, MHD_HEADER_KIND, "Content-Length");
+    char *end = nullptr;
+    errno = 0;
+    if (!value || !*value || *value == '-')
+        return false;
+    length = std::strtoull(value, &end, 10);
+    return !errno && !*end;
 }
 void prepare_upload(MHD_Connection *c, Request &r)
 {
@@ -848,8 +1045,9 @@ void prepare_upload(MHD_Connection *c, Request &r)
         fail(400, "Choose a valid content folder and filename.");
         return;
     }
-    struct stat st{};
-    if (content_stat(r.destination.c_str(), &st) == 0 || errno != ENOENT)
+    r.transfer = Transfer::single;
+    r.replace = std::strcmp(arg(c, "existing"), "replace") == 0;
+    if (!r.replace && exists(r.destination))
     {
         fail(409, "A file with this name already exists. Rename your file first.");
         return;
@@ -876,12 +1074,205 @@ void prepare_upload(MHD_Connection *c, Request &r)
     }
     r.temporary =
         r.destination.substr(0, r.destination.find_last_of('/') + 1) + ".upload-" + nonce();
-    r.file = open(r.temporary.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0644);
-    if (r.file < 0)
+    if (!r.writer.create(r.temporary))
     {
+        r.temporary.clear();
         fail(507, "Could not create the upload. Check console storage.");
+    }
+}
+void prepare_batch(MHD_Connection *c, Request &r)
+{
+    r.transfer = Transfer::batch;
+    if (!content_length(c, r.expected) || r.expected > upload_limit)
+    {
+        r.error = 411;
+        r.message = "A batch needs its size, at most 64 GiB.";
         return;
     }
+    auto state = std::make_unique<BatchState>();
+    state->upload.folder = arg(c, "folder");
+    state->upload.replace = std::strcmp(arg(c, "existing"), "replace") == 0;
+    state->upload.sync = std::strcmp(arg(c, "sync"), "0") != 0;
+    if (!state->upload.folder.empty() && !valid_path(state->upload.folder))
+    {
+        r.error = 400;
+        r.message = "Choose a valid content folder.";
+        return;
+    }
+    r.batch = std::move(state);
+}
+void prepare_part(MHD_Connection *c, Request &r)
+{
+    r.transfer = Transfer::part;
+    r.session = sessions.find(arg(c, "id"));
+    char *end = nullptr;
+    const char *offset = arg(c, "offset");
+    errno = 0;
+    r.offset = std::strtoull(offset, &end, 10);
+    if (!r.session)
+    {
+        r.error = 404;
+        r.message = "This upload is no longer open. Start it again.";
+        return;
+    }
+    if (!*offset || errno || *end || !content_length(c, r.expected) || r.offset > r.session->size ||
+        r.expected > r.session->size - r.offset)
+    {
+        r.session.reset();
+        r.error = 416;
+        r.message = "This part does not fit the file.";
+        return;
+    }
+    std::lock_guard<std::mutex> guard(r.session->lock);
+    if (r.session->closing || r.session->fd < 0)
+    {
+        r.session.reset();
+        r.error = 409;
+        r.message = "This upload was closed.";
+        return;
+    }
+    ++r.session->writers;
+    r.session->touched = std::time(nullptr);
+    r.writer.attach(r.session->fd, r.offset);
+}
+std::string names(const std::vector<std::string> &list)
+{
+    std::string out = "[";
+    for (const auto &name : list)
+        out += (out.size() > 1 ? "," : "") + quote(name);
+    return out + ']';
+}
+// The transfers' own routes: they run beside each other, outside state_lock.
+MHD_Result transfer_route(MHD_Connection *c, const std::string &url, const std::string &method,
+                          Request &r)
+{
+    if (r.transfer == Transfer::single)
+    {
+        if (r.received != r.expected)
+            return error(c, 400, "The upload was incomplete. Try again.");
+        const int fd = r.writer.release();
+        if (fd < 0)
+            return error(c, 507, "Could not finish writing the file. Check console storage.");
+        const auto result = ps5_transfer::commit(fd, r.temporary, r.destination, r.replace, true);
+        close(fd);
+        if (result == ps5_transfer::Commit::exists)
+            return error(c, 409, "A file with this name already exists. Rename your file first.");
+        if (result != ps5_transfer::Commit::done)
+            return error(c, 500, "Could not finish the upload.");
+        r.temporary.clear();
+        return respond(c, 201, "{\"uploaded\":true,\"bytes\":" + std::to_string(r.received) + '}');
+    }
+    if (r.transfer == Transfer::batch)
+    {
+        auto *state = r.batch.get();
+        auto &b = state->upload;
+        std::string failed = "[";
+        for (const auto &f : b.failed)
+            failed += (failed.size() > 1 ? "," : "") + std::string("{\"name\":") + quote(f.first) +
+                      ",\"error\":" + quote(f.second) + '}';
+        const bool whole = state->reader.finished() && r.received == r.expected;
+        return respond(c, whole ? 200 : 400,
+                       "{\"complete\":" + std::string(whole ? "true" : "false") + ",\"written\":" +
+                           std::to_string(b.written) + ",\"skipped\":" + std::to_string(b.skipped) +
+                           ",\"skippedNames\":" + names(b.skipped_names) + ",\"bytes\":" +
+                           std::to_string(b.bytes) + ",\"failed\":" + failed + "],\"problem\":" +
+                           quote(whole                      ? ""
+                                 : *state->reader.problem() ? state->reader.problem()
+                                                            : "The batch ended early.") +
+                           '}');
+    }
+    if (r.transfer == Transfer::part)
+    {
+        if (r.received != r.expected || !r.writer.flush())
+            return error(c, 507, "The part could not be written. Try it again.");
+        uint64_t covered;
+        {
+            // Released here, not when the request is freed after its answer: a commit
+            // sent the moment this answer arrives must find no writer left.
+            std::lock_guard<std::mutex> guard(r.session->lock);
+            r.session->add(r.offset, r.offset + r.received);
+            r.session->touched = std::time(nullptr);
+            covered = r.session->covered;
+            if (--r.session->writers == 0 && r.session->closing && r.session->fd >= 0)
+            {
+                close(r.session->fd);
+                r.session->fd = -1;
+            }
+        }
+        r.session.reset();
+        return respond(c, 200, "{\"covered\":" + std::to_string(covered) + '}');
+    }
+    if (method == "POST" && url == "/api/upload/session")
+    {
+        sessions.expire(std::time(nullptr), session_idle_seconds);
+        std::string destination;
+        char *end = nullptr;
+        const char *text = arg(c, "size");
+        errno = 0;
+        const uint64_t size = std::strtoull(text, &end, 10);
+        const bool size_ok = *text && !errno && !*end && size <= upload_limit;
+        const bool replace = std::strcmp(arg(c, "existing"), "replace") == 0;
+        if (!size_ok)
+            return error(c, 413, "Files must be 64 GiB or smaller.");
+        if (!content_parents(arg(c, "path"), destination))
+            return error(c, 400, "Choose a valid content folder and filename.");
+        if (!replace && exists(destination))
+            return error(c, 409, "A file with this name already exists. Rename your file first.");
+        struct statvfs storage{};
+        if (storage_space(storage) && size > uint64_t(storage.f_bavail) * storage.f_frsize)
+            return error(c, 507, "There is not enough free space on the console.");
+        const std::string id = nonce();
+        const char *why = "";
+        auto session = sessions.open(
+            id, destination.substr(0, destination.find_last_of('/') + 1) + ".upload-" + id,
+            destination, size, replace, why);
+        if (!session)
+            return error(c, 507, why);
+        return respond(c, 201,
+                       "{\"id\":" + quote(id) + ",\"size\":" + std::to_string(size) +
+                           ",\"partSize\":" + std::to_string(32u << 20) + '}');
+    }
+    if (method == "POST" && url == "/api/upload/commit")
+    {
+        auto session = sessions.find(arg(c, "id"));
+        if (!session)
+            return error(c, 404, "This upload is no longer open. Start it again.");
+        {
+            std::lock_guard<std::mutex> guard(session->lock);
+            if (session->writers || session->covered != session->size)
+                return respond(c, 409,
+                               "{\"error\":\"Parts are missing.\",\"covered\":" +
+                                   std::to_string(session->covered) + '}');
+        }
+        if (sessions.take(session->id) != session)
+            return error(c, 409, "This upload was already finished.");
+        const auto result = ps5_transfer::commit(session->fd, session->temporary,
+                                                 session->destination, session->replace, true);
+        close(session->fd);
+        session->fd = -1;
+        if (result != ps5_transfer::Commit::done)
+        {
+            unlink(session->temporary.c_str());
+            return result == ps5_transfer::Commit::exists
+                       ? error(c, 409,
+                               "A file with this name already exists. Rename your file first.")
+                       : error(c, 500, "Could not finish the upload.");
+        }
+        return respond(c, 201,
+                       "{\"uploaded\":true,\"bytes\":" + std::to_string(session->size) + '}');
+    }
+    if (method == "DELETE" && url == "/api/upload/session")
+    {
+        auto session = sessions.take(arg(c, "id"));
+        if (session)
+            ps5_transfer::discard(*session);
+        return respond(c, 200, "{\"cancelled\":" + std::string(session ? "true" : "false") + '}');
+    }
+    return error(c, 404, "This page was not found.");
+}
+bool is_transfer_route(const std::string &url)
+{
+    return url.rfind("/api/upload", 0) == 0;
 }
 std::string current_frontend()
 {
@@ -961,26 +1352,6 @@ MHD_Result route(MHD_Connection *c, const std::string &url, const std::string &m
                          "This folder already exists or could not be created.");
         return respond(c, 201, "{\"created\":true}");
     }
-    if (method == "PUT" && url == "/api/upload")
-    {
-        if (r.error)
-            return error(c, r.error, r.message);
-        if (r.received != r.expected)
-            return error(c, 400, "The upload was incomplete. Try again.");
-        if (fsync(r.file))
-            return error(c, 507, "Could not finish writing the file. Check console storage.");
-        close(r.file);
-        r.file = -1;
-        struct stat st{};
-        // All HTTP handlers run on one MHD thread; concurrent uploads cannot replace a completed
-        // file.
-        if (content_stat(r.destination.c_str(), &st) == 0 || errno != ENOENT)
-            return error(c, 409, "A file with this name already exists. Rename your file first.");
-        if (rename(r.temporary.c_str(), r.destination.c_str()))
-            return error(c, 500, "Could not finish the upload.");
-        r.temporary.clear();
-        return respond(c, 201, "{\"uploaded\":true,\"bytes\":" + std::to_string(r.received) + '}');
-    }
     if (method != "GET")
         return error(c, 405, "This action is not supported.");
     // Only shipped assets are reachable; no filesystem passthrough.
@@ -1019,12 +1390,14 @@ MHD_Result handle(void *, MHD_Connection *c, const char *url, const char *method
         if (write_request && (!provided || token != provided))
             return error(c, 403, "Your session expired. Reload the page and try again.");
         if (std::strcmp(method, "PUT") == 0 && std::strcmp(url, "/api/upload") == 0)
-        {
             prepare_upload(c, *r);
-            if (r->error)
-                return error(c, r->error, r->message);
-        }
-        else
+        else if (std::strcmp(method, "PUT") == 0 && std::strcmp(url, "/api/upload/batch") == 0)
+            prepare_batch(c, *r);
+        else if (std::strcmp(method, "PUT") == 0 && std::strcmp(url, "/api/upload/part") == 0)
+            prepare_part(c, *r);
+        if (r->error)
+            return error(c, r->error, r->message);
+        if (r->transfer == Transfer::none)
         {
             const char *length = MHD_lookup_connection_value(c, MHD_HEADER_KIND, "Content-Length");
             if (length && std::strtoull(length, nullptr, 10) > 16384)
@@ -1035,31 +1408,29 @@ MHD_Result handle(void *, MHD_Connection *c, const char *url, const char *method
     auto &r = *static_cast<Request *>(*context);
     if (*size)
     {
-        if (r.file >= 0 && !r.error)
+        if (r.transfer != Transfer::none && !r.error)
         {
             if (*size > r.expected - r.received)
             {
                 r.error = 413;
-                r.message = "Upload exceeded its declared file size.";
+                r.message = "Upload exceeded its declared size.";
             }
-            else
+            else if (r.transfer == Transfer::batch)
             {
-                size_t offset = 0;
-                while (offset < *size)
+                r.received += *size;
+                if (!r.batch->reader.feed(data, *size))
                 {
-                    ssize_t n = write(r.file, data + offset, *size - offset);
-                    if (n < 0 && errno == EINTR)
-                        continue;
-                    if (n <= 0)
-                    {
-                        r.error = 507;
-                        r.message = "The console could not write the upload. Check free space.";
-                        break;
-                    }
-                    offset += size_t(n);
-                    r.received += uint64_t(n);
+                    r.error = 400;
+                    r.message = r.batch->reader.problem();
                 }
             }
+            else if (!r.writer.write(data, *size))
+            {
+                r.error = 507;
+                r.message = "The console could not write the upload. Check free space.";
+            }
+            else
+                r.received += *size;
         }
         else if (!r.error)
         {
@@ -1076,9 +1447,25 @@ MHD_Result handle(void *, MHD_Connection *c, const char *url, const char *method
         // never during a body callback. Drain failed streams without buffering.
         return MHD_YES;
     }
-    if (r.error)
+    if (r.error && !(r.transfer == Transfer::batch && r.batch && r.error == 400))
         return error(c, r.error, r.message);
+    if (r.transfer != Transfer::none || is_transfer_route(url))
+        return transfer_route(c, url, method, r);
+    std::lock_guard<std::mutex> guard(state_lock);
     return route(c, url, method, r);
+}
+constexpr unsigned transfer_threads = 4;
+// Large socket buffers for each connection: a lane keeps the link full on its own.
+void tune_connection(void *, MHD_Connection *c, void **, MHD_ConnectionNotificationCode code)
+{
+    if (code != MHD_CONNECTION_NOTIFY_STARTED)
+        return;
+    const auto *info = MHD_get_connection_info(c, MHD_CONNECTION_INFO_CONNECTION_FD);
+    if (!info)
+        return;
+    int buffer = 4 << 20;
+    setsockopt(info->connect_fd, SOL_SOCKET, SO_RCVBUF, &buffer, sizeof buffer);
+    setsockopt(info->connect_fd, SOL_SOCKET, SO_SNDBUF, &buffer, sizeof buffer);
 }
 void completed(void *, MHD_Connection *, void **context, MHD_RequestTerminationCode)
 {
@@ -1233,12 +1620,16 @@ bool ps5_webui_start(const char *root, unsigned short port, bool apply_settings)
     listen_port = port;
     token = nonce();
     mkdir((root_path + "/content").c_str(), 0755);
+    // A pool of threads, so parallel connections progress side by side (one thread
+    // held a 4-connection upload to 15 MB/s, 2026-10-07); 512 KiB a connection, so a
+    // body arrives in large pieces; up to 32 connections for the page's lanes.
     web_daemon = MHD_start_daemon(
         MHD_USE_INTERNAL_POLLING_THREAD | MHD_USE_ITC | MHD_USE_ERROR_LOG, port, nullptr, nullptr,
-        handle, nullptr, MHD_OPTION_CONNECTION_LIMIT, unsigned(8), MHD_OPTION_CONNECTION_TIMEOUT,
-        unsigned(30), MHD_OPTION_CONNECTION_MEMORY_LIMIT, size_t(65536),
-        MHD_OPTION_THREAD_STACK_SIZE, size_t(256 * 1024), MHD_OPTION_NOTIFY_COMPLETED, completed,
-        nullptr, MHD_OPTION_END);
+        handle, nullptr, MHD_OPTION_THREAD_POOL_SIZE, unsigned(transfer_threads),
+        MHD_OPTION_CONNECTION_LIMIT, unsigned(32), MHD_OPTION_CONNECTION_TIMEOUT, unsigned(30),
+        MHD_OPTION_CONNECTION_MEMORY_LIMIT, size_t(512 * 1024), MHD_OPTION_THREAD_STACK_SIZE,
+        size_t(256 * 1024), MHD_OPTION_NOTIFY_COMPLETED, completed, nullptr,
+        MHD_OPTION_NOTIFY_CONNECTION, tune_connection, nullptr, MHD_OPTION_END);
     std::fprintf(stderr, "webui: %s port=%u\n", web_daemon ? "listening" : "unavailable", port);
     return web_daemon != nullptr;
 }
@@ -1250,5 +1641,6 @@ void ps5_webui_stop()
         web_daemon = nullptr;
         std::fprintf(stderr, "webui: stopped\n");
     }
+    sessions.clear();
     ps5_update::stop();
 }

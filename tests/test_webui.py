@@ -28,7 +28,7 @@ class WebUI(unittest.TestCase):
         subprocess.run(['c++', '-std=c++17', '-O1', '-g', '-pthread',
                         '-I'+str(ROOT / '.deps/webui/libmicrohttpd-1.0.10/src/include'),
                         '-I'+str(ROOT / '.deps/native/zlib/zlib-1.3.2/contrib/minizip'), '-I'+str(ROOT / 'vendor/retroarch/deps/mbedtls'),
-                        'tests/webui_server_main.cpp', 'src/webui_ps5.cpp', 'src/webui_update.cpp', archive, update, '-lz', '-o', str(cls.binary)], cwd=ROOT, check=True)
+                        'tests/webui_server_main.cpp', 'src/webui_ps5.cpp', 'src/webui_transfer.cpp', 'src/webui_update.cpp', archive, update, '-lz', '-o', str(cls.binary)], cwd=ROOT, check=True)
         with socket.socket() as s:
             s.bind(('127.0.0.1', 0)); cls.port = s.getsockname()[1]
         cls.process = subprocess.Popen([str(cls.binary), str(cls.root), str(cls.port)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -328,3 +328,117 @@ class WebUI(unittest.TestCase):
             time.sleep(.02)
         self.assertFalse(list((self.root / 'content').glob('.upload-*')))
         self.assertFalse((self.root / 'content/unfinished.iso').exists())
+
+    # The transfer engine (src/webui_transfer.h): batches, sessions, ranges, parallel.
+    @staticmethod
+    def batch(files, end=True):
+        out = b''
+        for name, data in files:
+            raw = name.encode()
+            out += len(raw).to_bytes(2, 'little') + raw + len(data).to_bytes(8, 'little') + data
+        return out + (b'\0\0' if end else b'')
+
+    def test_batch_upload_many_small_files(self):
+        files = [(f'media/{system}/{i:03}.png', bytes([i % 251]) * (i * 37 % 5000))
+                 for system in ('snes', 'nes') for i in range(150)]
+        status, _, body = self.request('PUT', '/api/upload/batch?folder=batch-a', self.batch(files))
+        result = json.loads(body)
+        self.assertEqual((status, result['written'], result['skipped'], result['failed']), (200, 300, 0, []))
+        for name, data in files:
+            self.assertEqual((self.root / 'content/batch-a' / name).read_bytes(), data)
+        # Existing files are skipped unless replace; a replace writes them again.
+        changed = [(files[0][0], b'new'), ('media/snes/extra.png', b'x')]
+        result = json.loads(self.request('PUT', '/api/upload/batch?folder=batch-a', self.batch(changed))[2])
+        self.assertEqual((result['written'], result['skipped']), (1, 1))
+        self.assertEqual((self.root / 'content/batch-a' / files[0][0]).read_bytes(), files[0][1])
+        result = json.loads(self.request('PUT', '/api/upload/batch?folder=batch-a&existing=replace&sync=0',
+                                         self.batch(changed))[2])
+        self.assertEqual((result['written'], result['skipped']), (2, 0))
+        self.assertEqual((self.root / 'content/batch-a' / files[0][0]).read_bytes(), b'new')
+        self.assertFalse(list((self.root / 'content/batch-a').rglob('.upload-*')))
+
+    def test_batch_refuses_bad_names_and_bad_streams(self):
+        bad = [('../escape.png', b'a'), ('.hidden', b'b'), ('a//b', b'c'), ('ok/fine.png', b'd'), ('/abs', b'e')]
+        status, _, body = self.request('PUT', '/api/upload/batch?folder=batch-b', self.batch(bad))
+        result = json.loads(body)
+        self.assertEqual((status, result['written'], len(result['failed'])), (200, 1, 4))
+        self.assertFalse((self.root / 'escape.png').exists())
+        self.assertEqual((self.root / 'content/batch-b/ok/fine.png').read_bytes(), b'd')
+        # Cut short: the files before the cut stand, the one cut is not left behind.
+        stream = self.batch([('whole.png', b'1' * 100)], end=False)
+        stream += (8).to_bytes(2, 'little') + b'half.png' + (1000).to_bytes(8, 'little') + b'2' * 10
+        status, _, body = self.request('PUT', '/api/upload/batch?folder=batch-c', stream)
+        result = json.loads(body)
+        self.assertEqual((status, result['complete'], result['written']), (400, False, 1))
+        self.assertFalse((self.root / 'content/batch-c/half.png').exists())
+        self.assertFalse(list((self.root / 'content/batch-c').glob('.upload-*')))
+        # Data past the end marker, and a folder outside content, are refused.
+        self.assertEqual(self.request('PUT', '/api/upload/batch?folder=batch-d', self.batch([]) + b'junk')[0], 400)
+        self.assertEqual(self.request('PUT', '/api/upload/batch?folder=../x', self.batch([]))[0], 400)
+        self.assertEqual(self.request('PUT', '/api/upload/batch?folder=x', self.batch([]),
+                                      headers={'X-RetroArch-Token': 'wrong'})[0], 403)
+
+    def test_session_parts_in_parallel_any_order(self):
+        import os, random, threading
+        data = os.urandom(5 * 1024 * 1024 + 123)
+        status, _, body = self.request('POST', '/api/upload/session?path=' + quote('big/game.iso') + f'&size={len(data)}')
+        self.assertEqual(status, 201)
+        sid = json.loads(body)['id']
+        # Missing parts: the commit says what is covered and leaves the session open.
+        status, _, body = self.request('POST', f'/api/upload/commit?id={sid}')
+        self.assertEqual((status, json.loads(body)['covered']), (409, 0))
+        part = 700 * 1024
+        ranges = [(o, min(o + part + 4096, len(data))) for o in range(0, len(data), part)]  # overlapping
+        random.Random(7).shuffle(ranges)
+        results = []
+        def send(chunk):
+            for start, end in chunk:
+                results.append(self.request('PUT', f'/api/upload/part?id={sid}&offset={start}', data[start:end])[0])
+        threads = [threading.Thread(target=send, args=(ranges[i::6],)) for i in range(6)]
+        [t.start() for t in threads]; [t.join() for t in threads]
+        self.assertEqual(set(results), {200})
+        self.assertFalse((self.root / 'content/big/game.iso').exists())
+        status, _, body = self.request('POST', f'/api/upload/commit?id={sid}')
+        self.assertEqual((status, json.loads(body)['bytes']), (201, len(data)))
+        self.assertEqual((self.root / 'content/big/game.iso').read_bytes(), data)
+        self.assertFalse(list((self.root / 'content/big').glob('.upload-*')))
+        # The session is gone; a second commit, or a part, finds nothing.
+        self.assertEqual(self.request('POST', f'/api/upload/commit?id={sid}')[0], 404)
+        self.assertEqual(self.request('PUT', f'/api/upload/part?id={sid}&offset=0', b'x')[0], 404)
+        # The name now exists: a new session for it is refused unless replace.
+        self.assertEqual(self.request('POST', '/api/upload/session?path=big/game.iso&size=5')[0], 409)
+
+    def test_session_bounds_abort_and_range_download(self):
+        status, _, body = self.request('POST', '/api/upload/session?path=abort.bin&size=10')
+        sid = json.loads(body)['id']
+        self.assertEqual(self.request('PUT', f'/api/upload/part?id={sid}&offset=8', b'abc')[0], 416)
+        self.assertEqual(self.request('PUT', f'/api/upload/part?id={sid}&offset=x', b'a')[0], 416)
+        self.assertEqual(self.request('PUT', f'/api/upload/part?id={sid}&offset=0', b'0123456789')[0], 200)
+        self.assertEqual(json.loads(self.request('DELETE', f'/api/upload/session?id={sid}')[2])['cancelled'], True)
+        self.assertFalse((self.root / 'content/abort.bin').exists())
+        self.assertFalse(list((self.root / 'content').glob('.upload-*')))
+        self.assertEqual(self.request('POST', '/api/upload/session?path=../x&size=1')[0], 400)
+        # Ranges of a download: a slice, an open end, the last bytes, and one past the end.
+        (self.root / 'content/range.bin').write_bytes(bytes(range(256)) * 4)
+        status, headers, body = self.request('GET', '/api/download?path=range.bin', headers={'Range': 'bytes=10-19'})
+        self.assertEqual((status, body, headers['Content-Range']), (206, bytes(range(10, 20)), 'bytes 10-19/1024'))
+        self.assertEqual(self.request('GET', '/api/download?path=range.bin', headers={'Range': 'bytes=1000-'})[2],
+                         (bytes(range(256)) * 4)[1000:])
+        self.assertEqual(self.request('GET', '/api/download?path=range.bin', headers={'Range': 'bytes=-4'})[2],
+                         bytes(range(252, 256)))
+        self.assertEqual(self.request('GET', '/api/download?path=range.bin', headers={'Range': 'bytes=2000-'})[0], 416)
+        status, headers, body = self.request('GET', '/api/download?path=range.bin')
+        self.assertEqual((status, len(body), headers['Accept-Ranges']), (200, 1024, 'bytes'))
+
+    def test_parallel_uploads_of_one_name_keep_one(self):
+        import threading
+        results = []
+        def send(i):
+            results.append(self.request('PUT', '/api/upload?path=race.bin', str(i).encode() * 100000)[0])
+        threads = [threading.Thread(target=send, args=(i,)) for i in range(8)]
+        [t.start() for t in threads]; [t.join() for t in threads]
+        self.assertEqual(results.count(201), 1)
+        self.assertEqual(results.count(409), 7)
+        content = (self.root / 'content/race.bin').read_bytes()
+        self.assertEqual(len(set(content)), 1)
+        self.assertFalse(list((self.root / 'content').glob('.upload-*')))

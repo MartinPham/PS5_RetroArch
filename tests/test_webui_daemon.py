@@ -47,7 +47,7 @@ class WebuiDaemon(unittest.TestCase):
                         '-I' + str(ROOT / 'vendor/retroarch/deps/mbedtls'),
                         f'-DPS5_WEBUI_HOMEBREW="{cls.homebrew}"', f'-DPS5_WEBUI_LINK_PORT={cls.link_port}',
                         f'-DPS5_WEBUI_HTTP_PORT={cls.http_port}', f'-DPS5_WEBUI_IDLE_SECONDS={IDLE}',
-                        'daemon/webui_daemon.cpp', 'src/webui_ps5.cpp', 'src/webui_update.cpp', http, update,
+                        'daemon/webui_daemon.cpp', 'src/webui_ps5.cpp', 'src/webui_transfer.cpp', 'src/webui_update.cpp', http, update,
                         '-lz', '-o', str(cls.binary)], cwd=ROOT, check=True)
 
     @classmethod
