@@ -222,6 +222,7 @@ usually `/data/homebrew/PPSA99169/`.
 | `config/webui.cfg` | Saved global WebUI preferences |
 | `config/<core>/` | Core options and RetroArch overrides, per core and per game |
 | `config/remaps/<core>/` | Controller remaps, per core and per game |
+| `library/<system>/` | Scraped box art, screenshots and details, shared by every frontend |
 | `savefiles/` and `savestates/` | Save RAM and save states |
 | `shaders/shaders_slang/` | GPU presets, including Mega Bezel and koko-aio |
 | `filters/` | Built-in CPU filter configurations |

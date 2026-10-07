@@ -71,7 +71,7 @@ async function reconnect() {
 }
 function pageFromHash() {
   const name = location.hash.slice(1).split('?')[0];
-  return ['content', 'transfers', 'settings'].includes(name) ? name : 'overview';
+  return ['content', 'games', 'transfers', 'settings'].includes(name) ? name : 'overview';
 }
 function navigate() {
   const page = pageFromHash();
@@ -79,6 +79,7 @@ function navigate() {
   $$('[data-page]').forEach(node => { if (node.dataset.page === page) node.setAttribute('aria-current', 'page'); else node.removeAttribute('aria-current'); });
   $('#page-title').textContent = page[0].toUpperCase() + page.slice(1);
   if (page === 'content') loadContent(currentPath);
+  if (page === 'games') { loadGames(); loadJob(); }
   $('#main').focus({ preventScroll: true });
 }
 function openFolder(path) {
@@ -711,3 +712,226 @@ $('#file-search').addEventListener('input', renderContent);
 window.addEventListener('hashchange', navigate);
 setInterval(() => { if (!document.hidden) reconnect(); }, 10000);
 navigate(); drawTransfers(); reconnect(); checkRelease();
+
+// The games and their media (src/scraper.h): the shared library every frontend reads.
+const KIND_NAMES = { cover: 'Cover', screenshot: 'Screenshot', title: 'Title', logo: 'Logo', video: 'Video' };
+let library = { systems: [] }, selectedGames = new Map(), shownGames = 300, scraperSettings = null, jobTimer = null, jobShown = null;
+function gameName(game) { return game.name || game.label; }
+// What tells versions of one game apart: the (region), (Rev 1), (Proto), [a1], (1992)
+// tags of its label or, failing that, of its file name. Two cards with one title are
+// two versions, and their tags say which.
+function gameTags(game) {
+  const tags = [], text = /[(\[]/.test(game.label) ? game.label : game.key;
+  for (const match of text.matchAll(/\(([^)]*)\)|\[([^\]]*)\]/g)) tags.push((match[1] ?? match[2]).trim());
+  return tags.filter(Boolean);
+}
+function visibleGames() {
+  const system = $('#games-system').value, words = $('#games-search').value.trim().toLowerCase(), missing = $('#games-missing').checked;
+  const out = [];
+  for (const s of library.systems) {
+    if (system && s.id !== system) continue;
+    for (const game of s.games) {
+      if (words && !gameName(game).toLowerCase().includes(words) && !game.label.toLowerCase().includes(words)) continue;
+      if (missing && game.media.includes('cover') && game.media.includes('screenshot')) continue;
+      out.push({ system: s, game });
+    }
+  }
+  return out;
+}
+function mediaUrl(system, game, kind) {
+  return `/api/library/media?system=${encodeURIComponent(system)}&game=${encodeURIComponent(game.key)}&kind=${kind}&v=${encodeURIComponent(game.scraped || '')}`;
+}
+function drawGames() {
+  const grid = $('#games-grid'), list = visibleGames();
+  grid.replaceChildren();
+  const total = library.systems.reduce((n, s) => n + s.games.length, 0);
+  const withCovers = library.systems.reduce((n, s) => n + s.games.filter(g => g.media.includes('cover')).length, 0);
+  $('#games-summary').textContent = `${total} games in ${library.systems.length} systems · ${withCovers} with covers · shared by RetroArch, EmulationStation and every frontend`;
+  if (!list.length) { grid.append(element('p', total ? 'No game matches.' : 'No games yet. Add content or scan it in RetroArch, then refresh.', 'list-message')); }
+  for (const { system, game } of list.slice(0, shownGames)) {
+    const card = element('article', undefined, 'game-card'), cover = element('div', undefined, 'game-cover'), info = element('div', undefined, 'game-info');
+    const pick = document.createElement('input'); pick.type = 'checkbox'; pick.className = 'game-select';
+    pick.setAttribute('aria-label', `Select ${gameName(game)}`); pick.checked = selectedGames.has(game.path);
+    card.setAttribute('aria-selected', pick.checked);
+    pick.addEventListener('change', () => { if (pick.checked) selectedGames.set(game.path, system.id); else selectedGames.delete(game.path); card.setAttribute('aria-selected', pick.checked); drawSelection(); });
+    if (game.media.includes('cover')) {
+      const img = document.createElement('img'); img.loading = 'lazy'; img.alt = `${gameName(game)} cover`; img.src = mediaUrl(system.id, game, 'cover');
+      img.addEventListener('error', () => img.replaceWith(icon('file'))); cover.append(img);
+    } else cover.append(icon('file'));
+    const badges = element('div', undefined, 'media-badges');
+    for (const kind of game.media) badges.append(element('span', KIND_NAMES[kind] || kind));
+    const tags = element('div', undefined, 'version-tags');
+    for (const tag of gameTags(game)) tags.append(element('span', tag));
+    card.title = game.path.split('/').pop();
+    info.append(element('strong', gameName(game)), tags, element('small', system.name), badges);
+    card.append(pick, cover, info); grid.append(card);
+  }
+  if (list.length > shownGames) {
+    const more = element('button', `Show ${Math.min(300, list.length - shownGames)} more of ${list.length - shownGames}`, 'secondary games-more');
+    more.addEventListener('click', () => { shownGames += 300; drawGames(); }); grid.append(more);
+  }
+  drawSelection();
+}
+function drawSelection() {
+  $('#games-selection').textContent = selectedGames.size ? `${selectedGames.size} game${selectedGames.size === 1 ? '' : 's'} selected` : 'Select games to scrape them, or scrape whole systems.';
+  $('#scrape-scope-selected').textContent = `Selected games (${selectedGames.size})`;
+}
+async function loadGames() {
+  try {
+    library = await api('/api/library', { signal: AbortSignal.timeout(60000) });
+    const select = $('#games-system'), chosen = select.value;
+    select.replaceChildren(new Option('All systems', ''));
+    for (const s of library.systems) select.add(new Option(`${s.name} (${s.games.length})`, s.id));
+    if ([...select.options].some(o => o.value === chosen)) select.value = chosen;
+    drawGames();
+  } catch (error) { $('#games-grid').replaceChildren(element('p', error.message, 'list-message inline-error')); }
+}
+for (const id of ['#games-system', '#games-missing']) $(id).addEventListener('change', () => { shownGames = 300; drawGames(); });
+$('#games-search').addEventListener('input', () => { shownGames = 300; drawGames(); });
+$('#refresh-games').addEventListener('click', loadGames);
+
+// The scrape panel: the download method first, remembered on the console.
+const METHOD_NAMES = { pc: 'Download through this PC and transfer to PS5', ps5: 'Download directly on PS5' };
+let scrapeSource = 'libretro', scrapeKinds = new Set();
+const RECOMMENDED = ['cover', 'screenshot', 'title'];
+function chosenSource() { return scraperSettings.sources.find(s => s.id === scrapeSource) || scraperSettings.sources[0]; }
+function drawSources() {
+  const box = $('#scrape-sources'); box.replaceChildren();
+  for (const source of scraperSettings.sources) {
+    const card = element('label', undefined, 'source-card'), radio = document.createElement('input');
+    radio.type = 'radio'; radio.name = 'scrape-source'; radio.value = source.id; radio.checked = source.id === scrapeSource; radio.disabled = !source.available;
+    radio.addEventListener('change', () => { scrapeSource = source.id; drawKinds(); });
+    const text = element('span'), title = element('strong', source.name);
+    if (!source.available) title.append(element('em', 'Coming', 'soon-tag'));
+    if (source.account) title.append(element('em', 'Account needed', 'account-tag'));
+    text.append(title, element('small', source.description)); card.append(radio, text);
+    if (!source.available) card.classList.add('unavailable');
+    box.append(card);
+  }
+}
+function drawKinds() {
+  const source = chosenSource(), box = $('#scrape-kinds'); box.replaceChildren();
+  for (const kind of scraperSettings.catalog) {
+    const has = source.kinds.includes(kind.id), card = element('label', undefined, 'kind-card'), box2 = document.createElement('input');
+    box2.type = 'checkbox'; box2.value = kind.id; box2.checked = has && scrapeKinds.has(kind.id); box2.disabled = !has;
+    box2.addEventListener('change', () => { if (box2.checked) scrapeKinds.add(kind.id); else scrapeKinds.delete(kind.id); drawSummary(); });
+    const others = scraperSettings.sources.filter(s => s.id !== source.id && s.kinds.includes(kind.id)).map(s => s.name + (s.available ? '' : ' (coming)'));
+    const text = element('span');
+    text.append(element('strong', kind.name), element('small', kind.description),
+      element('small', has ? `From ${source.name}` : `Not from ${source.name}` + (others.length ? ` · from ${others.join(', ')}` : ''), has ? 'kind-source' : 'kind-source missing'));
+    if (!has) card.classList.add('unavailable');
+    card.append(box2, text); box.append(card);
+  }
+  drawSummary();
+}
+function setKinds(ids) { scrapeKinds = new Set(ids.filter(id => chosenSource().kinds.includes(id))); drawKinds(); }
+function scopeGames() {
+  if ($('input[name="scrape-scope"]:checked').value === 'selected') return selectedGames.size;
+  const system = $('#games-system').value;
+  return library.systems.filter(s => !system || s.id === system).reduce((n, s) => n + s.games.length, 0);
+}
+function drawSummary() {
+  const kinds = [...scrapeKinds].filter(id => chosenSource().kinds.includes(id)), games = scopeGames();
+  const names = scraperSettings.catalog.filter(k => kinds.includes(k.id)).map(k => k.name.toLowerCase());
+  const system = $('#games-system').value, systemName = library.systems.find(s => s.id === system)?.name;
+  $('#scrape-scope-selected').textContent = `Selected games (${selectedGames.size})`;
+  $('#scrape-scope-systems').textContent = systemName ? `Every game of ${systemName}` : `Every game of all ${library.systems.length} systems`;
+  $('#scrape-summary').textContent = !kinds.length ? 'Choose at least one media type in step 3.' : !games ? 'Choose games in step 4: select some on the page, or scrape whole systems.'
+    : `Ready: ${names.join(', ')} for ${games} game${games === 1 ? '' : 's'} from ${chosenSource().name}${$('#scrape-overwrite').checked ? ', replacing what is there' : ', keeping what is already on the PS5'}.`;
+}
+async function openScrape() {
+  $('#scrape-panel').hidden = false;
+  try { scraperSettings = await api('/api/scraper/settings'); } catch (error) { announce(error.message, true); return; }
+  for (const radio of $$('input[name="scrape-method"]')) radio.checked = radio.value === scraperSettings.mode;
+  $('#scrape-method-saved').textContent = scraperSettings.mode ? `Last used on this console: ${METHOD_NAMES[scraperSettings.mode]}. You can change it.` : 'Choose one to continue. Your choice is remembered on this console.';
+  scrapeSource = scraperSettings.sources.some(s => s.id === scraperSettings.source && s.available) ? scraperSettings.source : 'libretro';
+  scrapeKinds = new Set(scraperSettings.kinds);
+  $('#scrape-region').value = scraperSettings.region;
+  $('#scrape-language').value = scraperSettings.language;
+  if (!selectedGames.size) $('input[name="scrape-scope"][value="systems"]').checked = true;
+  drawSources(); drawKinds();
+  $('#scrape-panel').scrollIntoView({ block: 'start' });
+}
+$('#kinds-recommended').addEventListener('click', () => setKinds(RECOMMENDED));
+$('#kinds-all').addEventListener('click', () => setKinds(chosenSource().kinds));
+$('#kinds-none').addEventListener('click', () => setKinds([]));
+for (const node of $$('input[name="scrape-scope"]')) node.addEventListener('change', drawSummary);
+$('#scrape-overwrite').addEventListener('change', drawSummary);
+$('#scrape-open').addEventListener('click', openScrape);
+$('#scrape-close').addEventListener('click', () => { $('#scrape-panel').hidden = true; });
+$('#scrape-start').addEventListener('click', async () => {
+  const method = $('input[name="scrape-method"]:checked')?.value;
+  if (!method) { $('#scrape-result').textContent = 'Choose where the media should be downloaded first.'; $('.scrape-method').scrollIntoView({ block: 'center' }); return; }
+  const kinds = [...scrapeKinds].filter(id => chosenSource().kinds.includes(id));
+  if (!kinds.length) { $('#scrape-result').textContent = 'Choose at least one media type in step 3.'; return; }
+  const scope = $('input[name="scrape-scope"]:checked').value;
+  let lines = [];
+  if (scope === 'selected') lines = [...selectedGames].map(([path, system]) => `${system}\t${path}`);
+  else { const system = $('#games-system').value; lines = library.systems.filter(s => !system || s.id === system).map(s => `${s.id}\t`); }
+  if (!lines.length) { $('#scrape-result').textContent = 'Select games first, or choose every game of the systems shown.'; return; }
+  const query = new URLSearchParams({ mode: method, source: scrapeSource, kinds: kinds.join(','), region: $('#scrape-region').value, language: $('#scrape-language').value, overwrite: $('#scrape-overwrite').checked ? '1' : '0' });
+  $('#scrape-start').disabled = true; $('#scrape-result').textContent = 'Starting…';
+  try {
+    await api('/api/scraper/settings?' + query, { method: 'POST' });
+    const started = await api('/api/scraper/start?' + query, { method: 'POST', body: lines.join('\n'), headers: { 'Content-Type': 'text/plain' }, signal: AbortSignal.timeout(60000) });
+    $('#scrape-result').textContent = ''; $('#scrape-panel').hidden = true; drawJob(started.job); pollJob();
+  } catch (error) { $('#scrape-result').textContent = error.message; }
+  finally { $('#scrape-start').disabled = false; }
+});
+
+// The job: polled while this page is open; the console keeps it whether or not it is.
+function count(job, ...states) { return states.reduce((n, s) => n + (job.counts[s] || 0), 0); }
+function drawJob(job) {
+  const panel = $('#scrape-job');
+  if (!job) { panel.hidden = true; return; }
+  panel.hidden = false; jobShown = job.id;
+  const total = job.total, settled = count(job, 'done', 'partial', 'skipped', 'unmatched', 'ambiguous', 'failed');
+  const identified = total - count(job, 'pending', 'working');
+  const running = job.state === 'running';
+  const stateText = { running: 'Running', cancelled: 'Cancelled', done: 'Finished', interrupted: 'Interrupted' }[job.state] || job.state;
+  $('#job-summary').textContent = `${stateText} · ${METHOD_NAMES[job.mode]} · ${settled} of ${total} games settled · ${count(job, 'done')} complete, ${count(job, 'partial')} partly, ${count(job, 'skipped')} already had media, ${count(job, 'unmatched', 'ambiguous')} need you, ${count(job, 'failed')} failed`;
+  $('#job-identified').value = total ? identified / total * 100 : 0; $('#job-identified-text').textContent = `${identified} of ${total} games`;
+  const wanted = job.downloaded.files + job.tasks.queued + job.tasks.leased;
+  $('#job-downloaded').value = job.mode === 'pc' ? (wanted ? job.downloaded.files / wanted * 100 : 0) : (total ? settled / total * 100 : 0);
+  $('#job-downloaded-text').textContent = `${job.downloaded.files} files · ${bytes(job.downloaded.bytes)}`;
+  $('#job-transferred-row').hidden = job.mode !== 'pc';
+  if (job.mode === 'pc') {
+    $('#job-transferred').value = job.downloaded.files ? job.transferred.files / Math.max(job.downloaded.files, 1) * 100 : 0;
+    $('#job-transferred-text').textContent = `${job.transferred.files} files · ${bytes(job.transferred.bytes)}`;
+  }
+  $('#job-helper').hidden = job.mode !== 'pc' || !running;
+  $('#job-helper-command').textContent = `python3 ps5-media-helper.py http://${location.host} ${job.id}`;
+  $('#job-cancel').hidden = !running;
+  $('#job-resume').hidden = running || job.state === 'done' && !count(job, 'pending', 'failed');
+  const problems = $('#job-problems'); problems.replaceChildren();
+  for (const p of job.problems) {
+    const row = element('div', undefined, 'problem-row'), text = element('div');
+    text.append(element('strong', p.label), element('p', p.message, p.state === 'failed' ? 'inline-error' : 'muted'));
+    const actions = element('div', undefined, 'problem-actions');
+    const resolve = async (action, value) => { try { drawJob((await api(`/api/scraper/resolve?id=${job.id}&item=${p.item}&action=${action}&value=${encodeURIComponent(value || '')}`, { method: 'POST', signal: AbortSignal.timeout(60000) })).job); pollJob(); } catch (error) { announce(error.message, true); } };
+    if (p.candidates.length) {
+      const pick = document.createElement('select'); pick.setAttribute('aria-label', `Match for ${p.label}`);
+      for (const c of p.candidates) pick.add(new Option(c, c));
+      const use = element('button', 'Use this match', 'primary compact'); use.addEventListener('click', () => resolve('choose', pick.value));
+      actions.append(pick, use);
+    }
+    const search = document.createElement('input'); search.type = 'search'; search.placeholder = 'Search by name'; search.value = p.label; search.setAttribute('aria-label', `Search for ${p.label}`);
+    const find = element('button', 'Search', 'secondary'); find.addEventListener('click', () => resolve('search', search.value));
+    const skip = element('button', 'Skip', 'secondary'); skip.addEventListener('click', () => resolve('skip'));
+    actions.append(search, find, skip); row.append(text, actions); problems.append(row);
+  }
+  if (!running && jobTimer) { clearInterval(jobTimer); jobTimer = null; loadGames(); }
+}
+async function loadJob() {
+  try { const { job } = await api('/api/scraper/job'); drawJob(job); if (job && job.state === 'running') pollJob(); } catch {}
+}
+function pollJob() {
+  if (jobTimer) return;
+  jobTimer = setInterval(async () => {
+    if (document.hidden) return;
+    try { const { job } = await api('/api/scraper/job' + (jobShown ? '?id=' + jobShown : '')); drawJob(job); } catch {}
+  }, 1500);
+}
+$('#job-cancel').addEventListener('click', async () => { try { await api('/api/scraper/cancel?id=' + jobShown, { method: 'POST' }); loadJob(); } catch (error) { announce(error.message, true); } });
+$('#job-resume').addEventListener('click', async () => { try { drawJob((await api('/api/scraper/resume?id=' + jobShown, { method: 'POST' })).job); pollJob(); } catch (error) { announce(error.message, true); } });
+$('#job-helper-copy').addEventListener('click', async () => { try { await navigator.clipboard.writeText($('#job-helper-command').textContent); announce('Command copied.'); } catch { announce('Select the command and copy it.'); } });

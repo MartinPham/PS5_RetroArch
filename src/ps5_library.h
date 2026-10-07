@@ -111,6 +111,12 @@ extern "C"
      * data file in it. content ends with NULL; NULL or empty scans nothing. */
     int ps5_library_load_content(struct ps5_library *library, const char *playlists,
                                  const char *info, const char *cores, const char *const *content);
+    /* The same, read from outside the title (the WebUI's daemon): title_root is the
+     * title's real folder (/data/homebrew/PPSA99169), and every game under it is
+     * recorded by its /app0 path, as the title and its frontends see it. */
+    int ps5_library_load_content_at(struct ps5_library *library, const char *playlists,
+                                    const char *info, const char *cores, const char *const *content,
+                                    const char *title_root);
     void ps5_library_free(struct ps5_library *library);
 
     /* The platform a name stands for (a RetroArch database, a playlist's or a folder's
@@ -135,6 +141,23 @@ extern "C"
                           void (*each)(void *context, const struct ps5_playlist_entry *entry),
                           void *context);
 
+    /* The shared media library (src/scraper.h): every frontend reads a game's media from
+     * the same files, PS5_LIBRARY_MEDIA/<system id>/<folder>/<key>.<ext>, folders named
+     * as EmulationStation names them (covers, screenshots, titlescreens, marquees,
+     * videos). A game's key is its content's file name without the extension (an
+     * archive member's "#inner" part dropped). */
+#define PS5_LIBRARY_MEDIA "/app0/library"
+    /* Writes the key of a content path; 0, or -1 when it does not fit. */
+    int ps5_library_media_key(const char *path, char *out, size_t size);
+    /* The stored file of a game's media: 1 with its path, 0 when there is none. system
+     * is anything ps5_library_platform reads (a database, playlist or folder name);
+     * folder is the store's ("covers"...) or RetroArch's thumbnail type ("Named_Boxarts",
+     * "Named_Snaps", "Named_Titles", "Named_Logos"). */
+    int ps5_library_media(const char *root, const char *system, const char *content_path,
+                          const char *folder, char *out, size_t size);
+    /* RetroArch's thumbnail lookup (patch 0114) asks this first: the store under /app0. */
+    int ps5_library_thumbnail(const char *system, const char *content_path, const char *type,
+                              char *out, size_t size);
 #ifdef __cplusplus
 }
 #endif

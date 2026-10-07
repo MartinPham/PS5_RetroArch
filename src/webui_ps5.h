@@ -12,6 +12,11 @@ void ps5_webui_prepare(const char *root);
 void ps5_webui_set_frontend(const char *frontend);
 // Requests being answered now (an upload or a download among them).
 unsigned ps5_webui_connections();
+// A scraping job the console drives is running (the daemon stays up for it).
+bool ps5_webui_scraping();
+// Transfers in flight (uploads, upload sessions' parts, helper deliveries): what must
+// not be cut. Idle keep-alive connections of an open page are not counted.
+unsigned ps5_webui_transfers();
 
 struct retro_core_options_v2;
 struct retro_variable;

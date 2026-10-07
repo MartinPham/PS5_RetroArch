@@ -12,6 +12,10 @@ import tempfile
 import time
 import unittest
 
+import sys
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent))
+import webui_build  # noqa: E402
+
 ROOT = Path(__file__).resolve().parent.parent
 TITLE = 'PPSA99169'
 IDLE = 2
@@ -41,14 +45,10 @@ class WebuiDaemon(unittest.TestCase):
         cls.homebrew = Path(cls.temp.name)
         cls.link_port, cls.http_port = free_port(), free_port()
         cls.binary = cls.homebrew / 'daemon'
-        subprocess.run(['c++', '-std=c++17', '-O1', '-g', '-pthread', '-Wall', '-Wextra', '-Werror',
-                        '-I' + str(ROOT / '.deps/webui/libmicrohttpd-1.0.10/src/include'),
-                        '-I' + str(ROOT / '.deps/native/zlib/zlib-1.3.2/contrib/minizip'),
-                        '-I' + str(ROOT / 'vendor/retroarch/deps/mbedtls'),
-                        f'-DPS5_WEBUI_HOMEBREW="{cls.homebrew}"', f'-DPS5_WEBUI_LINK_PORT={cls.link_port}',
-                        f'-DPS5_WEBUI_HTTP_PORT={cls.http_port}', f'-DPS5_WEBUI_IDLE_SECONDS={IDLE}',
-                        'daemon/webui_daemon.cpp', 'src/webui_ps5.cpp', 'src/webui_transfer.cpp', 'src/webui_update.cpp', http, update,
-                        '-lz', '-o', str(cls.binary)], cwd=ROOT, check=True)
+        webui_build.build(cls.binary, 'daemon/webui_daemon.cpp',
+                          (f'PS5_WEBUI_HOMEBREW="{cls.homebrew}"', f'PS5_WEBUI_LINK_PORT={cls.link_port}',
+                           f'PS5_WEBUI_HTTP_PORT={cls.http_port}', f'PS5_WEBUI_IDLE_SECONDS={IDLE}'),
+                          ('-O1', '-g', '-Wall', '-Wextra', '-Werror'))
 
     @classmethod
     def tearDownClass(cls):

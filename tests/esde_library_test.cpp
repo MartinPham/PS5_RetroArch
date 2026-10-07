@@ -93,9 +93,20 @@ int main(int argc, char **argv)
                "<string name=\"CollectionSystemsAuto\" value=\"\" />\n");
 
     const std::string playlists = dir + "/playlists", info = dir + "/info", cores = dir + "/cores",
-                      reference = dir + "/reference.xml", data = dir + "/data";
+                      reference = dir + "/reference.xml", data = dir + "/data",
+                      media = dir + "/media";
+    /* The shared media library's metadata (src/scraper.h): a name ES-DE renamed is kept and
+     * its missing description filled; a name still the label is the scraped one. */
+    for (const char *folder : {"/media", "/media/snes", "/media/snes/metadata"})
+        mkdir((dir + folder).c_str(), 0755);
+    write_text(
+        media + "/snes/metadata/Donkey Kong 2 (USA).meta",
+        "description = \"Scraped \\\"text\\\"\\nline two\"\nname = \"Donkey Kong Country 2\"\n");
+    write_text(media + "/snes/metadata/Mario & Luigi.meta",
+               "developer = \"AlphaDream\"\nname = \"Mario & Luigi RPG\"\n");
     const struct ps5_esde_library_paths paths = {playlists.c_str(), info.c_str(), cores.c_str(),
-                                                 reference.c_str(), data.c_str(), nullptr};
+                                                 reference.c_str(), data.c_str(), nullptr,
+                                                 media.c_str()};
     char summary[256];
     assert(ps5_esde_write_library_to(&paths, summary, sizeof(summary)) == 2);
     assert(std::string(summary).find("2 systems, 3 games (1 with ES-DE's details kept)") == 0);
@@ -131,9 +142,11 @@ int main(int argc, char **argv)
                    std::string(game.child_value("playcount")) == "5" &&
                    std::string(game.child_value("playtime")) == "125" &&
                    std::string(game.child_value("lastplayed")) == "20261002T083000" &&
-                   std::string(game.child_value("favorite")) == "true";
+                   std::string(game.child_value("favorite")) == "true" &&
+                   std::string(game.child_value("desc")) == "Scraped \"text\"\nline two";
         if (path == "./Hacks/Mario & Luigi.sfc") /* RetroArch's favourite */
-            added = std::string(game.child_value("name")) == "Mario & Luigi" &&
+            added = std::string(game.child_value("name")) == "Mario & Luigi RPG" &&
+                    std::string(game.child_value("developer")) == "AlphaDream" &&
                     std::string(game.child_value("favorite")) == "true" &&
                     !game.child("lastplayed");
         assert(path != "./Gone (USA).zip");
@@ -153,6 +166,10 @@ int main(int argc, char **argv)
                            .attribute("value")
                            .value()) == "favorites,recent");
     assert(settings.find_child_by_attribute("bool", "name", "Other"));
+    /* ES-DE's media folder is the shared library. */
+    assert(std::string(settings.find_child_by_attribute("string", "name", "MediaDirectory")
+                           .attribute("value")
+                           .value()) == media);
 
     /* Again: the same files. */
     assert(ps5_esde_write_library_to(&paths, summary, sizeof(summary)) == 2);

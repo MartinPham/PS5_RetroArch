@@ -146,6 +146,9 @@ void initialize(void *)
     /* input_remapping_directory "default" means this: with it unset, RetroArch loads no
      * remap at all (config_load_remap) and saves one to a path with no folder. */
     set_directory(DEFAULT_DIR_REMAP, "/app0/config/remaps");
+    /* RetroArch's own thumbnails; the scraper's media, shared by every frontend, is
+     * /app0/library, which the lookup asks first (patch 0114). */
+    set_directory(DEFAULT_DIR_THUMBNAILS, "/app0/thumbnails");
     set_directory(DEFAULT_DIR_LOGS, "/app0");
     std::fprintf(stderr, "frontend ps5: config=%s browser=/app0 cores=/app0/cores\n", saved_config);
     // Startup summary: what this sandbox exposes, roots and mount names only;

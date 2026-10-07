@@ -102,7 +102,9 @@ int main(int argc, char **argv)
                "\"content.lpl\"},\n"
                "{\"path\": \"/app0/content/PS1/Crash (USA).cue\", \"label\": \"Crash (USA)\","
                " \"core_path\": \"DETECT\", \"db_name\": \"content.lpl\"},\n"
-               "{\"path\": \"/app0/content/PS1/Crash (USA).bin\", \"label\": \"\","
+               "{\"path\": \"/app0/content/PS1/Crash (USA).bin\", \"label\": \"Crash track\","
+               " \"core_path\": \"DETECT\", \"db_name\": \"content.lpl\"},\n"
+               "{\"path\": \"/app0/content/PS1/Spyro (USA).bin\", \"label\": \"\","
                " \"core_path\": \"DETECT\", \"db_name\": \"content.lpl\"},\n"
                "{\"path\": \"/app0/content/Nintendo - Game Boy/Tetris (World).zip\", \"label\": "
                "\"Tetris\","
@@ -190,9 +192,13 @@ int main(int argc, char **argv)
     assert(strcmp(library.games[snes->first_game + 1].label, "It's Mario") == 0);
 
     const struct ps5_library_system *psx = system_of(&library, "psx");
+    /* Crash's track, listed beside its .cue, is part of it; Spyro's lone .bin is a game. */
     assert(psx && psx->game_count == 2 && strcmp(psx->folder, "/app0/content/PS1") == 0);
-    assert(strcmp(library.games[psx->first_game].label, "Crash (USA)") ==
-           0); /* an empty label: the file's */
+    assert(strcmp(library.games[psx->first_game].label, "Crash (USA)") == 0);
+    assert(strcmp(library.games[psx->first_game + 1].path, "/app0/content/PS1/Spyro (USA).bin") ==
+               0 &&
+           strcmp(library.games[psx->first_game + 1].label, "Spyro (USA)") ==
+               0); /* an empty label: the file's */
 
     const struct ps5_library_system *ps2 = system_of(&library, "ps2");
     assert(ps2 && ps2->game_count == 2 && strcmp(ps2->core, path + 1024) == 0);

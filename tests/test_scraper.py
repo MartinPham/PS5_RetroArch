@@ -1,0 +1,366 @@
+"""The scraper (src/scraper.h) end to end on the host: the WebUI's server against a fake
+libretro thumbnail server, in both download modes. A match, an ambiguous game resolved
+by the user, an unmatched one, cached browsing that fetches nothing again, overwrite,
+cancel and resume without repeating work, a server restart mid-job, and PC mode
+through the real helper (webui/ps5-media-helper.py), including a helper killed mid-job.
+The shared store's layout is checked as RetroArch's lookup (src/ps5_library.c) and
+EmulationStation read it."""
+from pathlib import Path
+import http.client
+import http.server
+import json
+import os
+import socket
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import unittest
+import urllib.parse
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import webui_build  # noqa: E402
+
+ROOT = Path(__file__).resolve().parent.parent
+DB = 'Nintendo - Super Nintendo Entertainment System'
+FOLDERS = {'Named_Boxarts': 'cover', 'Named_Snaps': 'screenshot', 'Named_Titles': 'title'}
+STORE = {'cover': 'covers', 'screenshot': 'screenshots', 'title': 'titlescreens'}
+# The fake source: names it has, and which of the three images each has.
+SOURCE = {
+    'Donkey Kong Country 2 - Diddy\'s Kong Quest (USA)': ('Named_Boxarts', 'Named_Snaps', 'Named_Titles'),
+    'Super Metroid (Japan, USA) (En,Ja)': ('Named_Boxarts', 'Named_Snaps'),
+    'Chrono Trigger (USA)': ('Named_Boxarts', 'Named_Snaps', 'Named_Titles'),
+    'Chrono Trigger (Japan)': ('Named_Boxarts',),
+}
+SOURCE.update({f'Filler Game {i:02} (USA)': ('Named_Boxarts', 'Named_Snaps', 'Named_Titles') for i in range(24)})
+
+
+def image(name, folder):
+    return f'PNG {folder}/{name}'.encode() * 50
+
+
+class FakeLibretro(http.server.ThreadingHTTPServer):
+    daemon_threads = True
+
+    def __init__(self):
+        super().__init__(('127.0.0.1', 0), Handler)
+        self.log, self.delay, self.lock = [], 0.0, threading.Lock()
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *args):
+        pass
+
+    def answer(self, body):
+        parts = urllib.parse.unquote(self.path).strip('/').split('/')
+        with self.server.lock:
+            self.server.log.append((self.command, self.headers.get('User-Agent', ''), '/'.join(parts[1:])))
+        time.sleep(self.server.delay)
+        if len(parts) == 2 and parts[0] == DB and parts[1] in FOLDERS:  # the folder's listing
+            data = ''.join(f'<a href="{urllib.parse.quote(n)}.png">{n}.png</a>\n' for n, f in SOURCE.items() if parts[1] in f).encode()
+        elif len(parts) == 3 and parts[0] == DB and parts[2].endswith('.png') and parts[2][:-4] in SOURCE \
+                and parts[1] in SOURCE[parts[2][:-4]]:
+            data = image(parts[2][:-4], parts[1])
+        else:
+            self.send_response(404); self.send_header('Content-Length', '0'); self.end_headers(); return
+        self.send_response(200); self.send_header('Content-Length', str(len(data))); self.end_headers()
+        if body:
+            self.wfile.write(data)
+
+    def do_GET(self):
+        self.answer(True)
+
+    def do_HEAD(self):
+        self.answer(False)
+
+
+def free_port():
+    with socket.socket() as s:
+        s.bind(('127.0.0.1', 0))
+        return s.getsockname()[1]
+
+
+class Scraper(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.temp = tempfile.TemporaryDirectory()
+        cls.binary = webui_build.build(Path(cls.temp.name) / 'server', 'tests/webui_server_main.cpp')
+        cls.source = FakeLibretro()
+        threading.Thread(target=cls.source.serve_forever, daemon=True).start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.source.shutdown()
+        cls.temp.cleanup()
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp(dir=self.temp.name))
+        for folder in ('config', 'content', 'webui', 'cores', 'info', 'playlists'):
+            (self.root / folder).mkdir()
+        (self.root / 'webui/index.html').write_text('<!doctype html><title>RetroArch</title>')
+        (self.root / 'cores/snes9x_libretro.so').write_bytes(b'')
+        (self.root / 'info/snes9x_libretro.info').write_text(
+            'display_name = "Snes9x"\ncorename = "Snes9x"\ndatabase = "' + DB + '"\nsupported_extensions = "sfc|smc|zip"\n')
+        self.games = {  # label -> path
+            'Donkey Kong Country 2 - Diddy\'s Kong Quest (USA)': '/app0/content/SNES/Donkey Kong Country 2 - Diddy\'s Kong Quest (USA).zip',
+            'Super Metroid (Japan, USA) (En,Ja)': '/app0/content/SNES/Super Metroid (Japan, USA) (En,Ja).sfc',
+            'Chrono Trigger (1995)': '/app0/content/SNES/Chrono Trigger (1995).sfc',  # same title: the USA one, unasked
+            'Chrono Trigger Special Edition': '/app0/content/SNES/Chrono Trigger SE.sfc',  # another title: ambiguous
+            'Totally Unknown Homebrew': '/app0/content/SNES/Totally Unknown Homebrew.sfc',  # unmatched
+        }
+        self.write_playlist(self.games)
+        self.source.delay = 0.0
+        with self.source.lock:
+            self.source.log.clear()
+        self.start_server()
+
+    def write_playlist(self, games):
+        items = [{'path': p, 'label': l, 'core_path': 'DETECT', 'core_name': 'DETECT', 'crc32': '', 'db_name': DB + '.lpl'}
+                 for l, p in games.items()]
+        (self.root / f'playlists/{DB}.lpl').write_text(json.dumps({'version': '1.5', 'items': items}))
+
+    def start_server(self, lease=None):
+        self.port = free_port()
+        env = {**os.environ, 'PS5_SCRAPER_LIBRETRO_BASE': f'http://127.0.0.1:{self.source.server_port}'}
+        if lease:
+            env['PS5_SCRAPER_LEASE_SECONDS'] = str(lease)
+        self.server = subprocess.Popen([str(self.binary), str(self.root), str(self.port)], env=env,
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        for _ in range(200):
+            try:
+                self.token = json.loads(self.request('GET', '/api/status')[1])['token']
+                return
+            except OSError:
+                time.sleep(0.02)
+        raise RuntimeError('the server did not start')
+
+    def stop_server(self):
+        self.server.terminate(); self.server.wait(timeout=10)
+
+    def tearDown(self):
+        if self.server.poll() is None:
+            self.stop_server()
+
+    def request(self, method, path, body=None):
+        conn = http.client.HTTPConnection('127.0.0.1', self.port, timeout=60)
+        conn.request(method, path, body, {'X-RetroArch-Token': getattr(self, 'token', '')})
+        response = conn.getresponse()
+        data = response.read()
+        conn.close()
+        return response.status, data
+
+    def start(self, mode='ps5', kinds='cover,screenshot,title', overwrite=False, lines=None):
+        query = f'mode={mode}&source=libretro&kinds={kinds}&region=us&overwrite={int(overwrite)}'
+        status, body = self.request('POST', f'/api/scraper/start?{query}', '\n'.join(lines or [f'snes\t']).encode())
+        self.assertEqual(status, 201, body)
+        return json.loads(body)['job']['id']
+
+    def job(self, job_id=''):
+        return json.loads(self.request('GET', f'/api/scraper/job?id={job_id}')[1])['job']
+
+    def wait(self, job_id, until=lambda j: j['state'] != 'running', timeout=60):
+        end = time.time() + timeout
+        while time.time() < end:
+            job = self.job(job_id)
+            if until(job):
+                return job
+            time.sleep(0.1)
+        self.fail(f'the job did not settle: {self.job(job_id)}')
+
+    def media_gets(self, agent='Scraper'):
+        with self.source.lock:
+            return [p for m, a, p in self.source.log if m == 'GET' and agent in a and p.endswith('.png')]
+
+    def stored(self, label, kind):
+        key = Path(self.games[label]).stem
+        return self.root / 'library/snes' / STORE[kind] / f'{key}.png'
+
+    def test_ps5_mode_match_ambiguous_unmatched_and_cache(self):
+        job_id = self.start()
+        job = self.wait(job_id)
+        self.assertEqual(job['state'], 'done')
+        self.assertEqual(job['counts'], {'ambiguous': 1, 'done': 2, 'partial': 1, 'unmatched': 1})
+        self.assertEqual(self.stored('Chrono Trigger (1995)', 'cover').read_bytes(), image('Chrono Trigger (USA)', 'Named_Boxarts'))
+        dk = 'Donkey Kong Country 2 - Diddy\'s Kong Quest (USA)'
+        for kind, folder in (('cover', 'Named_Boxarts'), ('screenshot', 'Named_Snaps'), ('title', 'Named_Titles')):
+            self.assertEqual(self.stored(dk, kind).read_bytes(), image(dk, folder))
+        self.assertFalse(self.stored('Super Metroid (Japan, USA) (En,Ja)', 'title').exists())  # the source has none
+        meta = (self.root / 'library/snes/metadata' / (Path(self.games[dk]).stem + '.meta')).read_text()
+        self.assertIn('name = "Donkey Kong Country 2 - Diddy\'s Kong Quest"', meta)
+        self.assertIn('media.cover = "snes/covers/', meta)
+        ambiguous = next(p for p in job['problems'] if p['state'] == 'ambiguous')
+        self.assertEqual(ambiguous['label'], 'Chrono Trigger Special Edition')
+        self.assertEqual(ambiguous['candidates'][0], 'Chrono Trigger (USA)')  # the region asked for first
+        self.assertIn('Chrono Trigger (Japan)', ambiguous['candidates'])
+        # A restart keeps what is offered: the server reads the job back with its candidates.
+        self.stop_server()
+        self.start_server()
+        again = next(p for p in self.job(job_id)['problems'] if p['state'] == 'ambiguous')
+        self.assertEqual(again['candidates'], ambiguous['candidates'])
+        unmatched = next(p for p in job['problems'] if p['state'] == 'unmatched')
+        self.assertEqual(unmatched['label'], 'Totally Unknown Homebrew')
+        # The user chooses: the game's media arrives under its own name.
+        status, body = self.request('POST', f'/api/scraper/resolve?id={job_id}&item={ambiguous["item"]}&action=choose&value='
+                                    + urllib.parse.quote('Chrono Trigger (USA)'))
+        self.assertEqual(status, 200, body)
+        self.wait(job_id, lambda j: j['state'] == 'done' and not j['counts'].get('pending') and not j['counts'].get('working'))
+        self.assertEqual(self.stored('Chrono Trigger Special Edition', 'cover').read_bytes(), image('Chrono Trigger (USA)', 'Named_Boxarts'))
+        # A manual search, then skip.
+        status, body = self.request('POST', f'/api/scraper/resolve?id={job_id}&item={unmatched["item"]}&action=search&value=metroid')
+        self.assertEqual(status, 200)
+        found = next(p for p in json.loads(body)['job']['problems'] if p['item'] == unmatched['item'])
+        self.assertEqual(found['candidates'], ['Super Metroid (Japan, USA) (En,Ja)'])
+        self.request('POST', f'/api/scraper/resolve?id={job_id}&item={unmatched["item"]}&action=skip')
+        self.assertEqual(self.job(job_id)['counts'].get('skipped'), 1)
+        # The library shows what is stored; a new job fetches nothing already there.
+        library = json.loads(self.request('GET', '/api/library')[1])
+        dk_entry = next(g for g in library['systems'][0]['games'] if g['label'] == dk)
+        self.assertEqual(sorted(dk_entry['media']), ['cover', 'screenshot', 'title'])
+        status, data = self.request('GET', f'/api/library/media?system=snes&game={urllib.parse.quote(dk_entry["key"])}&kind=cover')
+        self.assertEqual((status, data), (200, image(dk, 'Named_Boxarts')))
+        self.assertEqual(self.request('GET', '/api/library/media?system=snes&game=..%2F..%2Fconfig&kind=cover')[0], 404)
+        before = len(self.media_gets())
+        job2 = self.wait(self.start(lines=[f'snes\t{self.games[dk]}']))
+        self.assertEqual(job2['counts'], {'skipped': 1})
+        self.assertEqual(len(self.media_gets()), before)
+        # Overwrite: fetched again.
+        self.wait(self.start(lines=[f'snes\t{self.games[dk]}'], overwrite=True))
+        self.assertEqual(len(self.media_gets()), before + 3)
+        self.assertFalse(list((self.root / 'library').rglob('.partial-*')))
+
+    def test_cancel_resume_and_restart_do_not_repeat_work(self):
+        games = {f'Filler Game {i:02} (USA)': f'/app0/content/SNES/Filler Game {i:02} (USA).sfc' for i in range(24)}
+        self.games = games
+        self.write_playlist(games)
+        self.source.delay = 0.05
+        job_id = self.start(kinds='cover,screenshot,title')
+        self.wait(job_id, lambda j: j['counts'].get('done', 0) >= 4)
+        self.assertEqual(json.loads(self.request('POST', f'/api/scraper/cancel?id={job_id}')[1]), {'cancelled': True})
+        cancelled = self.wait(job_id, lambda j: j['state'] == 'cancelled')
+        done_then = cancelled['counts'].get('done', 0)
+        time.sleep(0.5)
+        self.assertFalse(list((self.root / 'library').rglob('.partial-*')))  # a cut download left nothing
+        # Resume, then restart the server mid-way: it goes on by itself.
+        self.assertEqual(self.request('POST', f'/api/scraper/resume?id={job_id}')[0], 200)
+        self.wait(job_id, lambda j: j['counts'].get('done', 0) >= done_then + 4)
+        self.stop_server()
+        self.start_server()
+        job = self.wait(job_id, timeout=120)
+        self.assertEqual((job['state'], job['counts']), ('done', {'done': 24}))
+        # Every image fetched once, but those a cancel or a restart cut (at most one a worker each time).
+        gets = self.media_gets()
+        repeats = len(gets) - len(set(gets))
+        self.assertEqual(len(set(gets)), 72)
+        self.assertLessEqual(repeats, 8)
+        for label in games:
+            for kind in ('cover', 'screenshot', 'title'):
+                self.assertTrue(self.stored(label, kind).exists())
+
+    def run_helper(self, job_id, timeout=120):
+        return subprocess.Popen([sys.executable, str(ROOT / 'webui/ps5-media-helper.py'), f'http://127.0.0.1:{self.port}', job_id],
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+
+    def test_pc_mode_bytes_pass_through_the_helper(self):
+        job_id = self.start(mode='pc')
+        helper = self.run_helper(job_id)
+        out, _ = helper.communicate(timeout=120)
+        self.assertEqual(helper.returncode, 0, out)
+        job = self.wait(job_id)
+        self.assertEqual(job['counts'], {'ambiguous': 1, 'done': 2, 'partial': 1, 'unmatched': 1})
+        self.assertEqual((job['downloaded']['files'], job['transferred']['files']), (8, 8))
+        dk = 'Donkey Kong Country 2 - Diddy\'s Kong Quest (USA)'
+        self.assertEqual(self.stored(dk, 'title').read_bytes(), image(dk, 'Named_Titles'))
+        # The console only asked whether files exist; every byte came through the helper.
+        self.assertEqual(self.media_gets('Scraper'), [])
+        self.assertEqual(len(self.media_gets('Helper')), 8)
+        self.assertFalse(list((self.root / 'library').rglob('.partial-*')))
+
+    def test_pc_mode_helper_killed_then_resumed(self):
+        games = {f'Filler Game {i:02} (USA)': f'/app0/content/SNES/Filler Game {i:02} (USA).sfc' for i in range(24)}
+        self.games = games
+        self.write_playlist(games)
+        self.stop_server()
+        self.start_server(lease=60)
+        self.source.delay = 0.05
+        job_id = self.start(mode='pc')
+        helper = self.run_helper(job_id)
+        self.wait(job_id, lambda j: j['transferred']['files'] >= 10)
+        helper.kill(); helper.wait()
+        sent = self.job(job_id)['transferred']['files']
+        self.assertLess(sent, 72)
+        # A cut upload's hidden file goes as the console notices the dropped connection.
+        partials = lambda: list((self.root / 'library').rglob('.partial-*'))
+        end = time.time() + 5
+        while partials() and time.time() < end:
+            time.sleep(0.1)
+        self.assertFalse(partials())
+        resumed = time.time()
+        helper = self.run_helper(job_id)
+        out, _ = helper.communicate(timeout=180)
+        self.assertLess(time.time() - resumed, 30)  # the killed helper's leases at once, not after theirs
+        self.assertEqual(helper.returncode, 0, out)
+        job = self.wait(job_id)
+        self.assertEqual((job['counts'], job['transferred']['files']), ({'done': 24}, 72))
+        # Nothing stored was sent twice: each file was stored once.
+        for label in games:
+            for kind, folder in (('cover', 'Named_Boxarts'), ('screenshot', 'Named_Snaps'), ('title', 'Named_Titles')):
+                self.assertEqual(self.stored(label, kind).read_bytes(), image(label, folder))
+
+    def test_shared_layout_is_what_frontends_read(self):
+        self.wait(self.start(lines=[f'snes\t{self.games["Donkey Kong Country 2 - Diddy\'s Kong Quest (USA)"]}']))
+        # The settings are remembered on the console.
+        self.request('POST', '/api/scraper/settings?mode=pc&source=libretro&kinds=cover,title&region=eu&language=en')
+        settings = json.loads(self.request('GET', '/api/scraper/settings')[1])
+        self.assertEqual((settings['mode'], settings['kinds'], settings['region']), ('pc', ['cover', 'title'], 'eu'))
+        # RetroArch's lookup and EmulationStation's folder names, as src/ps5_library.c reads them.
+        probe = Path(self.temp.name) / 'media-probe'
+        source = probe.with_suffix('.c')
+        source.write_text('#include "ps5_library.h"\n#include <stdio.h>\nint main(int c, char **v)\n'
+                          '{ char out[1024]; int found = ps5_library_media(v[1], v[2], v[3], v[4], out, sizeof out);'
+                          ' printf("%d %s\\n", found, out); return 0; }\n')
+        subprocess.run(['cc', '-std=c11', '-D_DEFAULT_SOURCE', '-Isrc', str(source), 'src/ps5_library.c', '-o', str(probe)], cwd=ROOT, check=True)
+        path = self.games["Donkey Kong Country 2 - Diddy's Kong Quest (USA)"]
+        for system, folder, store in ((DB, 'Named_Boxarts', 'covers'), (DB + '.lpl', 'Named_Snaps', 'screenshots'),
+                                      ('Nintendo - Super Nintendo Entertainment System', 'titlescreens', 'titlescreens')):
+            out = subprocess.run([str(probe), str(self.root / 'library'), system, path, folder], capture_output=True, text=True).stdout
+            self.assertEqual(out.strip(), f'1 {self.root}/library/snes/{store}/{Path(path).stem}.png')
+        out = subprocess.run([str(probe), str(self.root / 'library'), DB, '/app0/content/SNES/missing.sfc', 'Named_Boxarts'],
+                             capture_output=True, text=True).stdout
+        self.assertEqual(out.strip(), '0')
+
+    def test_a_game_in_a_playlist_and_the_content_folder_is_one_game(self):
+        # The daemon reads the title from its real folder; the playlists name /app0. A game
+        # in both (scanned, and listed) was listed twice, with its media shared by both cards.
+        folder = self.root / 'content' / DB
+        folder.mkdir(parents=True)
+        listed = 'Donkey Kong Country 2 - Diddy\'s Kong Quest (USA).zip'
+        self.games = {listed[:-4]: f'/app0/content/{DB}/{listed}',
+                      # RetroArch's scan lists a disc's track beside its index: one game.
+                      'Disc (USA) track': f'/app0/content/{DB}/Disc (USA).bin',
+                      'Disc (USA)': f'/app0/content/{DB}/Disc (USA).cue',
+                      'Lone Image (USA)': f'/app0/content/{DB}/Lone Image (USA).iso'}
+        self.write_playlist(self.games)
+        (folder / listed).write_bytes(b'rom')
+        (folder / 'Only In The Folder (USA).sfc').write_bytes(b'rom')
+        library = json.loads(self.request('GET', '/api/library')[1])
+        paths = sorted(g['path'] for s in library['systems'] for g in s['games'])
+        self.assertEqual(paths, sorted([f'/app0/content/{DB}/{listed}', f'/app0/content/{DB}/Only In The Folder (USA).sfc',
+                                        f'/app0/content/{DB}/Disc (USA).cue', f'/app0/content/{DB}/Lone Image (USA).iso']))
+
+    def test_games_page_in_a_browser(self):
+        playwright = next((str(p) for p in (Path.home() / '.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright-core',
+                                            Path('/usr/lib/chatgpt/resources/cua_node/lib/node_modules/playwright-core')) if p.exists()),
+                          os.environ.get('PLAYWRIGHT_PATH', ''))
+        if not playwright or not Path('/usr/bin/chromium').exists():
+            self.skipTest('needs Playwright and Chromium')
+        import shutil
+        shutil.copytree(ROOT / 'webui', self.root / 'webui', dirs_exist_ok=True)
+        # Covers the page can decode: real PNGs from the fake source for this test.
+        run = subprocess.run(['node', 'tests/webui_scraper_browser.cjs'], cwd=ROOT, capture_output=True, text=True, timeout=300,
+                             env={**os.environ, 'PLAYWRIGHT_PATH': playwright, 'WEBUI_TEST_URL': f'http://127.0.0.1:{self.port}'})
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+
+
+if __name__ == '__main__':
+    unittest.main()

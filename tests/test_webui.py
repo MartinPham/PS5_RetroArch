@@ -7,6 +7,10 @@ import subprocess
 import tempfile
 import time
 import unittest
+
+import sys
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent))
+import webui_build  # noqa: E402
 from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -25,10 +29,7 @@ class WebUI(unittest.TestCase):
         cls.original = b'audio_volume = "-6"\ninput_rumble_gain = "75"\nunrelated = "preserve"\n'
         (cls.root / 'config/retroarch.cfg').write_bytes(cls.original)
         cls.binary = cls.root / 'server'
-        subprocess.run(['c++', '-std=c++17', '-O1', '-g', '-pthread',
-                        '-I'+str(ROOT / '.deps/webui/libmicrohttpd-1.0.10/src/include'),
-                        '-I'+str(ROOT / '.deps/native/zlib/zlib-1.3.2/contrib/minizip'), '-I'+str(ROOT / 'vendor/retroarch/deps/mbedtls'),
-                        'tests/webui_server_main.cpp', 'src/webui_ps5.cpp', 'src/webui_transfer.cpp', 'src/webui_update.cpp', archive, update, '-lz', '-o', str(cls.binary)], cwd=ROOT, check=True)
+        webui_build.build(cls.binary, 'tests/webui_server_main.cpp')
         with socket.socket() as s:
             s.bind(('127.0.0.1', 0)); cls.port = s.getsockname()[1]
         cls.process = subprocess.Popen([str(cls.binary), str(cls.root), str(cls.port)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

@@ -3648,6 +3648,45 @@ static void ps5_core_option_default(struct core_option *option)
         'patches/series, 0113: "default" is the platform\'s remap folder',
     ),
 
+    (
+        # Every frontend reads a game's media from one shared store (src/ps5_library.h,
+        # src/scraper.h): RetroArch asks it before its own thumbnails folder.
+        'gfx/gfx_thumbnail_path.c',
+        '#include "gfx_thumbnail_path.h"\n',
+        '#include "gfx_thumbnail_path.h"\n'
+        '\n/* patches/series, 0114: the shared media library (src/ps5_library.c). */\n'
+        'int ps5_library_thumbnail(const char *system, const char *content_path, const char *type,\n'
+        '      char *out, size_t size);\n',
+        'patches/series, 0114: the shared media library',
+    ),
+    (
+        'gfx/gfx_thumbnail_path.c',
+        '      const char *type = gfx_thumbnail_get_type(gfx_thumbnails,\n'
+        '            menu_left_thumbnails, menu_icon_thumbnails, path_data, thumbnail_id);\n'
+        '      bool thumbnail_found = false;\n',
+        '      const char *type = gfx_thumbnail_get_type(gfx_thumbnails,\n'
+        '            menu_left_thumbnails, menu_icon_thumbnails, path_data, thumbnail_id);\n'
+        '      bool thumbnail_found = false;\n'
+        '      /* patches/series, 0114: the shared media library first, the same files\n'
+        '       * every frontend reads; RetroArch\'s own thumbnails folder after it. */\n'
+        '      if (ps5_library_thumbnail(system_name, path_data->content_path, type,\n'
+        '               thumbnail_path, PATH_MAX_LENGTH * sizeof(char)))\n'
+        '         return true;\n',
+        'patches/series, 0114: the shared media library first',
+    ),
+    (
+        'configuration.c',
+        '   if (string_is_equal(settings->paths.directory_thumbnails, "default"))\n'
+        '      *settings->paths.directory_thumbnails = \'\\0\';\n',
+        '   /* patches/series, 0114: "default" is the platform\'s thumbnails folder; empty,\n'
+        '    * every thumbnail lookup stopped before it began. */\n'
+        '   if (string_is_equal(settings->paths.directory_thumbnails, "default"))\n'
+        '      configuration_set_string(settings,\n'
+        '            settings->paths.directory_thumbnails,\n'
+        '            g_defaults.dirs[DEFAULT_DIR_THUMBNAILS]);\n',
+        'patches/series, 0114: "default" is the platform\'s thumbnails folder',
+    ),
+
 ]
 
 # Changes that are withdrawn rather than deleted, by marker.

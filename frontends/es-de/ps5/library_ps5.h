@@ -20,6 +20,7 @@ extern "C"
         const char *reference;                /* ES-DE's own systems file */
         const char *data;                     /* ES-DE's data folder (ES-DE/) */
         const char *const *content;           /* content roots, NULL-ended; or NULL */
+        const char *media; /* the shared media library (src/ps5_library.h); or NULL */
     };
 
     /* Writes ES-DE's systems file and game lists from the library; the number of

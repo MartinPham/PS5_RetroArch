@@ -132,7 +132,8 @@ void say(const char *format, ...)
         std::time_t t = std::time(nullptr);
         char stamp[32];
         std::strftime(stamp, sizeof stamp, "%Y-%m-%d %H:%M:%S", std::gmtime(&t));
-        std::fprintf(file, "%s %s\n", stamp, line);
+        /* The process: a stale daemon still finishing writes to the same file. */
+        std::fprintf(file, "%s [%d] %s\n", stamp, int(getpid()), line);
         std::fclose(file);
     }
 }
@@ -385,9 +386,13 @@ int main()
             stale = true; /* this daemon is the old build's now */
         }
 
-        const unsigned busy = ps5_webui_connections();
+        // What must not be cut: transfers in flight, not an open page's idle keep-alive
+        // connections (counting those, a stale daemon kept 6769 from the new build).
+        const unsigned busy = ps5_webui_transfers();
         const std::string update = ps5_update::status().state;
-        const bool updating = update == "downloading" || update == "verifying";
+        // A download, or a scraping job, goes on with the title closed and no page open.
+        const bool updating =
+            update == "downloading" || update == "verifying" || ps5_webui_scraping();
         bool stop = false;
         if (root.empty() && !linked && now - started >= kNoHelloSeconds)
         {
@@ -395,7 +400,11 @@ int main()
             stop = true;
         }
         else if (stale && !busy && !linked && (!installed || now - installed_at >= 15.0))
+        {
+            say("stopping for the new build's daemon (no transfer in flight%s)",
+                ps5_webui_scraping() ? "; the scraping job is saved and resumes there" : "");
             stop = true;
+        }
         else if (!root.empty() && !linked && !busy && !updating && !install_sent &&
                  now - idle_since >= kIdleSeconds)
         {

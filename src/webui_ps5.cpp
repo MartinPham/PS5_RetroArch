@@ -5,10 +5,12 @@
 #include "webui_ps5.h"
 #include "webui_update.h"
 #include "webui_transfer.h"
+#include "scraper.h"
 #include "ps5_frontend_choice.h"
 #include "../vendor/retroarch/libretro-common/include/libretro.h"
 #include <microhttpd.h>
 #include <algorithm>
+#include <atomic>
 #include <arpa/inet.h>
 #include <cerrno>
 #include <climits>
@@ -63,6 +65,7 @@ const Setting settings[] = {
 // as it did on the one thread before.
 std::mutex state_lock;
 ps5_transfer::Sessions sessions;
+std::atomic<unsigned> transfers_in_flight{0};
 constexpr std::time_t session_idle_seconds = 15 * 60;
 struct BatchState;
 enum class Transfer
@@ -70,7 +73,8 @@ enum class Transfer
     none,
     single, // PUT /api/upload
     batch,  // PUT /api/upload/batch
-    part    // PUT /api/upload/part
+    part,   // PUT /api/upload/part
+    scraped // PUT /api/scraper/pc/media: a file the PC helper downloaded
 };
 struct Request
 {
@@ -81,8 +85,12 @@ struct Request
     bool replace = false;
     std::string temporary, destination, body;
     uint64_t received = 0, expected = 0, offset = 0;
+    size_t body_limit = 16384;
+    std::string job;
+    unsigned task = 0;
     unsigned error = 0;
     const char *message = "";
+    bool counted = false; // in transfers_in_flight
     ~Request();
 };
 std::string quote(const std::string &text)
@@ -859,11 +867,19 @@ void close_download(void *cls)
     close(source->fd);
     delete source;
 }
+MHD_Result serve_file(MHD_Connection *c, const std::string &path, const char *type,
+                      bool attachment);
 MHD_Result download(MHD_Connection *c)
 {
     std::string path;
     if (!content_path(arg(c, "path"), path))
         return error(c, 400, "Invalid content path.");
+    return serve_file(c, path, "application/octet-stream", true);
+}
+// A file streamed in 1 MiB blocks, one Range honoured: a content download (attachment)
+// or a stored image or video the page shows.
+MHD_Result serve_file(MHD_Connection *c, const std::string &path, const char *type, bool attachment)
+{
     int fd = open(path.c_str(), O_RDONLY | O_NOFOLLOW);
     struct stat st{};
     if (fd < 0)
@@ -901,12 +917,15 @@ MHD_Result download(MHD_Connection *c)
                                           std::to_string(end - 1) + '/' + std::to_string(size);
         MHD_add_response_header(response, "Content-Range", content_range.c_str());
     }
-    const std::string disposition =
-        "attachment; filename=" + quote(path.substr(path.find_last_of('/') + 1));
-    MHD_add_response_header(response, "Content-Disposition", disposition.c_str());
-    MHD_add_response_header(response, "Content-Type", "application/octet-stream");
+    if (attachment)
+    {
+        const std::string disposition =
+            "attachment; filename=" + quote(path.substr(path.find_last_of('/') + 1));
+        MHD_add_response_header(response, "Content-Disposition", disposition.c_str());
+    }
+    MHD_add_response_header(response, "Content-Type", type);
     MHD_add_response_header(response, "X-Content-Type-Options", "nosniff");
-    MHD_add_response_header(response, "Cache-Control", "no-store");
+    MHD_add_response_header(response, "Cache-Control", attachment ? "no-store" : "no-cache");
     auto result = MHD_queue_response(c, partial ? 206 : 200, response);
     MHD_destroy_response(response);
     return result;
@@ -1010,6 +1029,8 @@ struct BatchState
 };
 Request::~Request()
 {
+    if (counted)
+        --transfers_in_flight;
     if (transfer == Transfer::part && session)
     {
         std::lock_guard<std::mutex> guard(session->lock);
@@ -1020,7 +1041,12 @@ Request::~Request()
         }
     }
     if (!temporary.empty())
+    {
         unlink(temporary.c_str());
+        /* A helper's upload cut short: the file is handed out again at once. */
+        if (transfer == Transfer::scraped)
+            ps5_scraper::pc_delivered(job, task, false, 0);
+    }
 }
 bool content_length(MHD_Connection *c, uint64_t &length)
 {
@@ -1141,6 +1167,153 @@ std::string names(const std::vector<std::string> &list)
     for (const auto &name : list)
         out += (out.size() > 1 ? "," : "") + quote(name);
     return out + ']';
+}
+// A media file from the PC helper (src/scraper.h, PC mode): written under a hidden
+// name in the shared library and renamed into place when whole.
+void prepare_scraped(MHD_Connection *c, Request &r)
+{
+    r.transfer = Transfer::scraped;
+    r.job = arg(c, "id");
+    r.task = unsigned(std::strtoul(arg(c, "task"), nullptr, 10));
+    if (!content_length(c, r.expected) || r.expected > (uint64_t(256) << 20))
+    {
+        r.error = 413;
+        r.message = "A media file is at most 256 MiB.";
+        return;
+    }
+    if (!ps5_scraper::pc_target(r.job, r.task, r.temporary, r.destination) ||
+        !r.writer.create(r.temporary))
+    {
+        r.temporary.clear();
+        r.error = 409;
+        r.message = "This download is no longer wanted.";
+    }
+}
+std::string query(MHD_Connection *c, const char *key, const char *fallback)
+{
+    const char *value = arg(c, key);
+    return *value ? value : fallback;
+}
+// The scraper's routes (src/scraper.h): they keep their own locks.
+MHD_Result scraper_route(MHD_Connection *c, const std::string &url, const std::string &method,
+                         Request &r)
+{
+    std::string why, id;
+    auto options = [&]
+    {
+        ps5_scraper::Options o;
+        o.mode = query(c, "mode", "");
+        o.source = query(c, "source", "libretro");
+        o.region = query(c, "region", "us");
+        o.language = query(c, "language", "en");
+        o.overwrite = std::strcmp(arg(c, "overwrite"), "1") == 0;
+        const std::string kinds = arg(c, "kinds");
+        size_t start = 0;
+        while (start < kinds.size())
+        {
+            size_t end = kinds.find(',', start);
+            if (end == std::string::npos)
+                end = kinds.size();
+            o.kinds.push_back(kinds.substr(start, end - start));
+            start = end + 1;
+        }
+        return o;
+    };
+    if (method == "GET" && url == "/api/library")
+        return respond(c, 200, ps5_scraper::library_json());
+    if (method == "GET" && url == "/api/library/media")
+    {
+        const std::string file =
+            ps5_scraper::media_file(arg(c, "system"), arg(c, "game"), arg(c, "kind"));
+        if (file.empty())
+            return error(c, 404, "No such media.");
+        const std::string ext = file.substr(file.find_last_of('.') + 1);
+        const char *type = ext == "png"                    ? "image/png"
+                           : ext == "jpg" || ext == "jpeg" ? "image/jpeg"
+                           : ext == "webp"                 ? "image/webp"
+                           : ext == "gif"                  ? "image/gif"
+                           : ext == "mp4"                  ? "video/mp4"
+                           : ext == "webm"                 ? "video/webm"
+                                                           : "application/octet-stream";
+        return serve_file(c, file, type, false);
+    }
+    if (method == "GET" && url == "/api/scraper/settings")
+        return respond(c, 200, ps5_scraper::settings_json());
+    if (method == "POST" && url == "/api/scraper/settings")
+        return ps5_scraper::save_settings(options())
+                   ? respond(c, 200, ps5_scraper::settings_json())
+                   : error(c, 500, "The settings could not be saved.");
+    if (method == "GET" && url == "/api/scraper/job")
+        return respond(c, 200, ps5_scraper::job_json(arg(c, "id")));
+    if (method == "POST" && url == "/api/scraper/start")
+    {
+        // The body: one "system<TAB>path" a line, path empty for a whole system.
+        std::vector<ps5_scraper::Selection> selection;
+        size_t start = 0;
+        while (start < r.body.size())
+        {
+            size_t end = r.body.find('\n', start);
+            if (end == std::string::npos)
+                end = r.body.size();
+            const std::string line = r.body.substr(start, end - start);
+            const size_t tab = line.find('\t');
+            if (!line.empty())
+                selection.push_back(
+                    {line.substr(0, tab), tab == std::string::npos ? "" : line.substr(tab + 1)});
+            start = end + 1;
+        }
+        if (!ps5_scraper::start(options(), selection, id, why))
+            return error(c, 409, why.c_str());
+        return respond(c, 201, ps5_scraper::job_json(id));
+    }
+    if (method == "POST" && url == "/api/scraper/cancel")
+        return respond(c, 200,
+                       std::string("{\"cancelled\":") +
+                           (ps5_scraper::cancel(arg(c, "id")) ? "true" : "false") + '}');
+    if (method == "POST" && url == "/api/scraper/resume")
+        return ps5_scraper::resume(arg(c, "id"), why)
+                   ? respond(c, 200, ps5_scraper::job_json(arg(c, "id")))
+                   : error(c, 409, why.c_str());
+    if (method == "POST" && url == "/api/scraper/resolve")
+        return ps5_scraper::resolve(arg(c, "id"),
+                                    unsigned(std::strtoul(arg(c, "item"), nullptr, 10)),
+                                    arg(c, "action"), arg(c, "value"), why)
+                   ? respond(c, 200, ps5_scraper::job_json(arg(c, "id")))
+                   : error(c, 409, why.c_str());
+    if (method == "GET" && url == "/api/scraper/pc/tasks")
+        return respond(
+            c, 200,
+            ps5_scraper::pc_tasks(arg(c, "id"),
+                                  unsigned(std::strtoul(query(c, "max", "8").c_str(), nullptr, 10)),
+                                  std::strcmp(arg(c, "fresh"), "1") == 0));
+    if (method == "POST" && url == "/api/scraper/pc/downloaded")
+    {
+        ps5_scraper::pc_downloaded(
+            arg(c, "id"), unsigned(std::strtoul(arg(c, "task"), nullptr, 10)),
+            std::strcmp(arg(c, "found"), "0") != 0, std::strtoull(arg(c, "bytes"), nullptr, 10));
+        return respond(c, 200, "{\"noted\":true}");
+    }
+    if (r.transfer == Transfer::scraped)
+    {
+        const bool flushed = r.writer.flush();
+        const uint64_t got = r.writer.written();
+        const int fd = r.writer.release();
+        bool ok = flushed && fd >= 0 && got == r.expected && r.received == r.expected;
+        if (ok)
+            ok = ps5_transfer::commit(fd, r.temporary, r.destination, true, true) ==
+                 ps5_transfer::Commit::done;
+        if (fd >= 0)
+            close(fd);
+        if (ok)
+        {
+            chmod(r.destination.c_str(), 0777);
+            r.temporary.clear();
+        }
+        ps5_scraper::pc_delivered(r.job, r.task, ok, got);
+        return ok ? respond(c, 201, "{\"stored\":true}")
+                  : error(c, 507, "The media file could not be stored.");
+    }
+    return error(c, 404, "This page was not found.");
 }
 // The transfers' own routes: they run beside each other, outside state_lock.
 MHD_Result transfer_route(MHD_Connection *c, const std::string &url, const std::string &method,
@@ -1274,6 +1447,10 @@ bool is_transfer_route(const std::string &url)
 {
     return url.rfind("/api/upload", 0) == 0;
 }
+bool is_scraper_route(const std::string &url)
+{
+    return url.rfind("/api/scraper", 0) == 0 || url.rfind("/api/library", 0) == 0;
+}
 std::string current_frontend()
 {
     std::lock_guard<std::mutex> guard(frontend_lock);
@@ -1364,7 +1541,8 @@ MHD_Result route(MHD_Connection *c, const std::string &url, const std::string &m
         {"/version.json", "application/json"},
         {"/assets/mihawk.png", "image/png"},
         {"/assets/ui.woff2", "font/woff2"},
-        {"/assets/retroarch.svg", "image/svg+xml"}};
+        {"/assets/retroarch.svg", "image/svg+xml"},
+        {"/ps5-media-helper.py", "text/x-python; charset=utf-8"}};
     auto asset = assets.find(url);
     if (asset == assets.end())
         return error(c, 404, "This page was not found.");
@@ -1395,12 +1573,21 @@ MHD_Result handle(void *, MHD_Connection *c, const char *url, const char *method
             prepare_batch(c, *r);
         else if (std::strcmp(method, "PUT") == 0 && std::strcmp(url, "/api/upload/part") == 0)
             prepare_part(c, *r);
+        else if (std::strcmp(method, "PUT") == 0 && std::strcmp(url, "/api/scraper/pc/media") == 0)
+            prepare_scraped(c, *r);
+        if (std::strcmp(url, "/api/scraper/start") == 0)
+            r->body_limit = 4 << 20; // one line a game chosen
         if (r->error)
             return error(c, r->error, r->message);
+        if (r->transfer != Transfer::none)
+        {
+            ++transfers_in_flight;
+            r->counted = true;
+        }
         if (r->transfer == Transfer::none)
         {
             const char *length = MHD_lookup_connection_value(c, MHD_HEADER_KIND, "Content-Length");
-            if (length && std::strtoull(length, nullptr, 10) > 16384)
+            if (length && std::strtoull(length, nullptr, 10) > r->body_limit)
                 return error(c, 413, "This request is too large.");
         }
         return MHD_YES;
@@ -1434,7 +1621,7 @@ MHD_Result handle(void *, MHD_Connection *c, const char *url, const char *method
         }
         else if (!r.error)
         {
-            if (*size > 16384 - r.body.size())
+            if (*size > r.body_limit - r.body.size())
             {
                 r.error = 413;
                 r.message = "This request is too large.";
@@ -1449,6 +1636,8 @@ MHD_Result handle(void *, MHD_Connection *c, const char *url, const char *method
     }
     if (r.error && !(r.transfer == Transfer::batch && r.batch && r.error == 400))
         return error(c, r.error, r.message);
+    if (r.transfer == Transfer::scraped || is_scraper_route(url))
+        return scraper_route(c, url, method, r);
     if (r.transfer != Transfer::none || is_transfer_route(url))
         return transfer_route(c, url, method, r);
     std::lock_guard<std::mutex> guard(state_lock);
@@ -1601,6 +1790,14 @@ void ps5_webui_set_frontend(const char *frontend)
     std::lock_guard<std::mutex> guard(frontend_lock);
     frontend_name = frontend ? frontend : "";
 }
+unsigned ps5_webui_transfers()
+{
+    return transfers_in_flight.load();
+}
+bool ps5_webui_scraping()
+{
+    return ps5_scraper::busy();
+}
 unsigned ps5_webui_connections()
 {
     if (!web_daemon)
@@ -1615,6 +1812,10 @@ bool ps5_webui_start(const char *root, unsigned short port, bool apply_settings)
         return true;
     root_path = root;
     ps5_update::initialize(root_path);
+    // The scraper's jobs live with the server: one left running resumes now.
+    ps5_scraper::configure(root_path, std::getenv("PS5_SCRAPER_LIBRETRO_BASE")
+                                          ? std::getenv("PS5_SCRAPER_LIBRETRO_BASE")
+                                          : "");
     if (apply_settings)
         apply_core_settings();
     listen_port = port;
@@ -1642,5 +1843,6 @@ void ps5_webui_stop()
         std::fprintf(stderr, "webui: stopped\n");
     }
     sessions.clear();
+    ps5_scraper::shutdown();
     ps5_update::stop();
 }

@@ -446,6 +446,11 @@ fi
 mkdir -p "$dist/webui"
 cp -a "$root/webui/." "$dist/webui/"
 cp "$webui_daemon" "$dist/webui/ps5-retroarch-webui.elf"
+# The certificates the daemon verifies HTTPS against (curl over mbedTLS): Mozilla's
+# bundle as EmulationStation ships it, from its pinned source.
+certificates="$root/.deps/es-de/resources/certificates/curl-ca-bundle.crt"
+[[ -f $certificates ]] || { echo "error: $certificates is missing (tools/build-esde.sh fetches it)" >&2; exit 1; }
+cp "$certificates" "$dist/webui/ca-bundle.crt"
 # Core option catalogs are available before the first game is opened.
 mkdir -p "$dist/webui/core-metadata"
 cp -a "$root/build/webui-core-metadata/." "$dist/webui/core-metadata/"

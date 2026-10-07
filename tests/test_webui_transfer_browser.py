@@ -9,6 +9,10 @@ import tempfile
 import time
 import unittest
 
+import sys
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent))
+import webui_build  # noqa: E402
+
 ROOT = Path(__file__).resolve().parent.parent
 PLAYWRIGHT = os.environ.get('PLAYWRIGHT_PATH') or next(
     (str(p) for p in (Path.home() / '.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright-core',
@@ -33,12 +37,7 @@ class TransferBrowser(unittest.TestCase):
                 (root / name).mkdir(parents=True)
             shutil.copytree(ROOT / 'webui', root / 'webui', dirs_exist_ok=True)
             binary = Path(temp) / 'server'
-            subprocess.run(['c++', '-std=c++17', '-O1', '-pthread',
-                            '-I' + str(ROOT / '.deps/webui/libmicrohttpd-1.0.10/src/include'),
-                            '-I' + str(ROOT / '.deps/native/zlib/zlib-1.3.2/contrib/minizip'),
-                            '-I' + str(ROOT / 'vendor/retroarch/deps/mbedtls'),
-                            'tests/webui_server_main.cpp', 'src/webui_ps5.cpp', 'src/webui_transfer.cpp',
-                            'src/webui_update.cpp', http, update, '-lz', '-o', str(binary)], cwd=ROOT, check=True)
+            webui_build.build(binary, 'tests/webui_server_main.cpp', flags=('-O1',))
             with socket.socket() as s:
                 s.bind(('127.0.0.1', 0)); port = s.getsockname()[1]
             server = subprocess.Popen([str(binary), str(root), str(port)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

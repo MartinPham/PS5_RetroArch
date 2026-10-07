@@ -167,6 +167,76 @@ void enable_collections(const std::string &data)
         std::fclose(file);
 }
 
+/* ES-DE's media folder is the shared media library (src/ps5_library.h): the same files
+ * RetroArch's thumbnails and every frontend read, never a copy. Set before each start,
+ * as ES-DE keeps its settings in this file. */
+void use_shared_media(const std::string &data, const char *media)
+{
+    const std::string settings = data + "/settings/es_settings.xml";
+    pugi::xml_document document;
+    if (!document.load_file(settings.c_str()))
+        return; /* ES-DE's first start writes it; the next start sets the folder */
+    pugi::xml_node node;
+    for (pugi::xml_node entry : document.children("string"))
+        if (std::strcmp(entry.attribute("name").value(), "MediaDirectory") == 0)
+            node = entry;
+    if (node && std::strcmp(node.attribute("value").value(), media) == 0)
+        return;
+    if (!node)
+    {
+        node = document.append_child("string");
+        node.append_attribute("name").set_value("MediaDirectory");
+        node.append_attribute("value");
+    }
+    node.attribute("value").set_value(media);
+    document.save_file(settings.c_str()); // as ES-DE saves it (Settings::saveFile)
+}
+
+/* A game's scraped metadata (library/<system>/metadata/<key>.meta, key = "value"). */
+std::map<std::string, std::string> read_meta(const std::string &path)
+{
+    std::map<std::string, std::string> fields;
+    std::ifstream input(path);
+    for (std::string line; std::getline(input, line);)
+    {
+        const size_t equals = line.find(" = \"");
+        if (equals == std::string::npos || line.size() < equals + 5 || line.back() != '"')
+            continue;
+        std::string value;
+        for (size_t i = equals + 4; i + 1 < line.size(); ++i)
+            if (line[i] == '\\' && i + 2 < line.size())
+                value += line[++i] == 'n' ? '\n' : line[i];
+            else
+                value += line[i];
+        fields[line.substr(0, equals)] = value;
+    }
+    return fields;
+}
+
+/* The scraped fields into a game's list entry: a field ES-DE has is kept, unless it is
+ * still the library's default (the name as the label). */
+void add_meta(pugi::xml_node node, const char *media, const char *system,
+              const struct ps5_library_game &game)
+{
+    char key[512];
+    if (!media || ps5_library_media_key(game.path, key, sizeof(key)) != 0)
+        return;
+    const auto meta = read_meta(std::string(media) + '/' + system + "/metadata/" + key + ".meta");
+    static const char *const fields[][2] = {
+        {"name", "name"},           {"description", "desc"},    {"developer", "developer"},
+        {"publisher", "publisher"}, {"genre", "genre"},         {"players", "players"},
+        {"rating", "rating"},       {"released", "releasedate"}};
+    for (const auto &field : fields)
+    {
+        const auto value = meta.find(field[0]);
+        if (value == meta.end() || value->second.empty())
+            continue;
+        const std::string current = node.child_value(field[1]);
+        if (current.empty() || (std::strcmp(field[1], "name") == 0 && current == game.label))
+            set_child(node, field[1], value->second);
+    }
+}
+
 bool save(pugi::xml_document &document, const std::string &path)
 {
     const std::string temporary = path + ".tmp";
@@ -202,6 +272,8 @@ extern "C" int ps5_esde_write_library_to(const struct ps5_esde_library_paths *pa
         chmod((data + folder).c_str(), 0777);
     }
     enable_collections(data);
+    if (paths->media)
+        use_shared_media(data, paths->media);
     /* RetroArch's favourites as they were at the last start. */
     const std::string favorites_record = data + "/ps5-favorites.txt";
     const std::set<std::string> were_favorites = read_lines(favorites_record);
@@ -282,6 +354,7 @@ extern "C" int ps5_esde_write_library_to(const struct ps5_esde_library_paths *pa
                 node.append_child("name").text().set(game.label);
             }
             add_play(node, game, were_favorites.count(path) != 0);
+            add_meta(node, paths->media, system.id, game);
             if (game.favorite)
                 favorites_now += path + "\n";
             favorites += std::strcmp(node.child_value("favorite"), "true") == 0;
@@ -322,6 +395,7 @@ extern "C" int ps5_esde_write_library(char *summary, size_t summary_size)
     const struct ps5_esde_library_paths paths = {
         PS5_LIBRARY_PLAYLISTS, PS5_LIBRARY_INFO,
         PS5_LIBRARY_CORES,     "/app0/es-de/resources/systems/unix/es_systems.xml",
-        "/app0/es-de/ES-DE",   content};
+        "/app0/es-de/ES-DE",   content,
+        PS5_LIBRARY_MEDIA};
     return ps5_esde_write_library_to(&paths, summary, summary_size);
 }

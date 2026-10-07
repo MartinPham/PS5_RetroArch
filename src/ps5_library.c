@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include <time.h>
 
@@ -550,6 +551,7 @@ struct loading
     const char *default_core; /* the playlist's */
     size_t game_capacity;
     int failed;
+    const char *title_root; /* the title's real folder, recorded as /app0; or NULL */
 };
 
 static const struct ps5_library_core *core_by_path(const struct ps5_library *library,
@@ -649,6 +651,23 @@ static void add_entry(void *context, const struct ps5_playlist_entry *entry)
     struct ps5_library *library = loading->library;
     if (loading->failed)
         return;
+    /* A game under the title's real folder is recorded by its /app0 path, as the
+     * playlists and every frontend name it: one game, one path, whoever reads the
+     * library (the WebUI's daemon scans the real folder; it listed games twice). */
+    struct ps5_playlist_entry mapped = *entry;
+    char title_path[PS5_LIBRARY_PATH_MAX];
+    const size_t root_length = loading->title_root ? strlen(loading->title_root) : 0;
+    if (root_length && strncmp(entry->path, loading->title_root, root_length) == 0 &&
+        entry->path[root_length] == '/')
+    {
+        const int n =
+            snprintf(title_path, sizeof(title_path), "/app0%s", entry->path + root_length);
+        if (n > 0 && (size_t)n < sizeof(title_path))
+        {
+            mapped.path = title_path;
+            entry = &mapped;
+        }
+    }
     for (size_t i = 0; i < library->game_count; i++)
         if (strcmp(library->games[i].path, entry->path) == 0)
             return; /* a game in two playlists is one game */
@@ -1366,13 +1385,58 @@ int ps5_library_load(struct ps5_library *library, const char *playlists, const c
     return ps5_library_load_content(library, playlists, info, cores, NULL);
 }
 
+/* A disc's track listed beside its index (RetroArch's scan lists Crash Bandicoot's .bin
+ * and its .cue): the index is the game, the track is dropped, as the content scan does. */
+static int path_extension_is(const char *path, const char *const *extensions)
+{
+    const char *dot = strrchr(path, '.');
+    if (!dot || strchr(dot, '/'))
+        return 0;
+    for (size_t i = 0; extensions[i]; i++)
+        if (strcasecmp(dot + 1, extensions[i]) == 0)
+            return 1;
+    return 0;
+}
+static void drop_listed_tracks(struct ps5_library *library)
+{
+    static const char *const tracks[] = {"bin", "img",  "iso", "raw", "wav",
+                                         "ape", "flac", "ogg", "mp3", NULL};
+    static const char *const indexes[] = {"cue", "gdi", "m3u", "ccd", "toc", NULL};
+    size_t kept = 0;
+    for (size_t i = 0; i < library->game_count; i++)
+    {
+        const char *path = library->games[i].path;
+        int listed_index = 0;
+        if (path_extension_is(path, tracks))
+        {
+            const size_t stem = (size_t)(strrchr(path, '.') - path);
+            for (size_t j = 0; j < library->game_count && !listed_index; j++)
+            {
+                const char *other = library->games[j].path;
+                listed_index = j != i && strncmp(other, path, stem) == 0 && other[stem] == '.' &&
+                               !strchr(other + stem + 1, '.') && path_extension_is(other, indexes);
+            }
+        }
+        if (!listed_index)
+            library->games[kept++] = library->games[i];
+    }
+    library->game_count = kept;
+}
+
 int ps5_library_load_content(struct ps5_library *library, const char *playlists, const char *info,
                              const char *cores, const char *const *content)
+{
+    return ps5_library_load_content_at(library, playlists, info, cores, content, NULL);
+}
+
+int ps5_library_load_content_at(struct ps5_library *library, const char *playlists,
+                                const char *info, const char *cores, const char *const *content,
+                                const char *title_root)
 {
     memset(library, 0, sizeof(*library));
     load_cores(library, info, cores);
     char **names = folder_names(playlists, ".lpl");
-    struct loading loading = {library, NULL, NULL, 0, 0};
+    struct loading loading = {library, NULL, NULL, 0, 0, title_root};
     for (size_t i = 0; names && names[i] && !loading.failed; i++)
     {
         if (is_builtin_playlist(names[i]))
@@ -1397,6 +1461,7 @@ int ps5_library_load_content(struct ps5_library *library, const char *playlists,
     }
     if (loading.failed)
         return -1;
+    drop_listed_tracks(library);
     finish_systems(library);
     read_play(library, playlists);
     return 0;
@@ -1448,4 +1513,76 @@ int ps5_library_command(const struct ps5_library *library, const struct ps5_libr
             return -1;
     }
     return append_quoted(out, size, &length, game->path);
+}
+
+/* The shared media library (src/ps5_library.h, src/scraper.h). */
+int ps5_library_media_key(const char *path, char *out, size_t size)
+{
+    const char *start, *end, *dot;
+    size_t length;
+    if (!path || !out || size == 0)
+        return -1;
+    end = strchr(path, '#');
+    if (!end)
+        end = path + strlen(path);
+    start = end;
+    while (start > path && start[-1] != '/')
+        --start;
+    dot = end;
+    while (dot > start && *dot != '.')
+        --dot;
+    if (dot > start)
+        end = dot;
+    length = (size_t)(end - start);
+    if (length == 0 || length + 2 > size)
+        return -1;
+    if (*start == '.')
+    {
+        out[0] = '_';
+        memcpy(out + 1, start, length);
+        out[length + 1] = '\0';
+    }
+    else
+    {
+        memcpy(out, start, length);
+        out[length] = '\0';
+    }
+    for (char *c = out; *c; ++c)
+        if (*c == '\\' || (unsigned char)*c < 32)
+            *c = '_';
+    return 0;
+}
+
+int ps5_library_media(const char *root, const char *system, const char *content_path,
+                      const char *folder, char *out, size_t size)
+{
+    static const char *const types[][2] = {{"Named_Boxarts", "covers"},
+                                           {"Named_Snaps", "screenshots"},
+                                           {"Named_Titles", "titlescreens"},
+                                           {"Named_Logos", "marquees"}};
+    static const char *const extensions[] = {".png", ".jpg", ".jpeg"};
+    const char *id = ps5_library_platform(system);
+    char key[512];
+    struct stat st;
+    size_t i;
+    if (!id || !folder || ps5_library_media_key(content_path, key, sizeof(key)) != 0)
+        return 0;
+    for (i = 0; i < sizeof(types) / sizeof(types[0]); ++i)
+        if (strcmp(folder, types[i][0]) == 0)
+            folder = types[i][1];
+    for (i = 0; i < sizeof(extensions) / sizeof(extensions[0]); ++i)
+    {
+        const int n = snprintf(out, size, "%s/%s/%s/%s%s", root, id, folder, key, extensions[i]);
+        if (n > 0 && (size_t)n < size && stat(out, &st) == 0 && S_ISREG(st.st_mode) &&
+            st.st_size > 0)
+            return 1;
+    }
+    out[0] = '\0';
+    return 0;
+}
+
+int ps5_library_thumbnail(const char *system, const char *content_path, const char *type, char *out,
+                          size_t size)
+{
+    return ps5_library_media(PS5_LIBRARY_MEDIA, system, content_path, type, out, size);
 }

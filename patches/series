@@ -261,3 +261,5 @@
 0112  Core frames are BGRA8888 textures: an RGB565 core's rows are widened on upload, and such a core is not lent the frontend's framebuffer.
 
 0113  input_remapping_directory "default" is the platform's remap folder (src/frontend_ps5.cpp, /app0/config/remaps), as "default" is for the other folders: remaps were saved to a relative "default/" path and never loaded.
+
+0114  The shared media library: RetroArch's thumbnail lookup asks /app0/library (src/ps5_library.c, ps5_library_thumbnail) first, the files every frontend reads; thumbnails_directory "default" is /app0/thumbnails, where it was empty and stopped every lookup.

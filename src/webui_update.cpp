@@ -1,5 +1,6 @@
 /* Copyright (C) 2026 Mihawk; SPDX-License-Identifier: GPL-3.0-or-later */
 #include "webui_update.h"
+#include "scraper_http.h"
 #include <unzip.h>
 #include <mbedtls/sha256.h>
 #include <algorithm>
@@ -252,7 +253,25 @@ bool tag_ok(const std::string &s)
 }
 bool fetch(const std::string &url, const std::string &file, uint64_t limit)
 {
-#ifdef __PROSPERO__
+#if defined(PS5_SCRAPER_CURL)
+    // The WebUI's daemon: libcurl over mbedTLS (src/scraper_http.h). Sony's SSL failed
+    // every handshake from the payload (0x8095f00c), and the daemon runs the updater.
+    const int fd = open(file.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0644);
+    if (fd < 0)
+        return false;
+    ps5_scraper::Http http("PS5-RetroArch-Updater/1");
+    const auto response = http.get(url, limit, &cancel, fd,
+                                   [](uint64_t received)
+                                   {
+                                       std::lock_guard<std::mutex> lock(guard);
+                                       current.received = received;
+                                   });
+    const bool ok = response.status == 200 && response.error.empty() && !response.cancelled &&
+                    !response.too_large && fsync(fd) == 0;
+    close(fd);
+    return ok;
+#endif
+#if defined(__PROSPERO__) && !defined(PS5_SCRAPER_CURL)
     // Keep the platform's certificate/hostname checks enabled.
     struct Handles
     {
