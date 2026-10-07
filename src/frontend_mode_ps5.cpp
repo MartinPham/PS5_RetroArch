@@ -68,6 +68,8 @@ struct ps5_game game;
 bool game_running = false;
 std::time_t game_started = 0;
 
+extern "C" void ps5_permissions_settle(); /* src/permissions_ps5.cpp */
+
 bool exists(const std::string &path)
 {
     std::FILE *file = std::fopen(path.c_str(), "rb");
@@ -82,6 +84,7 @@ void restart_as(const std::string &image, const char *argument, unsigned replace
                 const char *failure)
 {
     const char *const arguments[] = {argument, nullptr};
+    ps5_permissions_settle();
     std::fflush(nullptr);
     const int result = sceSystemServiceLoadExec(image.c_str(), arguments);
     if (result >= 0)
@@ -99,6 +102,7 @@ void restart_as(const std::string &image, unsigned replaced_wait_seconds, const 
  * that did not happen. */
 void close_title(unsigned replaced_wait_seconds)
 {
+    ps5_permissions_settle();
     std::fflush(nullptr);
     const int result = sceSystemServiceLoadExec("exit", nullptr);
     if (result >= 0)

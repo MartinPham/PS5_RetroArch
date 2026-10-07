@@ -86,6 +86,10 @@ std::string launch(const ps5::frontend_mode::Paths &paths, std::vector<const cha
 }
 } // namespace
 
+/* src/permissions_ps5.cpp: the repair is the title's; here it has nothing to wait for. */
+extern "C" void ps5_permissions_settle()
+{
+}
 extern "C" int sceSystemServiceLoadExec(const char *path, const char *const *argv)
 {
     exec_calls++;

@@ -37,6 +37,8 @@
 
 #include "kit.hpp"
 #include "ps5_frontend_choice.h"
+#include <ps5platform/libc.h>
+#include <sys/stat.h>
 
 extern "C" int sceSystemServiceLoadExec(const char *path, const char *const *argv);
 extern "C" int sceKernelUsleep(uint32_t microseconds);
@@ -109,8 +111,11 @@ std::vector<std::uint8_t> readPreview(const char *path, int &width, int &height)
 	return pixels;
 }
 
+void openForFtp(const char *path, int depth); // below
+
 class VulkanExample : public ps5ui::KitExample
 {
+	unsigned framesSinceStart = 0; // for opening the shader cache to FTP
 public:
 	int focus{ 0 };
 	int chosen{ -2 }; // -2: still choosing, -1: close, else the frontend
@@ -327,6 +332,11 @@ public:
 		compose();
 		buildKitCommandBuffer();
 		submitFrame();
+		// Once the first frames are drawn RADV has written its shader cache: open it
+		// to FTP now, as the title may be closed from here without a choice.
+		if (++framesSinceStart == 30) {
+			openForFtp("/app0/radv-shader-cache", 6);
+		}
 		if (chosen != -2) {
 			nextFrontend = chosen;
 			rememberChoice = remember;
@@ -342,6 +352,30 @@ public:
 	}
 };
 
+// What the picker wrote below a folder is given 0777, as eboot.bin gives everything
+// under /app0 (src/permissions_ps5.cpp): this executable has none of the title's
+// wrappers, and RADV writes its shader cache 0666. Without it FTP met those files
+// as the picker left them until eboot.bin's next start.
+void openForFtp(const char *path, int depth)
+{
+	chmod(path, 0777);
+	DIR *directory = depth > 0 ? ps5_opendir(path) : nullptr;
+	if (!directory) {
+		return;
+	}
+	while (const struct dirent *entry = ps5_readdir(directory)) {
+		if (std::strcmp(entry->d_name, ".") == 0 || std::strcmp(entry->d_name, "..") == 0) {
+			continue;
+		}
+		char child[1024];
+		const int length = std::snprintf(child, sizeof(child), "%s/%s", path, entry->d_name);
+		if (length > 0 && static_cast<size_t>(length) < sizeof(child)) {
+			openForFtp(child, depth - 1);
+		}
+	}
+	ps5_closedir(directory);
+}
+
 } // namespace
 
 // Called by the title's main once the program has ended and released its device
@@ -349,6 +383,7 @@ public:
 extern "C" void ps5_title_next(void)
 {
 	const Frontend *next = nextFrontend >= 0 && nextFrontend < cardCount ? &frontends[nextFrontend] : nullptr;
+	openForFtp("/app0/radv-shader-cache", 6); // the device is released: the cache is final
 	// Starting a frontend records Remember: that frontend, or "ask"; closing leaves it
 	if (next) {
 		const int written = ps5_frontend_choice_write(PS5_FRONTEND_CHOICE_PATH, rememberChoice ? next->id : "ask");
@@ -358,7 +393,7 @@ extern "C" void ps5_title_next(void)
 		if (FILE *record = std::fopen(testRecord, "a")) {
 			std::fprintf(record, "{%s,\"next\":\"%s\"}\n", testLine.c_str(), next ? next->next : "");
 			std::fclose(record);
-			chmod(testRecord, 0666);
+			chmod(testRecord, 0777);
 		}
 	}
 	if (!next) {

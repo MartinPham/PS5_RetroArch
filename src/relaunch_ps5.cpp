@@ -24,6 +24,7 @@
  * error, or that is accepted but leaves this process running, is recorded too, and
  * the test is disarmed so the launch still ends in RetroArch.
  */
+extern "C" void ps5_permissions_settle(); /* src/permissions_ps5.cpp */
 #include "relaunch_ps5.h"
 
 #include <cerrno>
@@ -242,6 +243,7 @@ bool run_test(const Paths &paths, int argc, char **argv, unsigned replaced_wait_
     const char *const arguments[] = {next.c_str(), nullptr};
     std::fflush(nullptr);
     const std::string &image = arm.image.empty() ? paths.image : arm.image;
+    ps5_permissions_settle();
     const int result = sceSystemServiceLoadExec(image.c_str(), arguments);
     std::string event = line_start(arm.run, current) +
                         ",\"event\":\"loadexec\",\"result\":" + std::to_string(result);

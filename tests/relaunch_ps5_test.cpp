@@ -70,6 +70,10 @@ bool launch(const ps5::relaunch::Paths &paths, std::vector<const char *> argv, b
 }
 } // namespace
 
+/* src/permissions_ps5.cpp: the repair is the title's; here it has nothing to wait for. */
+extern "C" void ps5_permissions_settle()
+{
+}
 extern "C" int sceSystemServiceLoadExec(const char *path, const char *const *argv)
 {
     exec_calls++;

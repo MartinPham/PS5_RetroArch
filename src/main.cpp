@@ -68,6 +68,7 @@ extern "C" void ps5_crash_report_install();
 extern "C" void ps5_core_threads_start();
 extern "C" void ps5_sampler_start();
 extern "C" void ps5_open_permissions();
+extern "C" void ps5_permissions_settle();
 /* ../PS5_Vulkan's driver/ps5vk_debug.h: whether VideoOut outlives a swapchain.
  * Weak, so a build without the driver links. */
 extern "C" void ps5vk_display_retain(bool retain) __attribute__((weak));
@@ -636,6 +637,7 @@ extern "C" void catchReturnFromMain(int status)
     /* A game mode game goes back to its frontend, and RetroArch the picker started to
      * the picker (src/frontend_mode_ps5.cpp). */
     ps5_frontend_after_retroarch(status, ps5_update::exit_requested() ? 1 : 0);
+    ps5_permissions_settle();
     std::fflush(nullptr);
     const int result = sceSystemServiceLoadExec("exit", nullptr);
     ps5::debug::mark_value("native quit: system service result", result);

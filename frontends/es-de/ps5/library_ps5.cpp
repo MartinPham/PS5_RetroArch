@@ -172,7 +172,7 @@ bool save(pugi::xml_document &document, const std::string &path)
     const std::string temporary = path + ".tmp";
     if (!document.save_file(temporary.c_str(), "\t", pugi::format_default, pugi::encoding_utf8))
         return false;
-    chmod(temporary.c_str(), 0666);
+    chmod(temporary.c_str(), 0777); /* FTP's reach: the title's files are 0777 */
     if (std::rename(temporary.c_str(), path.c_str()) != 0)
     {
         std::remove(temporary.c_str());
@@ -195,8 +195,12 @@ extern "C" int ps5_esde_write_library_to(const struct ps5_esde_library_paths *pa
     }
     const std::map<std::string, Reference> reference = read_reference(paths->reference);
     const std::string data = paths->data;
-    mkdir((data + "/custom_systems").c_str(), 0777);
-    mkdir((data + "/gamelists").c_str(), 0777);
+    /* Folders 0777 whatever the umask, for FTP's reach (src/permissions_ps5.cpp). */
+    for (const char *folder : {"/custom_systems", "/gamelists"})
+    {
+        mkdir((data + folder).c_str(), 0777);
+        chmod((data + folder).c_str(), 0777);
+    }
     enable_collections(data);
     /* RetroArch's favourites as they were at the last start. */
     const std::string favorites_record = data + "/ps5-favorites.txt";
@@ -243,6 +247,7 @@ extern "C" int ps5_esde_write_library_to(const struct ps5_esde_library_paths *pa
         const std::string folder = data + "/gamelists/" + name;
         const std::string gamelist = folder + "/gamelist.xml";
         mkdir(folder.c_str(), 0777);
+        chmod(folder.c_str(), 0777);
         pugi::xml_document previous, games;
         previous.load_file(gamelist.c_str());
         std::map<std::string, pugi::xml_node> known_games;

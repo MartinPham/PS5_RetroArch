@@ -73,7 +73,7 @@ static inline int ps5_frontend_choice_write(const char *path, const char *choice
         return -1;
     }
     /* FTP runs as another user: the file stays reachable, as the title's others are. */
-    chmod(temporary, 0666);
+    chmod(temporary, 0777); /* FTP's reach: the title's files are 0777 */
     if (rename(temporary, path) != 0)
     {
         remove(temporary);
