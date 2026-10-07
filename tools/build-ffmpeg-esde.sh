@@ -48,6 +48,9 @@ components=(
     --enable-filter=buffer --enable-filter=buffersink --enable-filter=abuffer --enable-filter=abuffersink
     --enable-filter=scale --enable-filter=fps --enable-filter=format --enable-filter=aresample
     --enable-filter=aformat --enable-filter=null --enable-filter=anull
+    # es-core's VideoFFmpegComponent ends its audio graph with asetnsamples; without it the
+    # graph fails ("Couldn't add graph filter: Filter not found") and videos stay black.
+    --enable-filter=asetnsamples
     --enable-decoder=h264 --enable-decoder=hevc --enable-decoder=vp8 --enable-decoder=vp9
     --enable-decoder=mpeg4 --enable-decoder=mpeg2video --enable-decoder=mpeg1video --enable-decoder=mjpeg
     --enable-decoder=aac --enable-decoder=aac_latm --enable-decoder=mp3 --enable-decoder=mp3float
