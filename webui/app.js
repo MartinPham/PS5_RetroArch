@@ -719,6 +719,47 @@ window.addEventListener('hashchange', navigate);
 setInterval(() => { if (!document.hidden) reconnect(); }, 10000);
 navigate(); drawTransfers(); reconnect(); checkRelease();
 
+
+// The WebUI's drawn icons (inline SVG, no image requests): flags for regions, the
+// console and the PC, and a badge for each media source. The sources' badges are
+// original drawings, not their owners' logos.
+const EU_STARS = Array.from({ length: 12 }, (_, i) => { const a = i * Math.PI / 6; return `<circle cx="${(15 + 6 * Math.sin(a)).toFixed(2)}" cy="${(10 - 6 * Math.cos(a)).toFixed(2)}" r="0.9" fill="#ffcc00"/>`; }).join('');
+const US_STRIPES = Array.from({ length: 7 }, (_, i) => `<rect y="${(i * 20 / 6.5).toFixed(2)}" width="30" height="${(20 / 13).toFixed(2)}" fill="#b22234"/>`).join('');
+const US_STARS = Array.from({ length: 12 }, (_, i) => `<circle cx="${(1.6 + (i % 4) * 2.9 + (Math.floor(i / 4) % 2) * 1.4).toFixed(2)}" cy="${(1.7 + Math.floor(i / 4) * 2.6).toFixed(2)}" r="0.55" fill="#fff"/>`).join('');
+const ICONS = {
+  'flag-us': `<svg class="flag" viewBox="0 0 30 20" aria-hidden="true"><rect width="30" height="20" fill="#fff"/>${US_STRIPES}<rect width="13" height="10.8" fill="#3c3b6e"/>${US_STARS}</svg>`,
+  'flag-eu': `<svg class="flag" viewBox="0 0 30 20" aria-hidden="true"><rect width="30" height="20" fill="#003399"/>${EU_STARS}</svg>`,
+  'flag-jp': '<svg class="flag" viewBox="0 0 30 20" aria-hidden="true"><rect width="30" height="20" fill="#fff"/><circle cx="15" cy="10" r="6" fill="#bc002d"/></svg>',
+  'flag-kr': '<svg class="flag" viewBox="0 0 30 20" aria-hidden="true"><rect width="30" height="20" fill="#fff"/><path d="M15 6a4 4 0 0 1 0 8 2 2 0 0 1 0-4 2 2 0 0 0 0-4Z" fill="#cd2e3a"/><path d="M15 14a4 4 0 0 1 0-8 2 2 0 0 1 0 4 2 2 0 0 0 0 4Z" fill="#0047a0"/></svg>',
+  globe: '<svg class="flag globe" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="#2f80ed"/><path d="M3 12h18M12 3c-3 3-3 15 0 18M12 3c3 3 3 15 0 18M5 7h14M5 17h14" fill="none" stroke="#fff" stroke-width="1.2"/></svg>',
+  ps5: '<svg class="device" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 2c-2 0-3 1-3 3l1 14c0 2 1 3 3 3h1V2Z" fill="currentColor" opacity=".35"/><path d="M17 2c2 0 3 1 3 3l-1 14c0 2-1 3-3 3h-1V2Z" fill="currentColor" opacity=".35"/><rect x="9.5" y="2" width="5" height="20" rx="1" fill="currentColor"/><circle cx="12" cy="17.5" r=".9" fill="var(--surface)"/></svg>',
+  pc: '<svg class="device" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="3" width="20" height="13" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M9 20h6M12 16v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+  arrow: '<svg class="device arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h15m-5-5 5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  'source-libretro': '<img class="source-logo" src="assets/retroarch.svg" alt="">',
+  'source-screenscraper': '<svg class="source-logo" viewBox="0 0 24 24" aria-hidden="true"><rect x="1" y="1" width="22" height="22" rx="6" fill="#e2463c"/><rect x="5" y="6" width="14" height="9" rx="1.5" fill="none" stroke="#fff" stroke-width="1.8"/><path d="M9 19h6M12 15v4" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/><path d="M8 11.5l2.2-2.2 2 2 1.8-1.8 2 2" fill="none" stroke="#fff" stroke-width="1.4" stroke-linejoin="round"/></svg>',
+  'source-launchbox': '<svg class="source-logo" viewBox="0 0 24 24" aria-hidden="true"><rect x="1" y="1" width="22" height="22" rx="6" fill="#2d6cdf"/><path d="M6 9l6-3 6 3v7l-6 3-6-3Z M6 9l6 3 6-3 M12 12v7" fill="none" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></svg>',
+  'source-emumovies': '<svg class="source-logo" viewBox="0 0 24 24" aria-hidden="true"><rect x="1" y="1" width="22" height="22" rx="6" fill="#f08a24"/><rect x="5" y="6" width="14" height="12" rx="1.5" fill="none" stroke="#fff" stroke-width="1.6"/><path d="M8 6v12M16 6v12" stroke="#fff" stroke-width="1.2"/><path d="M10.5 9.5v5l4-2.5Z" fill="#fff"/></svg>' };
+function iconNode(name) {
+  const template = document.createElement('template');
+  template.innerHTML = ICONS[name] || '';
+  return template.content.firstElementChild;
+}
+// A region tag of a game's name, as a flag ("USA", "Europe", "USA, Europe"...).
+const REGION_FLAGS = { USA: 'flag-us', Europe: 'flag-eu', Japan: 'flag-jp', Korea: 'flag-kr', World: 'globe' };
+function tagNode(tag) {
+  const node = element('span', undefined, 'version-tag');
+  const flags = tag.split(/,\s*/).map(part => REGION_FLAGS[part]).filter(Boolean);
+  if (flags.length && flags.length === tag.split(/,\s*/).length) { for (const flag of flags) node.append(iconNode(flag)); node.title = tag; node.setAttribute('aria-label', tag); node.classList.add('flags'); }
+  else node.textContent = tag;
+  return node;
+}
+// The page's own [data-icon] spans get their drawing once.
+for (const span of $$('[data-icon]')) {
+  const name = span.dataset.icon, label = span.textContent;
+  span.replaceChildren();
+  span.append(iconNode(name === 'pc-to-ps5' ? 'pc' : name)); // the words say where it goes
+  span.append(element('b', label));
+}
 // The games and their media (src/scraper.h): the shared library every frontend reads.
 const KIND_NAMES = { cover: 'Cover', screenshot: 'Screenshot', title: 'Title', logo: 'Logo', video: 'Video' };
 function gameName(game) { return game.name || game.label; }
@@ -766,7 +807,7 @@ function drawGames() {
     const badges = element('div', undefined, 'media-badges');
     for (const kind of game.media) badges.append(element('span', KIND_NAMES[kind] || kind));
     const tags = element('div', undefined, 'version-tags');
-    for (const tag of gameTags(game)) tags.append(element('span', tag));
+    for (const tag of gameTags(game)) tags.append(tagNode(tag));
     card.title = game.path.split('/').pop();
     info.append(element('strong', gameName(game)), tags, element('small', system.name), badges);
     card.append(pick, cover, info); grid.append(card);
@@ -819,7 +860,9 @@ function drawMethod() {
 function drawSources() {
   const box = $('#scrape-sources'); box.replaceChildren();
   for (const source of scraperSettings.sources) {
-    const chip = element('button', source.name, 'chip'); chip.type = 'button';
+    const chip = element('button', undefined, 'chip'); chip.type = 'button';
+    const logo = iconNode('source-' + source.id); if (logo) chip.append(logo);
+    chip.append(element('span', source.name));
     chip.setAttribute('role', 'radio'); chip.setAttribute('aria-checked', source.id === scrapeSource);
     if (!source.available) { chip.disabled = true; chip.append(element('em', 'Coming', 'soon-tag')); }
     chip.addEventListener('click', () => { scrapeSource = source.id; drawSources(); drawKinds(); });
@@ -877,7 +920,7 @@ async function openMedia() {
   for (const radio of $$('input[name="scrape-method"]')) radio.checked = radio.value === scraperSettings.mode;
   scrapeSource = scraperSettings.sources.some(s => s.id === scraperSettings.source && s.available) ? scraperSettings.source : 'libretro';
   scrapeKinds = new Set(scraperSettings.kinds);
-  $('#scrape-region').value = scraperSettings.region;
+  for (const radio of $$('input[name="scrape-region"]')) radio.checked = radio.value === scraperSettings.region;
   const select = $('#scrape-system'), chosen = select.value || $('#games-system').value;
   select.replaceChildren(...library.systems.map(s => new Option(`${s.name} (${s.games.length})`, s.id)));
   if (chosen) select.value = chosen;
@@ -897,7 +940,7 @@ $('#scrape-start').addEventListener('click', async () => {
   const lines = scope === 'selected' ? [...selectedGames].map(([path, system]) => `${system}\t${path}`)
     : library.systems.filter(s => scope === 'all' || s.id === $('#scrape-system').value).map(s => `${s.id}\t`);
   if (!kinds.length || !lines.length) { drawSummary(); return; }
-  const query = new URLSearchParams({ mode: method, source: scrapeSource, kinds: kinds.join(','), region: $('#scrape-region').value, language: scraperSettings.language || 'en', overwrite: $('#scrape-overwrite').checked ? '1' : '0' });
+  const query = new URLSearchParams({ mode: method, source: scrapeSource, kinds: kinds.join(','), region: $('input[name="scrape-region"]:checked')?.value || 'us', language: scraperSettings.language || 'en', overwrite: $('#scrape-overwrite').checked ? '1' : '0' });
   $('#scrape-start').disabled = true; $('#scrape-result').textContent = '';
   try {
     await api('/api/scraper/settings?' + query, { method: 'POST' });
