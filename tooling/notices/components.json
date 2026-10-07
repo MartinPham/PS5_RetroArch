@@ -350,6 +350,17 @@
       "modifications": "The fork's commits over azahar-emu/azahar; externals/dynarmic is mihawk-99/PS5_Dynarmic."
     },
     {
+      "id": "flycast",
+      "name": "Flycast (Dreamcast, NAOMI, NAOMI 2, Atomiswave)",
+      "kind": "code",
+      "artifacts": ["cores/flycast_libretro.so"],
+      "licence": "GPL-2.0-or-later (Flycast); others per core/deps/",
+      "copyright": ["Copyright flyinghead and the Flycast contributors", "Copyright the reicast and nullDC authors"],
+      "texts": [{"from": ".deps/flycast-src/LICENSE", "to": "LICENSE"}],
+      "source": {"kind": "core", "build": "flycast", "tree": ".deps/flycast-src", "remote": "https://github.com/mihawk-99/PS5_Flycast"},
+      "modifications": "The fork's commits over flyinghead/flycast (the PS5 port begun by rpf16rj); submodules at the revisions the fork pins."
+    },
+    {
       "id": "mame",
       "name": "MAME 0.289 (arcade), libretro/mame",
       "kind": "code",

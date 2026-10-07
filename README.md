@@ -4,7 +4,7 @@
 
 **Your collection on the console. Your controls in the browser.**
 
-Native Vulkan rendering · Fifteen release cores · A local WebUI
+Native Vulkan rendering · Sixteen release cores · A local WebUI
 
 [Download a release](https://github.com/mihawk-99/PS5_RetroArch/releases) · [Get started](#get-started) · [Supported systems](#supported-systems) · [Build from source](#build-from-source)
 
@@ -128,6 +128,7 @@ through Vulkan. These are supported systems, not a promise that every title work
 | Arcade | MAME | Software |
 | Nintendo DS | DeSmuME | Software |
 | Nintendo 3DS | Azahar | GPU |
+| Dreamcast, NAOMI, NAOMI 2, Atomiswave | Flycast | GPU |
 
 Use matching arcade sets: MAME currently targets **0.289**, and FBNeo requires
 sets compatible with its pinned version. Azahar requires decrypted content.
@@ -154,6 +155,7 @@ core, folder and game options take priority over these compiled defaults.
 | Mupen64Plus-Next | 4× | Core default |
 | Azahar | 6× · 2400 × 1440 top screen | Core default |
 | DeSmuME | 4× · 1024 × 768 per screen | Core default |
+| Flycast | 4.5× · 2880 × 2160 | Per-pixel transparency |
 
 Other cores retain native rendering, scaled for the display. MAME uses a 4K
 target for vector output; that path still needs console acceptance.
@@ -281,7 +283,8 @@ The cores that needed changes for the console build from my forks of them
 [PS5_MAME](https://github.com/mihawk-99/PS5_MAME),
 [PS5_DeSmuME](https://github.com/mihawk-99/PS5_DeSmuME),
 [PS5_Azahar](https://github.com/mihawk-99/PS5_Azahar) with
-[PS5_Dynarmic](https://github.com/mihawk-99/PS5_Dynarmic)), each pinned by revision in
+[PS5_Dynarmic](https://github.com/mihawk-99/PS5_Dynarmic),
+[PS5_Flycast](https://github.com/mihawk-99/PS5_Flycast)), each pinned by revision in
 its build script. The script uses the sibling checkout when there is one, and
 `github.com/mihawk-99/<fork>` otherwise.
 
@@ -307,7 +310,7 @@ bash tools/verify.sh
 
 The five gates are **format → unit → build → integration → evidence**. The build
 pins RetroArch 1.22.2, fetches core sources/metadata with checked hashes, builds the
-frontend and fifteen cores, and stages the native title in `dist/PPSA99169/`.
+frontend and sixteen cores, and stages the native title in `dist/PPSA99169/`.
 The initial dependency/source fetch requires network access.
 
 For an already configured checkout:
@@ -320,7 +323,8 @@ bash tools/build-ppsspp.sh   # The larger cores have scripts of their own:
                              # build-ppsspp.sh, build-dolphin.sh, build-lrps2.sh,
                              # build-beetle-psx.sh, build-mupen64plus.sh,
                              # build-beetle-saturn.sh, build-vice.sh,
-                             # build-mame.sh, build-desmume.sh, build-azahar.sh
+                             # build-mame.sh, build-desmume.sh, build-azahar.sh,
+                             # build-flycast.sh
 ```
 
 When adding or updating a core, rebuild the title too: the frontend's native
@@ -370,6 +374,7 @@ lists and original notices.
 | [MAME](https://github.com/libretro/mame) | MAMEdev and contributors |
 | [DeSmuME](https://github.com/libretro/desmume) | DeSmuME team and contributors |
 | [Azahar](https://github.com/azahar-emu/azahar), [Dynarmic](https://github.com/azahar-emu/dynarmic) | Azahar contributors, building on Citra; Dynarmic by merryhime and contributors |
+| [Flycast](https://github.com/flyinghead/flycast) | flyinghead and contributors, building on reicast and nullDC; PS5 port begun by rpf16rj |
 | [libretro core-info](https://github.com/libretro/libretro-core-info) | Metadata maintainers and contributors |
 
 
@@ -395,7 +400,7 @@ The cores keep their own licences, and they differ:
 
 | Licence | Cores |
 | --- | --- |
-| GPL-2.0-or-later | FCEUmm, PPSSPP, Dolphin, Beetle PSX HW, Beetle Saturn, Mupen64Plus-Next (with MIT and LGPL parts), VICE, DeSmuME, Azahar (Dynarmic is 0BSD), MAME (as a whole; many files BSD-3-Clause) |
+| GPL-2.0-or-later | FCEUmm, PPSSPP, Dolphin, Beetle PSX HW, Beetle Saturn, Mupen64Plus-Next (with MIT and LGPL parts), VICE, DeSmuME, Azahar (Dynarmic is 0BSD), Flycast, MAME (as a whole; many files BSD-3-Clause) |
 | GPL-3.0-or-later | LRPS2 (PCSX2) |
 | MPL-2.0 | mGBA |
 | Non-commercial licences | Snes9x, FinalBurn Neo, Genesis Plus GX: they may not be sold or used commercially, and FBNeo's forbids asking for donations for a project that uses its code |
