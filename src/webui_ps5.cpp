@@ -38,6 +38,9 @@ namespace
 {
 MHD_Daemon *web_daemon = nullptr;
 std::string root_path, token;
+// The page's build when this server started (webui/version.json): a page newer than
+// it (files replaced by a deploy or an update while the server ran) says so.
+std::string started_build;
 std::mutex frontend_lock;
 std::string frontend_name = "retroarch";
 unsigned short listen_port;
@@ -1557,7 +1560,8 @@ MHD_Result route(MHD_Connection *c, const std::string &url, const std::string &m
             "{\"name\":\"RetroArch\",\"frontend\":" + current_frontend() +
                 ",\"port\":" + std::to_string(listen_port) + ",\"token\":" + quote(token) +
                 ",\"uploadLimit\":" + std::to_string(upload_limit) + ",\"freeBytes\":" +
-                (space_known ? std::to_string(uint64_t(fs.f_bavail) * fs.f_frsize) : "null") + '}');
+                (space_known ? std::to_string(uint64_t(fs.f_bavail) * fs.f_frsize) : "null") +
+                ",\"build\":" + quote(started_build) + '}');
     }
     if (method == "GET" && url == "/api/alerts")
         return respond(c, 200, bios_alerts());
@@ -1903,6 +1907,14 @@ bool ps5_webui_start(const char *root, unsigned short port, bool apply_settings)
     if (web_daemon)
         return true;
     root_path = root;
+    {
+        const std::string version = read_file(root_path + "/webui/version.json", 4096);
+        const size_t at = version.find("\"build\"");
+        const size_t open = at == std::string::npos ? at : version.find('"', version.find(':', at));
+        const size_t close = open == std::string::npos ? open : version.find('"', open + 1);
+        started_build =
+            close == std::string::npos ? "" : version.substr(open + 1, close - open - 1);
+    }
     ps5_update::initialize(root_path);
     // The scraper's jobs live with the server: one left running resumes now.
     ps5_scraper::configure(root_path, std::getenv("PS5_SCRAPER_LIBRETRO_BASE")

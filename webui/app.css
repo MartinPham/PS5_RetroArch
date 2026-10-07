@@ -81,3 +81,4 @@ main{max-width:100rem;margin-inline:auto}
 @media(max-width:600px){.source-item{grid-template-columns:1.4rem 1.3rem minmax(0,1fr) auto;gap:.5rem}.source-move{grid-column:3/-1;justify-content:flex-end}.source-text small{white-space:normal}}
 
 .media-row>.account-line{grid-column:2}.language-pick{white-space:nowrap}@media(max-width:768px){.media-row>.account-line{grid-column:auto}}
+.restart-notice{border-color:#e0b04a;background:#fff5d8}.restart-notice span{color:#583b00}:root[data-theme=dark] .restart-notice{background:#4d3b1c;border-color:#8a6a2a}:root[data-theme=dark] .restart-notice span{color:#ffe09d}

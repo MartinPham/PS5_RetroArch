@@ -13,6 +13,8 @@ const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
     // Opened straight on the tab (the state it reads is declared before it runs).
     await page.goto(process.env.WEBUI_TEST_URL + '/#media');
     await page.waitForFunction(() => document.querySelectorAll('.kind-tile').length === 10);
+    await page.waitForFunction(() => !document.querySelector('#restart-notice').hidden);
+    assert.match(await page.locator('#restart-notice').innerText(), /Close PS5 RetroArch on the console/);
     await page.goto(process.env.WEBUI_TEST_URL + '/#games');
     await page.waitForFunction(() => document.querySelectorAll('.game-card').length === 5);
     await page.locator('#scrape-open').click();

@@ -58,6 +58,14 @@ function setConnection(ok) {
   updateButton();
   $('#install-update').disabled = !ok;
 }
+// A server older than the page files beside it (a deploy or an update while it ran):
+// some features are missing until the title restarts it.
+async function checkServerBuild(build) {
+  try {
+    const page = await (await fetch('/version.json', { cache: 'no-store', signal: AbortSignal.timeout(10000) })).json();
+    $('#restart-notice').hidden = !page.build || build === page.build;
+  } catch { $('#restart-notice').hidden = true; }
+}
 async function reconnect() {
   if (sessionRequest) return sessionRequest;
   sessionRequest = (async () => {
@@ -67,6 +75,7 @@ async function reconnect() {
       const recovered = !connected || token !== state.token;
       token = state.token; freeBytes = state.freeBytes; uploadLimit = state.uploadLimit; frontend = state.frontend ?? 'retroarch';
       setConnection(true);
+      checkServerBuild(state.build);
       $('#storage-info').textContent = freeBytes === null ? 'Games and files stored on your PS5' : `${bytes(freeBytes)} free on the console`;
       if (recovered) await Promise.all([loadLibrary(), loadSettings(), loadContent(currentPath), loadAlerts(), loadUpdate()]);
       return true;
@@ -1006,9 +1015,9 @@ function chosenSource() {
   const list = chainSources();
   if (!list.length) return { id: '', ids: [], name: 'no source', kinds: [], details: false, description: 'Turn on at least one source.' };
   return { id: list.map(s => s.id).join(','), ids: list.map(s => s.id), name: list.map(s => s.name).join(' → '),
-    kinds: [...new Set(list.flatMap(s => s.kinds))], details: list.some(s => s.details), description: list.length === 1 ? list[0].description : '' };
+    kinds: [...new Set(list.flatMap(s => s.kinds))], details: list.some(s => s.details ?? s.id !== 'libretro'), description: list.length === 1 ? list[0].description : '' };
 }
-function sourcesFor(kind) { return chainSources().filter(s => kind === 'details' ? s.details : s.kinds.includes(kind)).map(s => s.name); }
+function sourcesFor(kind) { return chainSources().filter(s => kind === 'details' ? (s.details ?? s.id !== 'libretro') : s.kinds.includes(kind)).map(s => s.name); }
 function pcAllowed() { const ids = chosenSource().ids; return ids.length <= 1 && !ids.includes('screenscraper'); }
 function svgIcon(path) {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('class', 'icon'); svg.setAttribute('aria-hidden', 'true');

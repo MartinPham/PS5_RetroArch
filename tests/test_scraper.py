@@ -230,6 +230,15 @@ class Scraper(unittest.TestCase):
         self.assertEqual(len(self.media_gets()), before + 3)
         self.assertFalse(list((self.root / 'library').rglob('.partial-*')))
 
+    def test_the_server_reports_the_page_build_it_started_with(self):
+        self.stop_server()
+        (self.root / 'webui/version.json').write_text('{"release": "", "build": "abc123", "repository": "x"}\n')
+        self.start_server()
+        self.assertEqual(json.loads(self.request('GET', '/api/status')[1])['build'], 'abc123')
+        # Files replaced while it runs (a deploy, an update): it keeps the build it started with.
+        (self.root / 'webui/version.json').write_text('{"build": "def456"}\n')
+        self.assertEqual(json.loads(self.request('GET', '/api/status')[1])['build'], 'abc123')
+
     def test_libretro_has_no_details(self):
         status, body = self.request('POST', '/api/scraper/start?mode=ps5&source=libretro&kinds=&details=1', b'snes\t')
         self.assertEqual((status, json.loads(body)['error']), (409, 'libretro has no game details: choose ScreenScraper for them.'))
@@ -422,6 +431,8 @@ class Scraper(unittest.TestCase):
             self.skipTest('needs Playwright and Chromium')
         import shutil
         shutil.copytree(ROOT / 'webui', self.root / 'webui', dirs_exist_ok=True)
+        # Page files newer than the running server: the page asks for a restart.
+        (self.root / 'webui/version.json').write_text('{"build": "newer-than-the-server"}\n')
         # Covers the page can decode: real PNGs from the fake source for this test.
         run = subprocess.run(['node', 'tests/webui_scraper_browser.cjs'], cwd=ROOT, capture_output=True, text=True, timeout=300,
                              env={**os.environ, 'PLAYWRIGHT_PATH': playwright, 'WEBUI_TEST_URL': f'http://127.0.0.1:{self.port}'})
