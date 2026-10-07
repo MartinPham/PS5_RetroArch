@@ -1,7 +1,7 @@
 {
   "step": "webui-games-sorting",
   "recorded": "2026-10-07T21:15:01.313313+00:00",
-  "console_run": "none: host WebUI server, Chromium, and staged PS5 build; no console deployment or live run",
+  "console_run": "Deployed to configured base PS5; FTP stored-byte and live HTTP asset verification. Existing daemon still running; new server metadata not exercised live.",
   "revision": "working tree on 11847f6",
   "command": "python3 -m unittest -v tests.test_scraper.Scraper.test_library_sort_details tests.test_scraper.Scraper.test_games_page_in_a_browser",
   "raw_capture": "klog/webui-games-sorting/targeted-tests.log",
@@ -32,7 +32,11 @@
     "== evidence",
     "100 capture(s) replayed, 0 failed",
     "   PASS (1s)",
-    "verify: PASS (unit build integration evidence)"
+    "verify: PASS (unit build integration evidence)",
+    "deployment: 9 changed files verified; 11689 unchanged files retained from prior verification",
+    "eboot.bin stored-byte SHA-256 matches staged artifact: PASS",
+    "live HTTP index.html, app.js, app.css and version.json match staged artifacts: PASS",
+    "running daemon is older than deployed files: title restart required"
   ],
   "staged_tree": "dist/PPSA99169",
   "staged_artifacts": {
@@ -74,5 +78,21 @@
   "verification_logs": [
     "klog/webui-games-sorting/format.log",
     "klog/webui-games-sorting/gates.log"
-  ]
+  ],
+  "deployment": {
+    "date": "2026-10-07",
+    "command": "python3 tools/deploy-title.py",
+    "raw_capture": "klog/webui-games-sorting/deploy/upload.log",
+    "readback": "klog/webui-games-sorting/deploy/readback.json",
+    "changed_files_verified": 9,
+    "unchanged_files_skipped": 11689,
+    "eboot_stored_sha256_matches": true,
+    "http_assets_match": {
+      "index.html": true,
+      "app.js": true,
+      "app.css": true,
+      "version.json": true
+    },
+    "restart_required": true
+  }
 }
