@@ -452,6 +452,38 @@ class Scraper(unittest.TestCase):
         self.assertEqual({field: game[field] for field in fields}, fields)
         self.assertTrue(any('released' not in game for game in games))
 
+    def test_add_game_and_savestate_preview(self):
+        options = json.loads(self.request('GET', '/api/library/add-options')[1])
+        self.assertIn('snes', [s['id'] for s in options['systems']])
+        route = '/api/library/add?' + urllib.parse.urlencode({'system': 'snes', 'filename': 'New Homebrew.sfc'})
+        status, body = self.request('PUT', route, b'synthetic backup')
+        self.assertEqual(status, 201, body)
+        game = json.loads(body)
+        query = urllib.parse.urlencode({'system': 'snes', 'game': game['key'], 'path': game['path']})
+        self.assertEqual(self.request('PUT', route, b'overwrite')[0], 400)
+        for name in ['../escape.sfc', 'invalid.exe', '.hidden.sfc']:
+            self.assertEqual(self.request('PUT', '/api/library/add?' + urllib.parse.urlencode({'system': 'snes', 'filename': name}), b'x')[0], 400)
+        self.assertEqual(self.request('GET', '/api/library/file?' + query + '&kind=rom')[1], b'synthetic backup')
+        self.assertEqual(self.request('POST', '/api/library/game?' + query, json.dumps({'partial': 'true', 'name': 'My Homebrew', 'launchbox_id': '42'}).encode())[0], 200)
+        self.assertEqual(self.request('POST', '/api/library/game?' + query, json.dumps({'partial': 'true', 'developer': 'Homebrew author'}).encode())[0], 200)
+        meta = (self.root / 'library/snes/metadata/New Homebrew.meta').read_text()
+        self.assertIn('edited = "name,developer"', meta)
+        self.assertNotIn('description =', meta)
+        folder = self.root / 'savestates/Snes9x'
+        folder.mkdir(parents=True)
+        state = folder / 'New Homebrew.state3'; state.write_bytes(b'state')
+        screenshot = folder / 'New Homebrew.state3.png'; screenshot.write_bytes(b'PNG fixture')
+        files = json.loads(self.request('GET', '/api/library/files?' + query)[1])
+        self.assertTrue(files['state'][0]['preview'])
+        export = '/api/library/file?' + query + '&' + urllib.parse.urlencode({'kind': 'state', 'file': str(state)})
+        self.assertEqual(self.request('GET', export + '&preview=1')[1], b'PNG fixture')
+        self.assertEqual(self.request('PUT', export + '&existing=replace', b'new state')[0], 201)
+        self.assertFalse(screenshot.exists(), 'An imported state must not keep the old screenshot')
+        self.assertEqual(self.request('GET', export + '&preview=1')[0], 404)
+        screenshot.symlink_to(state)
+        self.assertFalse(json.loads(self.request('GET', '/api/library/files?' + query)[1])['state'][0]['preview'])
+        self.assertEqual(self.request('GET', export + '&preview=1')[0], 404)
+
     def test_game_files_and_edited_metadata(self):
         path = next(iter(self.games.values()))
         rom = self.root / path.removeprefix('/app0/')
@@ -539,6 +571,11 @@ class Scraper(unittest.TestCase):
         import base64
         from unittest.mock import patch
         png = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4////fwAJ+wP9KobjigAAAABJRU5ErkJggg==')
+        state_folder = self.root / 'savestates/Snes9x'
+        state_folder.mkdir(parents=True)
+        key = Path(next(path for label, path in self.games.items() if 'Donkey Kong' in label)).stem
+        (state_folder / (key + '.state5')).write_bytes(b'preview state')
+        (state_folder / (key + '.state5.png')).write_bytes(png)
         with patch(__name__ + '.image', return_value=png):
             run = subprocess.run(['node', 'tests/webui_scraper_browser.cjs'], cwd=ROOT, capture_output=True, text=True, timeout=300,
                                  env={**os.environ, 'PLAYWRIGHT_PATH': playwright, 'WEBUI_TEST_URL': f'http://127.0.0.1:{self.port}'})

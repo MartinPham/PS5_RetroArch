@@ -50,9 +50,9 @@ def picture(name):
     return f'IMAGE {name}'.encode() * 30
 
 
-def metadata_zip():
+def metadata_zip(entries=GAMES):
     games = ''.join(f'<Game><Name>{n}</Name><DatabaseID>{i}</DatabaseID><Platform>{p}</Platform>{x or "<Genres />"}</Game>'
-                    for i, n, p, x in GAMES)
+                    for i, n, p, x in entries)
     alternate = ''.join(f'<GameAlternateName><AlternateName>{n}</AlternateName><DatabaseID>{i}</DatabaseID></GameAlternateName>'
                         for i, n in ALTERNATE)
     images = ''.join(f'<GameImage><DatabaseID>{i}</DatabaseID><FileName>{f}</FileName><Type>{t}</Type>'
@@ -186,8 +186,39 @@ class LaunchBox(unittest.TestCase):
         with self.source.lock:
             return [p for p in self.source.log if p.startswith(prefix)]
 
+    def test_lookup_details_before_game_upload(self):
+        original = self.source.zip
+        self.addCleanup(setattr, self.source, 'zip', original)
+        self.source.zip = metadata_zip(GAMES + [('4000', 'Super Metroid', SNES, ''), ('4001', 'Super Metroid (MSU-1 Enhanced)', SNES, '')] + [(str(5000 + i), f'Super Metroid Variant {i:02}', SNES, '') for i in range(30)])
+        status, body = self.request('POST', '/api/library/launchbox?system=snes&q=Super%20Metroid')
+        self.assertEqual(status, 200, body)
+        results = json.loads(body)['results']
+        self.assertTrue(results)
+        self.assertEqual(results[0]['id'], '4000')  # Literal title beats an edition with the same normalized key.
+        self.assertEqual(results[1]['id'], '2002')  # Exact alias still beats partial/variant names.
+        self.assertEqual(json.loads(self.request('POST', '/api/library/launchbox?system=snes&q=super%20metroid')[1])['results'][0]['id'], '4000')
+        self.assertEqual(len(results), 20)
+        self.assertIn('description', results[0])
+        self.assertIn('id', results[0])
+        self.assertEqual(self.request('POST', '/api/library/launchbox?system=unknown&q=Metroid')[0], 400)
+        status, body = self.request('PUT', '/api/library/add?system=snes&filename=My%20Custom%20Backup.sfc', b'synthetic game')
+        self.assertEqual(status, 201, body)
+        game = json.loads(body)
+        query = urllib.parse.urlencode({'system': 'snes', 'game': game['key']})
+        self.assertEqual(self.request('POST', '/api/library/game?' + query, json.dumps({'partial': 'true', 'name': 'A custom display name', 'launchbox_id': '2002'}).encode())[0], 200)
+        job = self.start(kinds='cover', details=True, lines=('snes\t' + game['path'],))
+        self.wait(job)
+        info = json.loads(self.request('GET', '/api/library/game?' + query)[1])
+        self.assertEqual(info['details']['name'], 'A custom display name')
+        self.assertTrue(next(k for k in info['kinds'] if k['id'] == 'cover')['present'])
+
+
     def test_ps5_mode_titles_alternate_names_romsets_regions_and_details(self):
         self.assertEqual({s['id']: s['available'] for s in json.loads(self.request('GET', '/api/scraper/settings')[1])['sources']}['launchbox'], True)
+        # Add Game without a database choice still permits later ambiguity resolution.
+        query = urllib.parse.urlencode({'system': 'snes', 'game': 'Chrono Trigger SE'})
+        self.assertEqual(self.request('POST', '/api/library/game?' + query,
+                         json.dumps({'partial': 'true', 'launchbox_id': ''}).encode())[0], 200)
         job_id = self.start()
         job = self.wait(job_id)
         self.assertEqual(job['state'], 'done', job)

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-02T16:54:39.012163+00:00",
+  "generatedAt": "2026-10-08T14:03:22.221536+00:00",
   "title": "Design System: PS5 RetroArch WebUI",
   "extensions": {
     "colorMeta": {
@@ -506,6 +506,61 @@
         "name": "intermediate-max",
         "value": "1300px"
       }
+    ],
+    "icons": {
+      "registry": "webui/icons.js",
+      "contract": "Role-specific colorful artwork; preserve authored colors and identities.",
+      "semantic": {
+        "family": "Fluent Color",
+        "rendering": "local SVG image assets with authored fills and gradients",
+        "navigationSize": "27px",
+        "source": "webui/assets/fluent/SOURCE.json",
+        "license": "webui/assets/fluent/LICENSE"
+      },
+      "regions": {
+        "family": "flag-icons",
+        "rendering": "accurate local regional SVGs",
+        "size": "26px \u00d7 20px",
+        "source": "webui/assets/flags/SOURCE.json",
+        "license": "webui/assets/flags/LICENSE"
+      },
+      "systems": {
+        "family": "Linear ES-DE hardware imagery",
+        "registry": "SYSTEM_ICONS",
+        "recognizedPlatformCount": 50,
+        "rendering": "local WebP images cropped above source logos",
+        "frame": "42px \u00d7 30px",
+        "imageSize": "42px \u00d7 42px",
+        "selectorFrame": "56px \u00d7 39px",
+        "selectorImageSize": "56px \u00d7 56px",
+        "fallback": "library artwork for unknown custom systems only",
+        "source": "webui/assets/systems/SOURCE.json",
+        "license": "webui/assets/systems/LICENSE"
+      },
+      "media": {
+        "style": "colorful recognizable media artwork, including authored geometric 3D box and disc",
+        "source": "MEDIA_SYMBOLS in webui/icons.js"
+      },
+      "identity": {
+        "brand": "actual RetroArch logo",
+        "providers": "original colored provider badges"
+      },
+      "utility": {
+        "family": "Lucide",
+        "roles": "simple controls including arrows, close and search",
+        "viewBox": "0 0 24 24",
+        "strokeWidth": 1.75,
+        "fill": "none",
+        "stroke": "currentColor",
+        "strokeLinecap": "round",
+        "strokeLinejoin": "round",
+        "source": "webui/assets/lucide/SOURCE.txt",
+        "license": "webui/assets/lucide/LICENSE"
+      },
+      "accessibility": "Decorative images have empty alt text and aria-hidden=true; decorative SVGs are hidden and not focusable. Labels or accessible control names carry meaning."
+    },
+    "implementationDrift": [
+      "Pre-existing game-dialog shadow, blurred backdrop and entrance animation, plus selection outlines implemented as shadows, differ from the flat contract. Retained without adopting new global tokens or repairing them in this update."
     ]
   },
   "components": [
@@ -546,8 +601,8 @@
       "kind": "nav",
       "refersTo": "nav-current",
       "description": "The solid purple current-page tab inside the dark rail.",
-      "html": "<nav class=\"ds-nav\" aria-label=\"Example navigation\"><a href=\"#overview\" aria-current=\"page\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"m3 10 9-7 9 7v11h-6v-7H9v7H3Z\"/></svg><span>Overview</span></a></nav>",
-      "css": ".ds-nav{background:var(--rail,#37184a);padding:0.722222rem}.ds-nav a{font:1rem/1.45 Arial,Helvetica,sans-serif;display:flex;align-items:center;gap:1.55556rem;min-height:3.11111rem;padding:0.666667rem 1.22222rem;border-radius:0.666667rem;text-decoration:none;color:#fff;font-size:1.11111rem}.ds-nav a[aria-current=page]{background:#6c3b9d}.ds-nav a:hover{background:#62378d}.ds-nav a:focus-visible{outline:0.166667rem solid var(--focus,#a566ef);outline-offset:0.222222rem}.ds-nav svg{width:1.55556rem;height:1.55556rem;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}"
+      "html": "<nav class=\"ds-nav\" aria-label=\"Example navigation\"><a href=\"#overview\" aria-current=\"page\"><svg aria-hidden=\"true\" focusable=\"false\" width=\"48\" height=\"48\" viewBox=\"0 0 48 48\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n<path d=\"M18.0674 27H30.0674V43H18.0674V27Z\" fill=\"url(#ds-home-paint0_linear_378174_9075)\"/>\n<path d=\"M26.4611 7.85517C25.0626 6.71494 23.0722 6.71494 21.6736 7.85517L8.49862 18.5966C7.59383 19.3342 7.06738 20.4493 7.06738 21.628V39.1134C7.06738 41.2599 8.7799 43 10.8924 43H19.0674V30.5C19.0674 29.1193 20.1867 28 21.5674 28H26.5674C27.9481 28 29.0674 29.1193 29.0674 30.5V43H37.2424C39.3549 43 41.0674 41.2599 41.0674 39.1134V21.628C41.0674 20.4492 40.5409 19.3342 39.6361 18.5966L26.4611 7.85517Z\" fill=\"url(#ds-home-paint1_linear_378174_9075)\"/>\n<path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M24.0676 9.32899L8.06752 22.5437C7.20621 23.2427 5.92946 23.1255 5.21581 22.2818C4.50215 21.4381 4.62184 20.1874 5.48315 19.4884L22.2796 5.62735C23.299 4.79992 24.7723 4.78996 25.8033 5.60353L42.6084 19.1918C43.4795 19.8792 43.6168 21.1281 42.9151 21.9814C42.2134 22.8346 40.9384 22.9691 40.0674 22.2818L24.0676 9.32899Z\" fill=\"url(#ds-home-paint2_linear_378174_9075)\"/>\n<defs>\n<linearGradient id=\"ds-home-paint0_linear_378174_9075\" x1=\"24.0674\" y1=\"27\" x2=\"13.4808\" y2=\"44.6501\" gradientUnits=\"userSpaceOnUse\">\n<stop stop-color=\"#944600\"/>\n<stop offset=\"1\" stop-color=\"#CD8E02\"/>\n</linearGradient>\n<linearGradient id=\"ds-home-paint1_linear_378174_9075\" x1=\"10.3125\" y1=\"5.23952\" x2=\"45.1728\" y2=\"31.9998\" gradientUnits=\"userSpaceOnUse\">\n<stop stop-color=\"#FFD394\"/>\n<stop offset=\"1\" stop-color=\"#FFB357\"/>\n</linearGradient>\n<linearGradient id=\"ds-home-paint2_linear_378174_9075\" x1=\"17.8174\" y1=\"0.724922\" x2=\"25.3077\" y2=\"22.4516\" gradientUnits=\"userSpaceOnUse\">\n<stop stop-color=\"#FF921F\"/>\n<stop offset=\"1\" stop-color=\"#EB4824\"/>\n</linearGradient>\n</defs>\n</svg><span>Overview</span></a></nav>",
+      "css": ".ds-nav{background:var(--rail,#37184a);padding:0.722222rem}.ds-nav a{font:1rem/1.45 Arial,Helvetica,sans-serif;display:flex;align-items:center;gap:1.55556rem;min-height:3.11111rem;padding:0.666667rem 1.22222rem;border-radius:0.666667rem;text-decoration:none;color:#fff;font-size:1.11111rem}.ds-nav a[aria-current=page]{background:#6c3b9d}.ds-nav a:hover{background:#62378d}.ds-nav a:focus-visible{outline:0.166667rem solid var(--focus,#a566ef);outline-offset:0.222222rem}.ds-nav svg{width:27px;height:27px}"
     },
     {
       "name": "Working panel",
@@ -562,8 +617,8 @@
       "kind": "custom",
       "refersTo": "dropzone",
       "description": "Dashed file target; use alongside the primary browse action.",
-      "html": "<button class=\"ds-drop\" type=\"button\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M14 2H5v20h14V7Z M14 2v6h5 M8 12h8 M8 16h8\"/></svg><strong>Drop files here</strong><span>or click to browse</span></button>",
-      "css": ".ds-drop{font:1rem/1.45 Arial,Helvetica,sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;width:100%;min-height:7.88889rem;background:transparent;border:0.111111rem dashed #b3b5ce;border-radius:0.444444rem;padding:0.833333rem;color:var(--muted,#6c6f90);cursor:pointer}.ds-drop svg{width:2.11111rem;height:2.11111rem;margin-bottom:0.555556rem;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}.ds-drop strong{font-size:1.11111rem;color:var(--ink,#2d1447)}.ds-drop:hover,.ds-drop.ds-dragging{border-color:var(--accent,#7544b7);background:var(--ground,#ede7f6)}.ds-drop:focus-visible{outline:0.166667rem solid var(--focus,#a566ef);outline-offset:0.222222rem}.ds-drop:disabled{opacity:.55;cursor:not-allowed}@media(min-width:769px){.ds-drop{min-height:7rem}}"
+      "html": "<button class=\"ds-drop\" type=\"button\"><svg aria-hidden=\"true\" focusable=\"false\" width=\"48\" height=\"48\" viewBox=\"0 0 48 48\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n<path d=\"M11 43H37C38.6569 43 40 41.6569 40 40V18L30 14L26 4H11C9.34315 4 8 5.34315 8 7V40C8 41.6569 9.34315 43 11 43Z\" fill=\"url(#ds-document-text-paint0_linear_72095_9761)\"/>\n<path d=\"M11 43H37C38.6569 43 40 41.6569 40 40V18L30 14L26 4H11C9.34315 4 8 5.34315 8 7V40C8 41.6569 9.34315 43 11 43Z\" fill=\"url(#ds-document-text-paint1_radial_72095_9761)\" fill-opacity=\"0.5\"/>\n<path d=\"M26 15V4L40 18H29C27.3431 18 26 16.6569 26 15Z\" fill=\"url(#ds-document-text-paint2_linear_72095_9761)\"/>\n<path d=\"M16.25 23C15.5596 23 15 23.5596 15 24.25C15 24.9404 15.5596 25.5 16.25 25.5H31.75C32.4404 25.5 33 24.9404 33 24.25C33 23.5596 32.4404 23 31.75 23H16.25ZM15 30.25C15 29.5596 15.5596 29 16.25 29H31.75C32.4404 29 33 29.5596 33 30.25C33 30.9404 32.4404 31.5 31.75 31.5H16.25C15.5596 31.5 15 30.9404 15 30.25ZM16.25 35C15.5596 35 15 35.5596 15 36.25C15 36.9404 15.5596 37.5 16.25 37.5H31.75C32.4404 37.5 33 36.9404 33 36.25C33 35.5596 32.4404 35 31.75 35H16.25Z\" fill=\"url(#ds-document-text-paint3_linear_72095_9761)\" fill-opacity=\"0.9\"/>\n<defs>\n<linearGradient id=\"ds-document-text-paint0_linear_72095_9761\" x1=\"30.4\" y1=\"4\" x2=\"33.4843\" y2=\"36.9112\" gradientUnits=\"userSpaceOnUse\">\n<stop stop-color=\"#6CE0FF\"/>\n<stop offset=\"1\" stop-color=\"#4894FE\"/>\n</linearGradient>\n<radialGradient id=\"ds-document-text-paint1_radial_72095_9761\" cx=\"0\" cy=\"0\" r=\"1\" gradientUnits=\"userSpaceOnUse\" gradientTransform=\"translate(41.3333 5.21875) rotate(134.348) scale(24.7968 14.6539)\">\n<stop offset=\"0.362364\" stop-color=\"#4A43CB\"/>\n<stop offset=\"1\" stop-color=\"#4A43CB\" stop-opacity=\"0\"/>\n</radialGradient>\n<linearGradient id=\"ds-document-text-paint2_linear_72095_9761\" x1=\"32.9766\" y1=\"9.83333\" x2=\"29.4766\" y2=\"15.6667\" gradientUnits=\"userSpaceOnUse\">\n<stop stop-color=\"#9FF0F9\"/>\n<stop offset=\"1\" stop-color=\"#B3E0FF\"/>\n</linearGradient>\n<linearGradient id=\"ds-document-text-paint3_linear_72095_9761\" x1=\"33\" y1=\"43.3\" x2=\"17.47\" y2=\"15.8049\" gradientUnits=\"userSpaceOnUse\">\n<stop stop-color=\"#9DEAFF\"/>\n<stop offset=\"1\" stop-color=\"white\"/>\n</linearGradient>\n</defs>\n</svg><strong>Drop files here</strong><span>or click to browse</span></button>",
+      "css": ".ds-drop{font:1rem/1.45 Arial,Helvetica,sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;width:100%;min-height:7.88889rem;background:transparent;border:0.111111rem dashed #b3b5ce;border-radius:0.444444rem;padding:0.833333rem;color:var(--muted,#6c6f90);cursor:pointer}.ds-drop svg{width:2.11111rem;height:2.11111rem;margin-bottom:0.555556rem}.ds-drop strong{font-size:1.11111rem;color:var(--ink,#2d1447)}.ds-drop:hover,.ds-drop.ds-dragging{border-color:var(--accent,#7544b7);background:var(--ground,#ede7f6)}.ds-drop:focus-visible{outline:0.166667rem solid var(--focus,#a566ef);outline-offset:0.222222rem}.ds-drop:disabled{opacity:.55;cursor:not-allowed}@media(min-width:769px){.ds-drop{min-height:7rem}}"
     },
     {
       "name": "Settings value row",
@@ -607,14 +662,19 @@
       },
       {
         "name": "The Flat Surface Rule",
-        "body": "Separate regions with tone, spacing and thin borders; the implemented interface has no shadows.",
+        "body": "Separate shell regions with tone, spacing and thin borders; do not turn the shading inside icon artwork into a new surface treatment.",
         "section": "elevation"
+      },
+      {
+        "name": "The Recognizable Artwork Rule",
+        "body": "Preserve authored color and identity: Fluent Color for interface meaning, accurate flags for regions, hardware imagery for recognized systems, original brand/provider marks and simple outlines for utility controls.",
+        "section": "components"
       }
     ],
     "dos": [
       "Do preserve the aubergine navigation, lavender ground and purple action hierarchy.",
       "Do keep labels beside icons and status text beside status indicators.",
-      "Do use the local heading font, inline SVG icons and the discreet credited portrait.",
+      "Do use the local heading font, colorful semantic artwork, recognizable hardware and brand marks, and the discreet credited portrait.",
       "Do retain visible keyboard focus and stable Cancel controls while progress changes.",
       "Do stack working panels and keep release information visible on narrow screens.",
       "Do keep settings scope, mode, search and save status explicitly labeled; show explanations in Guided and exact configuration keys in Advanced.",
@@ -622,7 +682,8 @@
     ],
     "donts": [
       "Don't present a failed release check or an unversioned development build as up to date.",
-      "Don't introduce external UI fonts, icon packages or framework dependencies into this offline interface.",
+      "Don't introduce external UI fonts, runtime icon packages or framework dependencies into this offline interface.",
+      "Don't flatten colorful semantic artwork, flags, hardware or brand identities into one monochrome icon family.",
       "Don't expand the credit portrait into a hero image or replace useful content with fabricated metrics.",
       "Don't remove the reduced-motion override when extending transfer feedback."
     ]

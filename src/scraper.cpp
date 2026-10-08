@@ -501,7 +501,7 @@ std::string kinds_text(const std::vector<std::string> &kinds)
         out += (out.empty() ? "" : ",") + kind;
     return out;
 }
-std::vector<std::string> kinds_from(const std::string &text)
+std::vector<std::string> comma_values(const std::string &text)
 {
     std::vector<std::string> out;
     size_t start = 0;
@@ -511,10 +511,18 @@ std::vector<std::string> kinds_from(const std::string &text)
         if (end == std::string::npos)
             end = text.size();
         const std::string kind = text.substr(start, end - start);
-        if (kind_folders.count(kind) && std::find(out.begin(), out.end(), kind) == out.end())
+        if (!kind.empty() && std::find(out.begin(), out.end(), kind) == out.end())
             out.push_back(kind);
         start = end + 1;
     }
+    return out;
+}
+std::vector<std::string> kinds_from(const std::string &text)
+{
+    auto out = comma_values(text);
+    out.erase(std::remove_if(out.begin(), out.end(),
+                             [](const std::string &kind) { return !kind_folders.count(kind); }),
+              out.end());
     return out;
 }
 /* An ambiguous item's candidates in the job file, separated by the unit separator. */
@@ -1813,7 +1821,8 @@ struct XmlRecords
     }
 };
 /* Reads one file of the zip through the reader; false when it is not there. */
-bool read_zipped(const std::string &zip, const char *name, XmlRecords &reader)
+bool read_zipped(const std::string &zip, const char *name, XmlRecords &reader,
+                 const std::atomic<bool> &cancel)
 {
     unzFile file = unzOpen(zip.c_str());
     if (!file)
@@ -1824,7 +1833,7 @@ bool read_zipped(const std::string &zip, const char *name, XmlRecords &reader)
         std::vector<char> buffer(1 << 20);
         int got;
         while ((got = unzReadCurrentFile(file, buffer.data(), unsigned(buffer.size()))) > 0 &&
-               !cancelling)
+               !cancel)
             reader.feed(buffer.data(), size_t(got));
         ok = got == 0;
         unzCloseCurrentFile(file);
@@ -1835,7 +1844,8 @@ bool read_zipped(const std::string &zip, const char *name, XmlRecords &reader)
 
 std::mutex launchbox_lock;
 /* The index, built from a fresh database when it is missing or a month old. */
-bool launchbox_prepare(Http &http, Job &job, std::string &why)
+bool launchbox_prepare(Http &http, Job &job, std::string &why,
+                       const std::atomic<bool> &cancel = cancelling)
 {
     std::lock_guard<std::mutex> guard(launchbox_lock);
     const std::string folder = launchbox_folder(), done = folder + "/index.done";
@@ -1862,7 +1872,7 @@ bool launchbox_prepare(Http &http, Job &job, std::string &why)
         why = "The console could not write to its storage.";
         return false;
     }
-    const Response response = http.get(launchbox_metadata, uint64_t(1) << 30, &cancelling, fd);
+    const Response response = http.get(launchbox_metadata, uint64_t(1) << 30, &cancel, fd);
     const bool complete =
         response.status == 200 && response.error.empty() && !response.cancelled && fsync(fd) == 0;
     close(fd);
@@ -1935,7 +1945,7 @@ bool launchbox_prepare(Http &http, Job &job, std::string &why)
                 }
         }
     };
-    bool ok = read_zipped(zip, "Metadata.xml", games);
+    bool ok = read_zipped(zip, "Metadata.xml", games, cancel);
     for (auto &file : files)
         if (file.second)
             ok = std::fclose(file.second) == 0 && ok;
@@ -1947,13 +1957,13 @@ bool launchbox_prepare(Http &http, Job &job, std::string &why)
         if (record == "MameFile" && names && f.count("FileName") && f.count("Name"))
             line(names, {f.at("FileName"), f.at("Name")});
     };
-    ok = names && read_zipped(zip, "Mame.xml", mame) && ok;
+    ok = names && read_zipped(zip, "Mame.xml", mame, cancel) && ok;
     if (names)
         ok = std::fclose(names) == 0 && ok;
     unlink(zip.c_str());
-    if (!ok || cancelling)
+    if (!ok || cancel)
     {
-        why = cancelling ? "Cancelled." : "The LaunchBox database could not be read.";
+        why = cancel ? "Cancelled." : "The LaunchBox database could not be read.";
         return false;
     }
     for (const auto &file : files)
@@ -2150,7 +2160,10 @@ void process_launchbox(Http &http, Job &job, unsigned index, const Options &opti
             }
         }
     };
-    const std::string chosen = candidate_id(item.matched);
+    const Fields stored = read_fields(meta_path(item.game.system, item.game.key));
+    const std::string chosen = stored.count("launchbox_id") && !stored.at("launchbox_id").empty()
+                                   ? stored.at("launchbox_id")
+                                   : candidate_id(item.matched);
     if (!chosen.empty())
         find_id(chosen);
     else
@@ -2792,9 +2805,13 @@ bool edit_game(const std::string &system, const std::string &key, const std::str
     }
     std::lock_guard<std::mutex> guard(metadata_lock);
     Fields meta = read_fields(meta_path(system, key));
+    auto edited = comma_values(meta["edited"]);
+    const bool partial = input["partial"].str() == "true";
     for (const char *field : {"name", "description", "developer", "publisher", "genre", "players",
                               "rating", "released"})
     {
+        if (partial && input[field].kind == Json::null)
+            continue;
         if (input[field].kind != Json::string)
         {
             why = "Every detail must be text.";
@@ -2820,8 +2837,20 @@ bool edit_game(const std::string &system, const std::string &key, const std::str
             }
         }
         meta[field] = value;
+        if (!holds(edited, field))
+            edited.push_back(field);
     }
-    meta["edited"] = "name,description,developer,publisher,genre,players,rating,released";
+    if (input["launchbox_id"].kind == Json::string)
+    {
+        const auto id = input["launchbox_id"].str();
+        if (id.size() > 20 || id.find_first_not_of("0123456789") != std::string::npos)
+        {
+            why = "Choose a valid LaunchBox result.";
+            return false;
+        }
+        meta["launchbox_id"] = id;
+    }
+    meta["edited"] = kinds_text(edited);
     make_folders(library_root() + '/' + system + "/metadata");
     if (write_atomic(meta_path(system, key), fields_text(meta)))
         return true;
@@ -2879,6 +2908,162 @@ void uploaded(const std::string &system, const std::string &key, const std::stri
     write_atomic(meta_path(system, key), fields_text(meta));
 }
 
+namespace
+{
+std::map<std::string, Fields> add_systems()
+{
+    ps5_library lib{};
+    ps5_library_load(&lib, (root_path + "/playlists").c_str(), (root_path + "/info").c_str(),
+                     (root_path + "/cores").c_str());
+    std::map<std::string, Fields> out;
+    for (size_t i = 0; i < lib.core_count; ++i)
+    {
+        const auto &core = lib.cores[i];
+        const std::string databases = core.databases;
+        for (size_t at = 0; at < databases.size();)
+        {
+            auto end = databases.find('|', at);
+            const auto database = databases.substr(at, end - at);
+            const char *id = ps5_library_platform(database.c_str());
+            if (id)
+            {
+                auto &entry = out[id];
+                entry["name"] = ps5_library_platform_database(id);
+                if (entry["extensions"].empty())
+                    entry["extensions"] = core.extensions;
+                else
+                    entry["extensions"] += '|' + std::string(core.extensions);
+            }
+            if (end == std::string::npos)
+                break;
+            at = end + 1;
+        }
+    }
+    ps5_library_free(&lib);
+    return out;
+}
+} // namespace
+std::string add_systems_json()
+{
+    std::string out = "{\"systems\":[";
+    for (const auto &system : add_systems())
+    {
+        if (out.back() != '[')
+            out += ',';
+        out += "{\"id\":" + quote(system.first) + ",\"name\":" + quote(system.second.at("name")) +
+               ",\"extensions\":" + quote(system.second.at("extensions")) + '}';
+    }
+    return out + "]}";
+}
+bool add_target(const std::string &system, const std::string &filename, std::string &relative,
+                std::string &key, std::string &why)
+{
+    const auto systems = add_systems();
+    auto selected = systems.find(system);
+    if (selected == systems.end() || filename.empty() || filename.size() > 240 ||
+        filename.front() == '.' || filename.find_first_of("/\\#\t\r\n") != std::string::npos ||
+        filename.find('\0') != std::string::npos)
+    {
+        why = "Choose an installed system and a valid game filename.";
+        return false;
+    }
+    const auto dot = filename.find_last_of('.');
+    std::string ext = dot == std::string::npos ? "" : filename.substr(dot + 1);
+    for (char &c : ext)
+        c = char(std::tolower((unsigned char)c));
+    if (ext.empty() ||
+        ("|" + selected->second.at("extensions") + "|").find('|' + ext + '|') == std::string::npos)
+    {
+        why = "This file type is not supported by the installed cores for this system.";
+        return false;
+    }
+    relative = selected->second.at("name") + '/' + filename;
+    key = game_key("/app0/content/" + relative);
+    for (const auto &game : load_games())
+        if (game.system == system && game.key == key)
+        {
+            why = "This game filename is already in your library. Open its overlay to replace it, "
+                  "or rename the new file.";
+            return false;
+        }
+    return true;
+}
+std::string launchbox_lookup(const std::string &system, const std::string &query, std::string &why)
+{
+    if (!launchbox_platforms.count(system) || query.size() < 2 || query.size() > 160)
+    {
+        why = "Choose a supported system and enter at least two letters.";
+        return "";
+    }
+    Http http("PS5-RetroArch");
+    Job lookup;
+    if (!launchbox_prepare(http, lookup, why, stopping))
+        return "";
+    std::vector<std::string> candidates;
+    const auto key = title_key(query);
+    std::vector<std::pair<std::string, std::string>> matches;
+    for (const auto &platform : launchbox_platforms.at(system))
+    {
+        const auto index = launchbox_index(platform);
+        for (const auto &title : index->by_title)
+        {
+            if (title.first.find(key) == std::string::npos)
+                continue;
+            for (const auto &id : title.second)
+            {
+                const auto found = index->by_id.find(id);
+                if (found == index->by_id.end())
+                    continue;
+                const auto &game = index->games[found->second];
+                const auto candidate = game.name + " [" + id + ']';
+                /* The normalized index strips parenthesized edition tags. A literal
+                 * title must outrank an enhanced edition sharing that index key. */
+                const bool exact = game.name.size() == query.size() &&
+                                   std::equal(game.name.begin(), game.name.end(), query.begin(),
+                                              [](unsigned char a, unsigned char b)
+                                              { return std::tolower(a) == std::tolower(b); });
+                matches.emplace_back((exact                ? "0"
+                                      : title.first == key ? "1"
+                                                           : "2") +
+                                         title.first,
+                                     candidate);
+            }
+        }
+    }
+    std::sort(matches.begin(), matches.end());
+    for (const auto &match : matches)
+        if (!holds(candidates, match.second) && candidates.size() < 20)
+            candidates.push_back(match.second);
+    for (const auto &candidate : launchbox_search(system, query, "wor"))
+        if (!holds(candidates, candidate) && candidates.size() < 20)
+            candidates.push_back(candidate);
+    std::string out = "{\"results\":[";
+    for (const auto &candidate : candidates)
+    {
+        const auto id = candidate_id(candidate);
+        for (const auto &platform : launchbox_platforms.at(system))
+        {
+            auto index = launchbox_index(platform);
+            auto hit = index->by_id.find(id);
+            if (hit == index->by_id.end())
+                continue;
+            const auto &g = index->games[hit->second];
+            if (out.back() != '[')
+                out += ',';
+            out +=
+                "{\"id\":" + quote(g.id) + ",\"name\":" + quote(g.name) +
+                ",\"description\":" + quote(g.overview) + ",\"developer\":" + quote(g.developer) +
+                ",\"publisher\":" + quote(g.publisher) + ",\"released\":" + quote(g.released) +
+                ",\"genre\":" + quote(g.genres) + ",\"players\":" + quote(g.players) +
+                ",\"rating\":" +
+                quote(g.rating.empty() ? "" : std::to_string(std::atof(g.rating.c_str()) / 5.0)) +
+                '}';
+            break;
+        }
+    }
+    return out + "]}";
+}
+
 std::string library_json()
 {
     const auto games = load_games();
@@ -2930,7 +3115,8 @@ std::string settings_json()
     for (const auto &kind : kind_catalog)
         catalog += std::string(catalog.empty() ? "" : ",") + "{\"id\":" + quote(kind.id) +
                    ",\"name\":" + quote(kind.name) + ",\"description\":" + quote(kind.description) +
-                   ",\"folder\":" + quote(kind.folder) + '}';
+                   ",\"folder\":" + quote(kind.folder) +
+                   ",\"accepts\":" + list(accepted_types(kind.id)) + '}';
     /* The sources: libretro now; the others are named so the page can say where each
      * media type will come from (they need accounts or keys, to be added). */
     struct SourceInfo
@@ -3171,6 +3357,11 @@ bool start(const Options &requested, const std::vector<Selection> &selection, st
             {
                 Item item;
                 item.game = game;
+                const auto metadata = read_fields(meta_path(game.system, game.key));
+                if (metadata.count("edited") &&
+                    holds(comma_values(metadata.at("edited")), "name") && metadata.count("name") &&
+                    !metadata.at("name").empty())
+                    item.game.label = metadata.at("name");
                 job->items.push_back(item);
             }
     if (job->items.empty())

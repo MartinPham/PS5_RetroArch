@@ -271,12 +271,18 @@ class ScreenScraper(unittest.TestCase):
 
     def test_ps5_mode_checksum_name_search_details_and_thread_limit(self):
         self.assertEqual(self.sign_in()[0], 200)
+        # Database IDs belong to their source; a LaunchBox choice is not a ScreenScraper ID.
+        key = self.key('Super Metroid (Japan, USA) (En,Ja)')
+        query = urllib.parse.urlencode({'system': 'snes', 'game': key})
+        self.assertEqual(self.request('POST', '/api/library/game?' + query,
+                         json.dumps({'partial': 'true', 'launchbox_id': '2002'}).encode())[0], 200)
         job_id = self.start()
         job = self.wait(job_id)
         self.assertEqual(job['state'], 'done', job)
         self.assertEqual(job['counts'], {'ambiguous': 1, 'done': 3, 'unmatched': 1})
         self.assertLessEqual(self.source.most_busy, 2 + 3)  # two games at once (and their media downloads)
         infos = [q for e, q in self.source.calls if e == 'jeuInfos.php']
+        self.assertFalse(any(q.get('gameid') == '2002' for q in infos))
         self.assertTrue(any(q.get('crc') == 'D63ED5F8' and q.get('romtaille') == '300' for q in infos))
         library = self.root / 'library/snes'
         metroid = self.key('Super Metroid (Japan, USA) (En,Ja)')

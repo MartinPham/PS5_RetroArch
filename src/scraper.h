@@ -68,6 +68,10 @@ bool busy();
 
 /* The library with what the store holds for each game, as JSON for the WebUI. */
 std::string library_json();
+std::string add_systems_json();
+bool add_target(const std::string &system, const std::string &filename, std::string &relative,
+                std::string &key, std::string &why);
+std::string launchbox_lookup(const std::string &system, const std::string &query, std::string &why);
 /* The remembered choices (method, media, region), as JSON; and saving them. */
 std::string settings_json();
 bool save_settings(const Options &options);

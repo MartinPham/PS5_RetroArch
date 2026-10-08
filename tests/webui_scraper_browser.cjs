@@ -9,7 +9,40 @@ const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
   try {
     const page = await browser.newPage();
     const errors = []; page.on('pageerror', e => errors.push(e.message));
-    await page.route('https://api.github.com/**', route => route.fulfill({ json: [] }));
+    let releaseResponse = [];
+    await page.route('https://api.github.com/**', route => route.fulfill({ json: releaseResponse }));
+    // Sign in from Add Game before the Download Media page initializes its state.
+    await page.route('**/api/scraper/settings', async route => {
+      const response = await route.fetch(), settings = await response.json();
+      settings.sources.find(s => s.id === 'screenscraper').available = true;
+      await route.fulfill({json: settings});
+    });
+    await page.route('**/api/scraper/account?source=screenscraper', route => route.fulfill({json:{signed_in:true,user:'browser fixture'}}));
+    await page.route('**/version.json', async route => {
+      const response = await route.fetch(), version = await response.json();
+      await route.fulfill({json:{...version,release:'v0.6.7-alpha.6'}});
+    });
+    await page.goto(process.env.WEBUI_TEST_URL + '/#games');
+    for (const [tag,state,icon] of [['v0.6.7-alpha.6','current','check'],['v1.0.0-beta.1','update','info']]) {
+      releaseResponse = [{tag_name:tag,published_at:'2026-10-01T13:00:00Z',draft:false}];
+      await page.locator('#check-release').click();
+      await page.waitForFunction(state => document.querySelector('.release-bar').dataset.state === state, state);
+      assert.equal(await page.locator('.release-icon').evaluate((node,name) => node.classList.contains('color-icon') && node.getAttribute('src') === uiIcon(name).getAttribute('src'), icon),true);
+    }
+    releaseResponse = []; await page.unroute('**/version.json');
+    await page.locator('#add-game-open').click();
+    await page.locator('[data-add-tab=media]').click();
+    await page.locator('#add-download').click();
+    await page.locator('.add-source', {hasText:'ScreenScraper'}).getByRole('button', {name:'Sign in',exact:true}).click();
+    await page.locator('#sign-in-user').fill('browser fixture');
+    await page.locator('#sign-in-password').fill('fixture');
+    await page.locator('#sign-in-submit').click();
+    await page.locator('#sign-in-submit').filter({hasText:'Done'}).waitFor();
+    assert.equal(await page.locator('#sign-in-error').innerText(),'');
+    await page.locator('#sign-in-submit').click();
+    await page.locator('#add-cancel').click();
+    await page.unroute('**/api/scraper/settings');
+    await page.unroute('**/api/scraper/account?source=screenscraper');
     // Opened straight on the tab (the state it reads is declared before it runs).
     await page.goto(process.env.WEBUI_TEST_URL + '/#media');
     await page.waitForFunction(() => document.querySelectorAll('.kind-tile').length === 10);
@@ -17,7 +50,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
     assert.match(await page.locator('#restart-notice').innerText(), /Close PS5 RetroArch on the console/);
     await page.goto(process.env.WEBUI_TEST_URL + '/#games');
     await page.waitForFunction(() => document.querySelectorAll('.game-card').length === 5);
-    await page.locator('#scrape-open').click();
+    await page.locator('a[data-page=media]').click();
     await page.waitForFunction(() => location.hash === '#media' && document.querySelectorAll('.kind-tile').length === 10);
     assert.match(await page.locator('#scrape-method-hint').innerText(), /This PC → PS5: this PC downloads, then transfers to the PS5/);
     assert.equal(await page.locator('#scrape-start').isDisabled(), true, 'no start until a method is chosen');
@@ -66,19 +99,19 @@ const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
     assert.equal(await page.locator('.recap-game .kind-pill').count(), 2, 'one kind shown when one is picked');
     await page.goto(process.env.WEBUI_TEST_URL + '/#games');
     await page.waitForFunction(() => {
-      const covers = [...document.querySelectorAll('.game-cover img')];
+      const covers = [...document.querySelectorAll('.game-cover img:not(.color-icon)')];
       return covers.length === 4 && covers.every(img => img.complete && img.naturalWidth > 0);
     });
     // A card opens the game: one row a kind of media, missing ones greyed, each replaceable.
     await page.locator('.game-card', { hasText: 'Donkey Kong Country 2' }).locator('.game-cover').click();
     const sheet = page.locator('#game-sheet');
     await sheet.waitFor({ state: 'visible' });
-    await page.waitForFunction(() => document.querySelectorAll('.sheet-thumb').length === 10);
+    await page.waitForFunction(() => document.querySelectorAll('#game-sheet .sheet-thumb').length === 10);
     assert.equal(await page.locator('.media-row-item:not(.missing)').count(), 1);
     assert.equal(await page.locator('.media-row-item').count(), 1);
     assert.equal(await page.locator('.media-row-item[data-kind="cover"]:not(.missing) .media-stage').count(), 1);
     assert.match(await page.locator('#sheet-media-count').innerText(), /3 of 10 types/);
-    await page.locator('.sheet-thumb', { hasText: 'Fan art' }).click();
+    await page.locator('#game-sheet .sheet-thumb', { hasText: 'Fan art' }).click();
     const fanart = page.locator('.media-row-item[data-kind="fanart"]');
     assert.equal(await fanart.locator('button').innerText(), 'Add…');
     // A type no frontend shows is refused on the page; a PNG is sent and shown at once.
@@ -105,6 +138,10 @@ const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
     const downloadUrl = await saveGroup.locator('a').getAttribute('href');
     assert.equal(await (await page.request.get(process.env.WEBUI_TEST_URL + downloadUrl)).text(), 'native save fixture');
     const stateGroup = page.locator('.sheet-file-group[data-kind="state"]');
+    await page.waitForFunction(() => document.querySelector('.state-preview img')?.naturalWidth > 0);
+    await stateGroup.locator('.state-preview-image').click();
+    await page.locator('.lightbox').waitFor(); await page.keyboard.press('Escape');
+    await stateGroup.locator('select').selectOption('');
     await stateGroup.locator('input[type="number"]').fill('3');
     page.once('dialog', dialog => dialog.accept());
     await stateGroup.locator('input[type="file"]').setInputFiles({ name: 'progress.state', mimeType: 'application/octet-stream', buffer: Buffer.from('native state fixture') });
@@ -123,13 +160,71 @@ const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
     assert.equal(await page.locator('input[name="games-view"][value="box3d"]').isChecked(), true);
     await page.locator('label:has(input[name="games-view"][value="cover"])').click();
     await page.waitForFunction(() => {
-      const covers = [...document.querySelectorAll('.game-cover img')];
+      const covers = [...document.querySelectorAll('.game-cover img:not(.color-icon)')];
       return covers.length === 4 && covers.every(img => img.complete && img.naturalWidth > 0);
     });
     // The checkbox still selects without opening.
     await page.locator('.game-card', { hasText: 'Donkey Kong Country 2' }).locator('.game-select').click();
     assert.equal(await sheet.isVisible(), false);
     await page.locator('.game-card', { hasText: 'Donkey Kong Country 2' }).locator('.game-select').click();
+    await page.locator('#add-game-open').click();
+    await page.locator('#add-system').selectOption('snes');
+    await page.locator('#add-file').setInputFiles({name:'Browser Homebrew.sfc', mimeType:'application/octet-stream', buffer:Buffer.from('synthetic game')});
+    await page.locator('[data-add-tab=details]').click();
+    await page.locator('#add-name').fill('My Browser Homebrew');
+    await page.locator('#add-developer').fill('Homebrew author');
+    await page.locator('[data-add-tab=media]').click();
+    await page.locator('#add-media-file').setInputFiles({name:'cover.png', mimeType:'image/png', buffer:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4////fwAJ+wP9KobjigAAAABJRU5ErkJggg==','base64')});
+    await page.locator('[data-add-tab=details]').click();
+    assert.equal(await page.locator('#add-developer').inputValue(),'Homebrew author');
+    await page.locator('#add-submit').click();
+    await page.locator('#add-game').waitFor({state:'hidden'});
+    await page.locator('#sheet-title').filter({hasText:'My Browser Homebrew'}).waitFor();
+    await page.locator('.media-row-item:not(.missing)').waitFor();
+    assert.equal(await page.locator('.media-row-item:not(.missing)').count(),1);
+    await page.locator('#sheet-close').click();
+    assert.equal(await page.locator('.game-card').count(),6);
+    assert.ok(await page.locator('.sidebar nav .color-icon').count() >= 6);
+    // Color artwork uses bundled assets; real flags and every known system resolve.
+    assert.equal(await page.locator('.game-platform .system-icon img').count(),6);
+    const artwork = await page.evaluate(() => ({ systems:Object.values(SYSTEM_ICONS), flags:['us','eu','jp','kr'].map(f => iconNode('flag-'+f).getAttribute('src')) }));
+    assert.equal(artwork.systems.length,50);
+    for (const src of [...artwork.systems,...artwork.flags]) assert.equal((await page.request.get(process.env.WEBUI_TEST_URL+'/'+src)).status(),200,src);
+    assert.equal((await page.request.get(process.env.WEBUI_TEST_URL+'/assets/systems/../../retroarch.cfg')).status(),404);
+    // Adding with downloads stays in a live progress view and opens fresh artwork.
+    await page.locator('#add-game-open').click();
+    await page.locator('#add-system').selectOption('snes');
+    await page.locator('#add-file').setInputFiles({name:'Super Metroid Download Check.sfc',mimeType:'application/octet-stream',buffer:Buffer.from('synthetic download-flow backup')});
+    await page.locator('[data-add-tab=details]').click();
+    await page.locator('#add-name').fill('Super Metroid (Japan, USA) (En,Ja)');
+    await page.locator('[data-add-tab=media]').click();
+    await page.locator('#add-download').click();
+    assert.match(await page.locator('#add-submit').innerText(),/Add game & download media/);
+    // Keep the running phase visible even on a fast local fixture.
+    let polls = 0, lastAddJob;
+    await page.route('**/api/scraper/job?id=*',async route => {
+      const response = await route.fetch(), data = await response.json(); lastAddJob = data.job;
+      if (data.job && polls++ < 2) data.job.state = 'running';
+      await route.fulfill({json:data});
+    });
+    await page.locator('#add-submit').click();
+    await page.locator('#add-activity').waitFor({state:'visible'});
+    assert.equal(await page.locator('#game-sheet').isVisible(),false);
+    await page.locator('#add-submit').filter({hasText:'Open game'}).waitFor({timeout:30000});
+    assert.ok(await page.locator('#add-live-media .add-live-item').count() > 0,JSON.stringify(lastAddJob));
+    if (process.env.WEBUI_ADD_SCREENSHOTS) {
+      await page.screenshot({path:process.env.WEBUI_ADD_SCREENSHOTS+'-desktop.png'});
+      await page.setViewportSize({width:390,height:844});
+      await page.screenshot({path:process.env.WEBUI_ADD_SCREENSHOTS+'-mobile.png'});
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1),true);
+      await page.setViewportSize({width:1280,height:720});
+    }
+    await page.locator('#add-submit').click();
+    await page.locator('#add-game').waitFor({state:'hidden'});
+    await page.locator('#sheet-title').filter({hasText:'Super Metroid'}).waitFor();
+    assert.ok(await page.locator('.media-row-item:not(.missing)').count() > 0,'downloaded artwork is visible without reloading');
+    await page.locator('#sheet-close').click();
+    await page.unroute('**/api/scraper/job?id=*');
     // Sorting/filtering the complete library, across systems, before the 300-card limit.
     const game = (name, details = {}) => ({ name, label: name, key: name, path: `/app0/content/${name}.zip`, media: [], ...details });
     const library = { systems: [
@@ -139,7 +234,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
     const libraryRoute = route => route.fulfill({ json: library });
     await page.route('**/api/library', libraryRoute);
     await page.locator('#refresh-games').click();
-    await page.waitForFunction(() => document.querySelectorAll('.game-card').length === 6);
+    await page.locator('.game-info strong').filter({hasText: '!Unknown'}).waitFor();
     const titles = () => page.locator('.game-info strong').allTextContents();
     assert.deepEqual(await titles(), ['!Unknown', '1942', 'Alpha 2', 'Alpha 10', 'Éclair', 'Zelda']);
     await page.locator('.game-card', { hasText: 'Alpha 2' }).locator('.game-select').check();

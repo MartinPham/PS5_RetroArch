@@ -79,6 +79,7 @@ enum class Transfer
     part,      // PUT /api/upload/part
     scraped,   // PUT /api/scraper/pc/media: a file the PC helper downloaded
     game_file, // PUT /api/library/file
+    game_add,  // PUT /api/library/add
     media      // PUT /api/library/media: a media file the user chose for a game
 };
 struct Request
@@ -1357,7 +1358,8 @@ std::string game_files_json(const GameFiles &g)
         const std::string shown =
             path.rfind(root_path + '/', 0) == 0 ? "/app0" + path.substr(root_path.size()) : path;
         return "{\"path\":" + quote(path) + ",\"name\":" + quote(leaf_name(path)) +
-               ",\"display\":" + quote(shown) + ",\"bytes\":" + std::to_string(st.st_size) + '}';
+               ",\"display\":" + quote(shown) + ",\"bytes\":" + std::to_string(st.st_size) +
+               ",\"preview\":" + (game_safe_path(path + ".png") ? "true" : "false") + '}';
     };
     auto list = [&](const std::vector<std::string> &files)
     {
@@ -1394,6 +1396,44 @@ bool game_file_target(MHD_Connection *c, const GameFiles &g, bool writing, std::
     else
         return false;
     return game_safe_path(target, writing, writing);
+}
+void prepare_game_add(MHD_Connection *c, Request &r)
+{
+    std::string relative;
+    r.media_system = arg(c, "system");
+    if (!ps5_scraper::add_target(r.media_system, arg(c, "filename"), relative, r.media_game,
+                                 r.media_why))
+    {
+        r.error = 400;
+        r.message = r.media_why.c_str();
+        return;
+    }
+    if (!content_parents(relative, r.destination) || !game_safe_path(r.destination, false, true))
+    {
+        r.error = 400;
+        r.message = "Choose a safe game location.";
+        return;
+    }
+    if (exists(r.destination))
+    {
+        r.error = 409;
+        r.message = "This backup already exists. Open the game to replace it.";
+        return;
+    }
+    if (!content_length(c, r.expected) || !r.expected || r.expected > upload_limit)
+    {
+        r.error = 413;
+        r.message = "Choose a non-empty game backup of at most 64 GiB.";
+        return;
+    }
+    r.transfer = Transfer::game_add;
+    r.temporary =
+        r.destination.substr(0, r.destination.find_last_of('/') + 1) + ".upload-" + nonce();
+    if (!r.writer.create(r.temporary))
+    {
+        r.error = 507;
+        r.message = "Cannot store this game. Check free space.";
+    }
 }
 void prepare_game_file(MHD_Connection *c, Request &r)
 {
@@ -1631,6 +1671,39 @@ MHD_Result scraper_route(MHD_Connection *c, const std::string &url, const std::s
         }
         return o;
     };
+    if (method == "GET" && url == "/api/library/add-options")
+        return respond(c, 200, ps5_scraper::add_systems_json());
+    if (method == "POST" && url == "/api/library/launchbox")
+    {
+        const auto result = ps5_scraper::launchbox_lookup(arg(c, "system"), arg(c, "q"), why);
+        return result.empty() ? error(c, 400, why.c_str()) : respond(c, 200, result);
+    }
+    if (method == "PUT" && url == "/api/library/add")
+    {
+        if (r.transfer != Transfer::game_add || r.received != r.expected || !r.writer.flush())
+            return error(c, 400, "The upload was incomplete. Try again.");
+        const int fd = r.writer.release();
+        const auto result = ps5_transfer::commit(fd, r.temporary, r.destination, false, true);
+        if (fd >= 0)
+            close(fd);
+        if (result != ps5_transfer::Commit::done)
+            return error(c, result == ps5_transfer::Commit::exists ? 409 : 507,
+                         "Could not add this game. No existing backup was replaced.");
+        chmod(r.destination.c_str(), 0777);
+        r.temporary.clear();
+        const auto path = "/app0" + r.destination.substr(root_path.size());
+        std::string core;
+        if (!ps5_scraper::game_identity(r.media_system, r.media_game, path, core))
+        {
+            unlink(r.destination.c_str());
+            return error(c, 415,
+                         "This file cannot be listed as a game. For disc sets or folder-based "
+                         "games, use Content to upload the complete folder.");
+        }
+        return respond(c, 201,
+                       "{\"system\":" + quote(r.media_system) + ",\"key\":" + quote(r.media_game) +
+                           ",\"path\":" + quote(path) + "}");
+    }
     if (url == "/api/library/files" || url == "/api/library/file")
     {
         GameFiles game;
@@ -1642,7 +1715,15 @@ MHD_Result scraper_route(MHD_Connection *c, const std::string &url, const std::s
         if (!game_file_target(c, game, method == "PUT", target))
             return error(c, 400, "Choose a file belonging to this game.");
         if (method == "GET")
+        {
+            if (std::strcmp(arg(c, "preview"), "1") == 0)
+            {
+                if (std::strcmp(arg(c, "kind"), "state") != 0 || !game_safe_path(target + ".png"))
+                    return error(c, 404, "No screenshot was saved for this slot.");
+                return serve_file(c, target + ".png", "image/png", false);
+            }
             return serve_file(c, target, "application/octet-stream", true);
+        }
         if (r.transfer != Transfer::game_file || target != r.destination)
             return error(c, 409, "The game location changed. Refresh and try again.");
         if (r.received != r.expected || !r.writer.flush())
@@ -1655,6 +1736,9 @@ MHD_Result scraper_route(MHD_Connection *c, const std::string &url, const std::s
             return error(c, result == ps5_transfer::Commit::exists ? 409 : 507,
                          "Could not finish the upload; the original file was kept.");
         chmod(target.c_str(), 0777);
+        // A screenshot belongs to the old state; never show it for an imported one.
+        if (std::strcmp(arg(c, "kind"), "state") == 0 && game_safe_path(target + ".png"))
+            unlink((target + ".png").c_str());
         r.temporary.clear();
         return respond(c, 201, "{\"stored\":true}");
     }
@@ -2028,6 +2112,109 @@ MHD_Result route(MHD_Connection *c, const std::string &url, const std::string &m
         {"/index.html", "text/html; charset=utf-8"},
         {"/app.css", "text/css; charset=utf-8"},
         {"/app.js", "text/javascript; charset=utf-8"},
+        {"/icons.js", "text/javascript; charset=utf-8"},
+        {"/add-game.js", "text/javascript; charset=utf-8"},
+        {"/assets/fluent/LICENSE", "text/plain; charset=utf-8"},
+        {"/assets/fluent/arrow-square-down.svg", "image/svg+xml"},
+        {"/assets/fluent/arrow-sync.svg", "image/svg+xml"},
+        {"/assets/fluent/board.svg", "image/svg+xml"},
+        {"/assets/fluent/book-open.svg", "image/svg+xml"},
+        {"/assets/fluent/book.svg", "image/svg+xml"},
+        {"/assets/fluent/briefcase.svg", "image/svg+xml"},
+        {"/assets/fluent/building.svg", "image/svg+xml"},
+        {"/assets/fluent/checkmark-circle.svg", "image/svg+xml"},
+        {"/assets/fluent/cloud.svg", "image/svg+xml"},
+        {"/assets/fluent/coin-multiple.svg", "image/svg+xml"},
+        {"/assets/fluent/content-view.svg", "image/svg+xml"},
+        {"/assets/fluent/database.svg", "image/svg+xml"},
+        {"/assets/fluent/document-folder.svg", "image/svg+xml"},
+        {"/assets/fluent/document-text.svg", "image/svg+xml"},
+        {"/assets/fluent/edit.svg", "image/svg+xml"},
+        {"/assets/fluent/flag.svg", "image/svg+xml"},
+        {"/assets/fluent/game-chat.svg", "image/svg+xml"},
+        {"/assets/fluent/globe.svg", "image/svg+xml"},
+        {"/assets/fluent/headphones.svg", "image/svg+xml"},
+        {"/assets/fluent/home.svg", "image/svg+xml"},
+        {"/assets/fluent/image.svg", "image/svg+xml"},
+        {"/assets/fluent/laptop.svg", "image/svg+xml"},
+        {"/assets/fluent/library.svg", "image/svg+xml"},
+        {"/assets/fluent/question-circle.svg", "image/svg+xml"},
+        {"/assets/fluent/settings.svg", "image/svg+xml"},
+        {"/assets/fluent/text-bullet-list-square.svg", "image/svg+xml"},
+        {"/assets/fluent/text-edit-style.svg", "image/svg+xml"},
+        {"/assets/fluent/vault.svg", "image/svg+xml"},
+        {"/assets/fluent/video.svg", "image/svg+xml"},
+        {"/assets/fluent/warning.svg", "image/svg+xml"},
+        {"/assets/fluent/weather-sunny-low.svg", "image/svg+xml"},
+        {"/assets/flags/LICENSE", "text/plain; charset=utf-8"},
+        {"/assets/flags/au.svg", "image/svg+xml"},
+        {"/assets/flags/br.svg", "image/svg+xml"},
+        {"/assets/flags/ca.svg", "image/svg+xml"},
+        {"/assets/flags/cn.svg", "image/svg+xml"},
+        {"/assets/flags/de.svg", "image/svg+xml"},
+        {"/assets/flags/es.svg", "image/svg+xml"},
+        {"/assets/flags/eu.svg", "image/svg+xml"},
+        {"/assets/flags/fr.svg", "image/svg+xml"},
+        {"/assets/flags/gb.svg", "image/svg+xml"},
+        {"/assets/flags/it.svg", "image/svg+xml"},
+        {"/assets/flags/jp.svg", "image/svg+xml"},
+        {"/assets/flags/kr.svg", "image/svg+xml"},
+        {"/assets/flags/ru.svg", "image/svg+xml"},
+        {"/assets/flags/tw.svg", "image/svg+xml"},
+        {"/assets/flags/us.svg", "image/svg+xml"},
+        {"/assets/systems/3do.webp", "image/webp"},
+        {"/assets/systems/LICENSE", "text/plain; charset=utf-8"},
+        {"/assets/systems/amiga.webp", "image/webp"},
+        {"/assets/systems/arcade.webp", "image/webp"},
+        {"/assets/systems/atari2600.webp", "image/webp"},
+        {"/assets/systems/atari5200.webp", "image/webp"},
+        {"/assets/systems/atari7800.webp", "image/webp"},
+        {"/assets/systems/atarijaguar.webp", "image/webp"},
+        {"/assets/systems/atarilynx.webp", "image/webp"},
+        {"/assets/systems/atomiswave.webp", "image/webp"},
+        {"/assets/systems/c64.webp", "image/webp"},
+        {"/assets/systems/cps.webp", "image/webp"},
+        {"/assets/systems/dos.webp", "image/webp"},
+        {"/assets/systems/dreamcast.webp", "image/webp"},
+        {"/assets/systems/fbneo.webp", "image/webp"},
+        {"/assets/systems/fds.webp", "image/webp"},
+        {"/assets/systems/gamegear.webp", "image/webp"},
+        {"/assets/systems/gb.webp", "image/webp"},
+        {"/assets/systems/gba.webp", "image/webp"},
+        {"/assets/systems/gbc.webp", "image/webp"},
+        {"/assets/systems/gc.webp", "image/webp"},
+        {"/assets/systems/genesis.webp", "image/webp"},
+        {"/assets/systems/mame.webp", "image/webp"},
+        {"/assets/systems/mastersystem.webp", "image/webp"},
+        {"/assets/systems/msx.webp", "image/webp"},
+        {"/assets/systems/n3ds.webp", "image/webp"},
+        {"/assets/systems/n64.webp", "image/webp"},
+        {"/assets/systems/naomi.webp", "image/webp"},
+        {"/assets/systems/nds.webp", "image/webp"},
+        {"/assets/systems/neogeo.webp", "image/webp"},
+        {"/assets/systems/neogeocd.webp", "image/webp"},
+        {"/assets/systems/nes.webp", "image/webp"},
+        {"/assets/systems/ngp.webp", "image/webp"},
+        {"/assets/systems/ngpc.webp", "image/webp"},
+        {"/assets/systems/pcengine.webp", "image/webp"},
+        {"/assets/systems/pcfx.webp", "image/webp"},
+        {"/assets/systems/pokemini.webp", "image/webp"},
+        {"/assets/systems/ps2.webp", "image/webp"},
+        {"/assets/systems/psp.webp", "image/webp"},
+        {"/assets/systems/psx.webp", "image/webp"},
+        {"/assets/systems/saturn.webp", "image/webp"},
+        {"/assets/systems/scummvm.webp", "image/webp"},
+        {"/assets/systems/sega32x.webp", "image/webp"},
+        {"/assets/systems/segacd.webp", "image/webp"},
+        {"/assets/systems/sg-1000.webp", "image/webp"},
+        {"/assets/systems/snes.webp", "image/webp"},
+        {"/assets/systems/supergrafx.webp", "image/webp"},
+        {"/assets/systems/virtualboy.webp", "image/webp"},
+        {"/assets/systems/wii.webp", "image/webp"},
+        {"/assets/systems/wonderswan.webp", "image/webp"},
+        {"/assets/systems/wonderswancolor.webp", "image/webp"},
+        {"/assets/ICON-CREDITS.txt", "text/plain; charset=utf-8"},
+        {"/assets/lucide/LICENSE", "text/plain; charset=utf-8"},
         {"/settings-guide.js", "text/javascript; charset=utf-8"},
         {"/version.json", "application/json"},
         {"/assets/mihawk.png", "image/png"},
@@ -2068,6 +2255,8 @@ MHD_Result handle(void *, MHD_Connection *c, const char *url, const char *method
             prepare_scraped(c, *r);
         else if (std::strcmp(method, "PUT") == 0 && std::strcmp(url, "/api/library/media") == 0)
             prepare_media(c, *r);
+        else if (std::strcmp(method, "PUT") == 0 && std::strcmp(url, "/api/library/add") == 0)
+            prepare_game_add(c, *r);
         else if (std::strcmp(method, "PUT") == 0 && std::strcmp(url, "/api/library/file") == 0)
             prepare_game_file(c, *r);
         if (std::strcmp(url, "/api/scraper/start") == 0)

@@ -19,12 +19,7 @@ function element(tag, text, className) {
   if (className) node.className = className;
   return node;
 }
-function icon(kind) {
-  const selectors = { folder: '.library-panel .section-icon', file: '.dropzone .icon', check: '.release-icon' };
-  const node = $(selectors[kind] || selectors.file).cloneNode(true);
-  node.setAttribute('class', 'icon');
-  return node;
-}
+function icon(kind) { return uiIcon({folder:'folder', file:'file-text', check:'check'}[kind] || kind); }
 function bytes(n) {
   if (n === null || !Number.isFinite(n)) return 'Unknown';
   const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
@@ -727,7 +722,7 @@ async function checkRelease() {
     if ((comparison === null || comparison < 0) && assetNames.has(archive) && assetNames.has(archive + '.sha256')) latestUpdate = latest.tag_name;
     bar.dataset.state = comparison === null ? 'development' : comparison < 0 ? 'update' : 'current';
     $('#release-summary').textContent = comparison === null ? `Latest release: ${latest.tag_name}` : comparison < 0 ? `Update available · ${latest.tag_name}` : 'You’re up to date';
-    $('.release-icon').innerHTML = comparison !== null && comparison >= 0 ? '<circle cx="12" cy="12" r="10"/><path d="m7 12 3 3 7-7"/>' : '<circle cx="12" cy="12" r="10"/><path d="M12 11v6 M12 7v.1"/>';
+    $('.release-icon').replaceWith(uiIcon(comparison !== null && comparison >= 0 ? 'check' : 'info', 'release-icon'));
     $('#notes-title').textContent = `What’s new in ${latest.tag_name}`;
     $('#release-date').textContent = new Date(latest.published_at).toLocaleDateString(undefined, { dateStyle: 'long' });
     $('#release-notes').textContent = latest.body || 'No release notes were provided for this version.';
@@ -748,17 +743,8 @@ setInterval(() => { if (!document.hidden) reconnect(); }, 10000);
 navigate(); drawTransfers(); reconnect(); checkRelease();
 
 
-// The WebUI's drawn icons (inline SVG, no image requests): flags for regions, the
-// console and the PC, and a badge for each media source. The sources' badges are
-// original drawings, not their owners' logos.
-const EU_STARS = Array.from({ length: 12 }, (_, i) => { const a = i * Math.PI / 6; return `<circle cx="${(15 + 6 * Math.sin(a)).toFixed(2)}" cy="${(10 - 6 * Math.cos(a)).toFixed(2)}" r="0.9" fill="#ffcc00"/>`; }).join('');
-const US_STRIPES = Array.from({ length: 7 }, (_, i) => `<rect y="${(i * 20 / 6.5).toFixed(2)}" width="30" height="${(20 / 13).toFixed(2)}" fill="#b22234"/>`).join('');
-const US_STARS = Array.from({ length: 12 }, (_, i) => `<circle cx="${(1.6 + (i % 4) * 2.9 + (Math.floor(i / 4) % 2) * 1.4).toFixed(2)}" cy="${(1.7 + Math.floor(i / 4) * 2.6).toFixed(2)}" r="0.55" fill="#fff"/>`).join('');
+// Colorful provider badges, console silhouettes and accurate region flags.
 const ICONS = {
-  'flag-us': `<svg class="flag" viewBox="0 0 30 20" aria-hidden="true"><rect width="30" height="20" fill="#fff"/>${US_STRIPES}<rect width="13" height="10.8" fill="#3c3b6e"/>${US_STARS}</svg>`,
-  'flag-eu': `<svg class="flag" viewBox="0 0 30 20" aria-hidden="true"><rect width="30" height="20" fill="#003399"/>${EU_STARS}</svg>`,
-  'flag-jp': '<svg class="flag" viewBox="0 0 30 20" aria-hidden="true"><rect width="30" height="20" fill="#fff"/><circle cx="15" cy="10" r="6" fill="#bc002d"/></svg>',
-  'flag-kr': '<svg class="flag" viewBox="0 0 30 20" aria-hidden="true"><rect width="30" height="20" fill="#fff"/><path d="M15 6a4 4 0 0 1 0 8 2 2 0 0 1 0-4 2 2 0 0 0 0-4Z" fill="#cd2e3a"/><path d="M15 14a4 4 0 0 1 0-8 2 2 0 0 1 0 4 2 2 0 0 0 0 4Z" fill="#0047a0"/></svg>',
   globe: '<svg class="flag globe" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="#2f80ed"/><path d="M3 12h18M12 3c-3 3-3 15 0 18M12 3c3 3 3 15 0 18M5 7h14M5 17h14" fill="none" stroke="#fff" stroke-width="1.2"/></svg>',
   ps5: '<svg class="device" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 2c-2 0-3 1-3 3l1 14c0 2 1 3 3 3h1V2Z" fill="currentColor" opacity=".35"/><path d="M17 2c2 0 3 1 3 3l-1 14c0 2-1 3-3 3h-1V2Z" fill="currentColor" opacity=".35"/><rect x="9.5" y="2" width="5" height="20" rx="1" fill="currentColor"/><circle cx="12" cy="17.5" r=".9" fill="var(--surface)"/></svg>',
   pc: '<svg class="device" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="3" width="20" height="13" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M9 20h6M12 16v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
@@ -768,12 +754,13 @@ const ICONS = {
   'source-launchbox': '<svg class="source-logo" viewBox="0 0 24 24" aria-hidden="true"><rect x="1" y="1" width="22" height="22" rx="6" fill="#2d6cdf"/><path d="M6 9l6-3 6 3v7l-6 3-6-3Z M6 9l6 3 6-3 M12 12v7" fill="none" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></svg>',
   'source-emumovies': '<svg class="source-logo" viewBox="0 0 24 24" aria-hidden="true"><rect x="1" y="1" width="22" height="22" rx="6" fill="#f08a24"/><rect x="5" y="6" width="14" height="12" rx="1.5" fill="none" stroke="#fff" stroke-width="1.6"/><path d="M8 6v12M16 6v12" stroke="#fff" stroke-width="1.2"/><path d="M10.5 9.5v5l4-2.5Z" fill="#fff"/></svg>' };
 function iconNode(name) {
-  const template = document.createElement('template');
-  template.innerHTML = ICONS[name] || '';
-  return template.content.firstElementChild;
+  if (name.startsWith('flag-')) return assetIcon('assets/flags/' + name.slice(5) + '.svg','flag');
+  if (name === 'pc') return uiIcon('monitor','device');
+  if (name === 'globe') return uiIcon('globe','flag');
+  const template = document.createElement('template'); template.innerHTML = ICONS[name] || ''; return template.content.firstElementChild || uiIcon(name);
 }
 // A region tag of a game's name, as a flag ("USA", "Europe", "USA, Europe"...).
-const REGION_FLAGS = { USA: 'flag-us', Europe: 'flag-eu', Japan: 'flag-jp', Korea: 'flag-kr', World: 'globe' };
+const REGION_FLAGS = { USA: 'flag-us', Europe: 'flag-eu', Japan: 'flag-jp', Korea: 'flag-kr', World: 'globe', UK:'flag-gb', France:'flag-fr', Germany:'flag-de', Spain:'flag-es', Italy:'flag-it', Australia:'flag-au', Canada:'flag-ca', Brazil:'flag-br', China:'flag-cn', Taiwan:'flag-tw', Russia:'flag-ru' };
 function tagNode(tag) {
   const node = element('span', undefined, 'version-tag');
   const flags = tag.split(/,\s*/).map(part => REGION_FLAGS[part]).filter(Boolean);
@@ -800,6 +787,7 @@ function gameTags(game) {
   return tags.filter(Boolean);
 }
 function visibleGames() {
+  $('#games-system-icon').replaceChildren(systemIcon($('#games-system').value));
   const system = $('#games-system').value, words = $('#games-search').value.trim().toLowerCase(), missing = $('#games-missing').checked;
   const letter = $('#games-letters [aria-pressed="true"]')?.dataset.letter || '';
   const sort = $('#games-sort').value, direction = $('#games-direction').dataset.direction === 'desc' ? -1 : 1;
@@ -866,7 +854,8 @@ function drawGames() {
     const tags = element('div', undefined, 'version-tags');
     for (const tag of gameTags(game)) tags.append(tagNode(tag));
     card.title = `${game.path.split('/').pop()} · open to see and change its media`;
-    info.append(element('strong', gameName(game)), tags, element('small', system.name), badges);
+    const platform = element('small', undefined, 'game-platform'); platform.append(systemIcon(system.id),document.createTextNode(system.name));
+    info.append(element('strong', gameName(game)), tags, platform, badges);
     // The card opens the game's media; its checkbox still selects it for a download.
     card.tabIndex = 0; card.setAttribute('aria-haspopup', 'dialog');
     card.addEventListener('click', event => { if (event.target !== pick) openGame(system, game); });
@@ -906,7 +895,7 @@ for (const letter of ['', '#', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ']) {
 }
 function setGamesDirection(direction) {
   $('#games-direction').dataset.direction = direction;
-  $('#games-direction').textContent = direction === 'desc' ? '↓ Descending' : '↑ Ascending';
+  $('#games-direction').replaceChildren(uiIcon(direction === 'desc' ? 'arrow-down' : 'arrow-up'), document.createTextNode(direction === 'desc' ? 'Descending' : 'Ascending'));
 }
 try {
   const sort = localStorage.getItem('ps5-games-sort');
@@ -936,7 +925,7 @@ async function openGame(system, game) {
   const dialog = $('#game-sheet');
   $('#sheet-title').textContent = gameName(game);
   $('#sheet-tags').replaceChildren(...gameTags(game).map(tagNode));
-  $('#sheet-sub').textContent = `${system.name} · ${game.path.split('/').pop()}`;
+  $('#sheet-sub').replaceChildren(systemIcon(system.id), document.createTextNode(`${system.name} · ${game.path.split('/').pop()}`));
   $('#sheet-details').hidden = true;
   $('#sheet-media-panel').hidden = false; $('#sheet-files').hidden = true;
   $('#sheet-thumbs').replaceChildren();
@@ -1050,6 +1039,7 @@ async function loadSheetFiles() {
       const slotLabel = element('label', 'Slot (0 is the default, -1 is automatic)', 'sheet-slot'), slot = document.createElement('input');
       slot.type = 'number'; slot.min = -1; slot.max = 999999; slot.value = 0; slotLabel.append(slot);
       const destination = element('p', '', 'muted sheet-path');
+      const preview = element('div', undefined, 'state-preview'); preview.hidden = kind !== 'state';
       const actions = element('div', undefined, 'sheet-actions'), upload = element('button', kind === 'rom' ? 'Replace…' : 'Import…', 'secondary'), download = element('a', 'Export', 'secondary');
       upload.type = 'button'; const input = document.createElement('input'); input.type = 'file'; input.hidden = true;
       if (kind === 'rom') input.accept = '.' + data.rom.name.split('.').pop();
@@ -1058,6 +1048,16 @@ async function loadSheetFiles() {
       const refresh = () => {
         const file = list.find(f => f.path === select.value);
         slotLabel.hidden = kind !== 'state' || !!file;
+        if (kind === 'state') {
+          preview.replaceChildren();
+          if (file?.preview) {
+            const image = document.createElement('img'); image.alt = 'Screenshot of ' + file.name;
+            image.src = `/api/library/file?${sheetQuery(context)}&kind=state&file=${encodeURIComponent(file.path)}&preview=1`;
+            const enlarge = element('button', undefined, 'state-preview-image'); enlarge.type = 'button'; enlarge.setAttribute('aria-label', 'Enlarge savestate screenshot'); enlarge.append(image);
+            enlarge.addEventListener('click', () => openLightbox(image.src, {name:'Savestate screenshot'})); preview.append(enlarge);
+            image.addEventListener('error', () => preview.replaceChildren(element('p', 'Screenshot unavailable. Refresh to try again.', 'muted')));
+          } else preview.append(uiIcon('image'), element('p', file ? 'No screenshot for this slot. Enable Savestate Thumbnails in RetroArch and save the state again.' : 'A screenshot appears here when a saved slot has a thumbnail.', 'muted'));
+        }
         destination.textContent = file ? file.display : data[kind + 'Folder'] ? `Destination: ${data[kind + 'Folder']}` : 'Launch this game with its core and save once, then refresh to locate its files.';
         upload.disabled = !file && !data[kind + 'Folder'];
         if (file) { download.href = `/api/library/file?${sheetQuery(context)}&kind=${kind}&file=${encodeURIComponent(file.path)}`; download.removeAttribute('aria-disabled'); }
@@ -1098,7 +1098,7 @@ async function loadSheetFiles() {
         } catch (error) { status.textContent = error.message; status.classList.add('inline-error'); }
         finally { sheetBusy = false; select.disabled = false; refresh(); progress.remove(); cancel.remove(); }
       });
-      actions.append(upload, download, input); group.append(select, destination, slotLabel, actions, status); box.append(group);
+      actions.append(upload, download, input); group.append(select, destination, preview, slotLabel, actions, status); box.append(group);
     }
     box.append(element('p', 'File transfers preserve bytes; they do not convert save formats. Cores with private save directories and multi-file disc sets may need the Content browser or FTP.', 'muted sheet-hint'));
   } catch (error) { if (sheetGame === context) box.replaceChildren(element('p', error.message, 'inline-error')); }
@@ -1112,14 +1112,14 @@ function mediaRow(kind) {
     stage.classList.add('video');
     const video = document.createElement('video'); video.src = sheetMediaUrl(kind.id); video.preload = 'metadata'; video.playsInline = true; video.controls = true;
     const play = element('button', undefined, 'play'); play.type = 'button'; play.setAttribute('aria-label', 'Play the video');
-    play.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5Z"/></svg>';
+    play.append(uiIcon('video'));
     play.addEventListener('click', () => { video.play(); });
     video.addEventListener('play', () => { play.hidden = true; });
     video.addEventListener('pause', () => { play.hidden = false; });
     stage.append(video, play);
   } else if (kind.type === 'pdf') {
     const a = element('a', undefined, 'pdf'); a.href = sheetMediaUrl(kind.id); a.target = '_blank'; a.rel = 'noopener';
-    a.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6Z M15 3v4h4 M9 12h7 M9 16h7"/></svg>'; a.append(element('span', 'Open the manual (PDF)'));
+    a.append(uiIcon('book-open')); a.append(element('span', 'Open the manual (PDF)'));
     stage.append(a);
   } else {
     const img = document.createElement('img'); img.alt = kind.name; img.src = sheetMediaUrl(kind.id);
@@ -1206,18 +1206,13 @@ const METHOD_HINTS = {
   pc: 'Downloads on this PC first, then transfers each file to your PS5. A small helper program on this PC does both; keep it running until the job is done (this page can close).',
   '': 'PS5: the console downloads directly. This PC → PS5: this PC downloads, then transfers to the PS5. Your choice is remembered on this console.' };
 const RECOMMENDED = ['cover', 'screenshot', 'title'];
-const KIND_ICONS = { cover: 'M5 3h14v18H5Z M8 7h8 M8 11h8', backcover: 'M5 3h14v18H5Z M8 14h8 M8 17h5', box3d: 'M4 7l8-4 8 4v10l-8 4-8-4Z M4 7l8 4 8-4 M12 11v10',
-  screenshot: 'M3 5h18v14H3Z M7 15l3-4 3 3 2-2 3 3', title: 'M3 5h18v14H3Z M7 10h10 M9 14h6', logo: 'M4 12c4-8 12-8 16 0-4 8-12 8-16 0Z M9 12h6',
-  physical: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z M12 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z', fanart: 'M3 5h18v14H3Z M3 15l5-5 4 4 3-3 6 6',
-  manual: 'M5 4h10l4 4v12H5Z M8 10h8 M8 14h8', video: 'M3 6h13v12H3Z M16 10l5-3v10l-5-3',
-  details: 'M4 5h16v14H4Z M8 9h8 M8 12h8 M8 15h5' };
+const KIND_ICONS = {cover:'book-image', backcover:'book-open', box3d:'box', screenshot:'image', title:'panels-top-left', logo:'type', physical:'disc-3', fanart:'wallpaper', manual:'book-open', video:'video', details:'list'};
 const DETAILS_TEXT = 'Description, developer, publisher, release date, genre, players and rating, shown in EmulationStation and on each game here.';
 function detailsOn() { return scrapeDetails && !!chosenSource()?.details; }
 function drawDetails() {
   const source = chosenSource(), tile = element('button', undefined, 'details-tile'); tile.type = 'button';
   tile.setAttribute('aria-pressed', detailsOn()); tile.disabled = !source.details;
-  const tick = element('span', undefined, 'tick'), check = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); check.setAttribute('viewBox', '0 0 24 24');
-  const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); p.setAttribute('d', 'M5 12.5l4.5 4.5L19 7.5'); check.append(p); tick.append(check);
+  const tick = element('span', undefined, 'tick'); tick.append(uiIcon('check'));
   tile.append(svgIcon(KIND_ICONS.details), element('strong', 'Game details'), source.details ? tick : element('em', `Not from ${source.name}`, 'soon-tag'), element('small', DETAILS_TEXT));
   const hint = source.details ? `Game details: ${DETAILS_TEXT} Text only, so it costs almost nothing; details you edited yourself are never replaced.` : `Game details: ${source.name} has pictures only. ScreenScraper has details.`;
   tile.title = hint;
@@ -1235,10 +1230,7 @@ function chosenSource() {
 }
 function sourcesFor(kind) { return chainSources().filter(s => kind === 'details' ? (s.details ?? s.id !== 'libretro') : s.kinds.includes(kind)).map(s => s.name); }
 function pcAllowed() { const ids = chosenSource().ids; return ids.length <= 1 && !ids.includes('screenscraper'); }
-function svgIcon(path) {
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('class', 'icon'); svg.setAttribute('aria-hidden', 'true');
-  const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); p.setAttribute('d', path); svg.append(p); return svg;
-}
+function svgIcon(name) { return uiIcon(name); }
 // The Games tab's view choices get their drawings (KIND_ICONS is set by now).
 for (const span of $$('[data-view-icon]')) span.prepend(svgIcon(KIND_ICONS[span.dataset.viewIcon]));
 function drawMethod() {
@@ -1252,7 +1244,6 @@ function drawMethod() {
 function drawSources() {
   const box = $('#scrape-sources'), ordered = [...chainSources(), ...scraperSettings.sources.filter(s => !scrapeChain.includes(s.id))];
   box.replaceChildren();
-  const arrow = d => { const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('viewBox', '0 0 24 24'); const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); p.setAttribute('d', d); svg.append(p); return svg; };
   const move = (id, by) => { const i = scrapeChain.indexOf(id), j = i + by; if (i < 0 || j < 0 || j >= scrapeChain.length) return; [scrapeChain[i], scrapeChain[j]] = [scrapeChain[j], scrapeChain[i]]; drawSources(); drawKinds(); };
   for (const source of ordered) {
     const on = scrapeChain.includes(source.id), order = scrapeChain.indexOf(source.id);
@@ -1277,7 +1268,7 @@ function drawSources() {
     }
     const moves = element('div', undefined, 'source-move');
     const up = element('button'), down = element('button'); up.type = down.type = 'button';
-    up.append(arrow('M6 15l6-6 6 6')); down.append(arrow('M6 9l6 6 6-6'));
+    up.append(uiIcon('chevron-up')); down.append(uiIcon('chevron-down'));
     up.setAttribute('aria-label', `Ask ${source.name} earlier`); down.setAttribute('aria-label', `Ask ${source.name} later`);
     up.disabled = !on || order === 0; down.disabled = !on || order === scrapeChain.length - 1;
     up.addEventListener('click', () => move(source.id, -1)); down.addEventListener('click', () => move(source.id, 1));
@@ -1316,9 +1307,7 @@ function drawSources() {
   drawMethod();
 }
 function checkNode() {
-  const badge = element('span', undefined, 'signed-check'); badge.setAttribute('role', 'img'); badge.setAttribute('aria-label', 'Signed in');
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true');
-  const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); p.setAttribute('d', 'M5 12.5l4.5 4.5L19 7.5'); svg.append(p); badge.append(svg); return badge;
+  const badge = element('span', undefined, 'signed-check'); badge.setAttribute('role', 'img'); badge.setAttribute('aria-label', 'Signed in'); badge.append(uiIcon('check')); return badge;
 }
 
 // Sign-in: the name and password go to the console in a request body (never in an
@@ -1349,6 +1338,8 @@ async function openSignIn(source) {
   } else $('#sign-in-user').focus();
 }
 function signedIn(state) {
+  signInSource.signed_in = state;
+  if (!scraperSettings) return;
   const source = scraperSettings.sources.find(s => s.id === signInSource.id);
   source.signed_in = signInSource.signed_in = state;
   if (state && !scrapeChain.includes(source.id)) scrapeChain.push(source.id);
@@ -1440,7 +1431,7 @@ async function openMedia() {
   if (selectedGames.size) $('input[name="scrape-scope"][value="selected"]').checked = true;
   drawMethod(); drawSources(); drawKinds(); loadJob();
 }
-$('#scrape-open').addEventListener('click', () => { location.hash = 'media'; });
+
 for (const node of $$('input[name="scrape-method"], input[name="scrape-scope"]')) node.addEventListener('change', () => { drawMethod(); });
 $('#scrape-system').addEventListener('change', drawSummary);
 const EXISTING_HINTS = {
@@ -1575,7 +1566,7 @@ function drawRecap() {
     const details = element('details', undefined, 'recap-system'); details.dataset.system = system.id;
     if (open.has(system.id) || recap.systems.length === 1) details.open = true;
     const got = games.filter(g => g.got.length).length, missing = games.filter(g => g.missed.length).length;
-    const summary = element('summary'); summary.append(element('strong', system.name), element('span', `${games.length.toLocaleString()} game${games.length === 1 ? '' : 's'} · ${got.toLocaleString()} with new media · ${missing.toLocaleString()} missing some`));
+    const summary = element('summary'); summary.append(systemIcon(system.id), element('strong', system.name), element('span', `${games.length.toLocaleString()} game${games.length === 1 ? '' : 's'} · ${got.toLocaleString()} with new media · ${missing.toLocaleString()} missing some`));
     const list = element('div', undefined, 'recap-games'), limit = recapLimit[system.id] || 100;
     const draw = () => {
       list.replaceChildren(...games.slice(0, limit).map(recapRow));
@@ -1620,7 +1611,7 @@ function drawPasses(job, running) {
     const state = !running || i < job.pass ? 'done' : i === job.pass ? 'running' : 'waiting';
     const step = element('li', undefined, 'job-pass'); step.dataset.state = state;
     const head = element('div', undefined, 'pass-head'), name = scraperSettings?.sources.find(s => s.id === pass.source)?.name || pass.source;
-    head.append(element('span', state === 'done' ? '✓' : String(i + 1), 'pass-number'), element('span', name));
+    const number = element('span', state === 'done' ? '' : String(i + 1), 'pass-number'); if (state === 'done') number.append(uiIcon('check')); head.append(number, element('span', name));
     step.append(head);
     const gave = pass.files ? `${pass.files.toLocaleString()} found for ${pass.games.toLocaleString()} game${pass.games === 1 ? '' : 's'}` : 'nothing missing it has';
     if (state === 'running') {

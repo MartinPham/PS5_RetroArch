@@ -12,6 +12,106 @@
   "schema": 1,
   "components": [
     {
+      "id": "webui-fluent",
+      "name": "Microsoft Fluent UI color icons",
+      "kind": "asset",
+      "artifacts": [
+        "webui/assets/fluent/*"
+      ],
+      "licence": "MIT",
+      "copyright": [
+        "Copyright (c) Microsoft Corporation."
+      ],
+      "texts": [
+        {
+          "from": "webui/assets/fluent/LICENSE",
+          "to": "LICENSE"
+        }
+      ],
+      "source": {
+        "kind": "fixed",
+        "revision": "cd332ec1f90cda2fad16f86754f8da52f1e9ab30",
+        "remote": "https://github.com/microsoft/fluentui-system-icons"
+      },
+      "modifications": "Bundled artwork; original colors preserved. System artwork is framed with CSS to show the hardware."
+    },
+    {
+      "id": "webui-flags",
+      "name": "Region flags by flag-icons",
+      "kind": "asset",
+      "artifacts": [
+        "webui/assets/flags/*"
+      ],
+      "licence": "MIT",
+      "copyright": [
+        "Copyright (c) 2013-2026 Panayiotis Lipiridis"
+      ],
+      "texts": [
+        {
+          "from": "webui/assets/flags/LICENSE",
+          "to": "LICENSE"
+        }
+      ],
+      "source": {
+        "kind": "fixed",
+        "revision": "086f7e97d657358203916dbe84f61c2bccaa81eb",
+        "remote": "https://github.com/lipis/flag-icons"
+      },
+      "modifications": "Bundled artwork; original colors preserved. System artwork is framed with CSS to show the hardware."
+    },
+    {
+      "id": "webui-systems",
+      "name": "Linear ES-DE system artwork",
+      "kind": "asset",
+      "artifacts": [
+        "webui/assets/systems/*"
+      ],
+      "licence": "MIT",
+      "copyright": [
+        "Copyright (c) 2024-2026 Northwestern Software AB",
+        "Copyright (c) 2024 Leon Styhre",
+        "Copyright (c) 2023 Weestuarty"
+      ],
+      "texts": [
+        {
+          "from": "webui/assets/systems/LICENSE",
+          "to": "LICENSE"
+        }
+      ],
+      "source": {
+        "kind": "fixed",
+        "revision": "bundled source snapshot; original SHA-256 manifest in webui/assets/systems/SOURCE.json",
+        "remote": "https://gitlab.com/es-de/themes/linear-es-de"
+      },
+      "modifications": "Bundled artwork; original colors preserved. System artwork is framed with CSS to show the hardware."
+    },
+    {
+      "id": "webui-lucide",
+      "name": "Lucide WebUI icons (including Feather-derived icons)",
+      "kind": "asset",
+      "artifacts": [
+        "webui/icons.js",
+        "webui/assets/lucide/*"
+      ],
+      "licence": "ISC AND MIT",
+      "copyright": [
+        "Lucide Icons and Contributors",
+        "Copyright (c) 2013-present Cole Bemis (Feather)"
+      ],
+      "texts": [
+        {
+          "from": "webui/assets/lucide/LICENSE",
+          "to": "LICENSE"
+        }
+      ],
+      "source": {
+        "kind": "fixed",
+        "revision": "a04f228cd01185e09c188b7227b9600c08c565ec",
+        "remote": "https://github.com/lucide-icons/lucide"
+      },
+      "modifications": "Unmodified SVG geometry bundled locally in icons.js, rendered at a consistent 1.75 stroke width."
+    },
+    {
       "id": "ps5-retroarch",
       "name": "PS5 RetroArch (this port: title code, platform integration, build scripts and patches)",
       "kind": "code",
