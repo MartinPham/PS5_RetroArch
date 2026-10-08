@@ -2,11 +2,11 @@
 
 # RetroArch for PS5
 
-**Your collection on the console. Your controls in the browser.**
+**Your games on the TV. Your library in your hands.**
 
-Native Vulkan rendering · Thirty-three release cores · A local WebUI
+33 native cores · RetroArch & EmulationStation · A local WebUI
 
-[Download a release](https://github.com/mihawk-99/PS5_RetroArch/releases) · [Get started](#get-started) · [Supported systems](#supported-systems) · [Build from source](#build-from-source)
+[Download](https://github.com/mihawk-99/PS5_RetroArch/releases) · [Get started](#get-started) · [Supported systems](#supported-systems) · [What’s new](releases/v1.0.0-beta.1.md)
 
 </div>
 
@@ -24,143 +24,175 @@ It exists so you can play the games you own on the console you own.
 
 ---
 
-![RetroArch WebUI Overview with content uploads, library folders, recent transfers and quick settings](assets/readme/webui-overview.png)
+<img src="assets/releases/v1.0.0-beta.1/webui-games-neogeo-b.jpg" width="960" alt="WebUI Games library with SNK Neo Geo selected and the B filter active">
 
-<p align="center"><strong>WebUI Overview</strong> · Open <code>http://&lt;PS5-IP&gt;:6769</code> while the title is open.<br><sub>Replace &lt;PS5-IP&gt; with your console’s local address. Use a browser on the same network.</sub></p>
+<p align="center"><strong>Your collection, beautifully organized.</strong><br>Browse, add games, and manage artwork from your phone or computer.</p>
 
-![The pre-screen: choose RetroArch or EmulationStation when the title starts](assets/readme/pre-screen.png)
+A native RetroArch homebrew title for jailbroken PlayStation 5 consoles, made by [Mihawk](https://github.com/mihawk-99). Play through RetroArch or EmulationStation, with Vulkan graphics and up to four controllers.
 
-<p align="center"><strong>Choose a frontend</strong> · RetroArch’s XMB or EmulationStation, both playing every game through RetroArch.<br><sub>Square remembers your choice. Hold L1 while the title starts to come back to this screen.</sub></p>
+**This README describes the current beta development version.** See the [beta notes](releases/v1.0.0-beta.1.md) for what’s new and [Releases](https://github.com/mihawk-99/PS5_RetroArch/releases) for packaged downloads.
 
-A native RetroArch homebrew title for jailbroken PlayStation 5 consoles, made by
-[Mihawk](https://github.com/mihawk-99). Play through XMB on your TV, then upload
-content, browse your library and adjust settings from your phone or computer.
-The purple WebUI stays up while the title is open, on the pre-screen, in RetroArch
-and in EmulationStation, so an upload carries on while you switch. It runs as its own
-payload, started through your console's ELF loader (port 9021) or the homebrew
-launcher (port 8080); with neither, it runs only while RetroArch runs.
+> [!WARNING]
+> **Designed around ShadowMountPlus 1.7beta4 or later.** Use [ShadowMountPlus 1.7beta4](https://github.com/drakmor/ShadowMountPlus/releases/tag/1.7beta4) or newer for supported USB and extended-storage access.
 
-**v0.6.7-alpha.6** opens on a pre-screen that starts RetroArch or
-EmulationStation, adds up to four controllers and verified updates from the WebUI,
-and fixes the Manual Scan crash. This is an alpha release; compatibility varies
-by core and workload. See the [release notes](https://github.com/mihawk-99/PS5_RetroArch/releases/tag/v0.6.7-alpha.6) for the tested scope.
+<a id="highlights"></a>
 
-## Get started
+## <img src="webui/assets/fluent/board.svg" width="26" height="26" alt=""> At a glance
 
-1. **Install the complete title folder.** Extract a release and copy its
-   `PPSA99169` folder to the location used by your homebrew launcher. The tested
-   location is `/data/homebrew/PPSA99169/`. A source build produces the same
-   folder in `dist/`. A compatible jailbreak and launcher must already be set up.
-2. **Open the title and choose a frontend.** The pre-screen starts RetroArch or
-   EmulationStation; with Remember (Square) on, the title opens on your choice from
-   then on, and the WebUI's **Start with** setting changes it. RetroArch creates its
-   writable folders and initial configuration; existing settings are preserved. XMB
-   is the default menu; RGUI is also available.
-3. **Open the WebUI.** Visit `http://<PS5-IP>:6769` on the same network.
-   Choose a destination and drop your content into **Upload content**, or use FTP.
-4. **Load content on the console.** Select the matching core and your file.
-   Install any required BIOS files first, using the locations below.
+| | Made for your collection |
+| --- | --- |
+| <img src="webui/assets/fluent/game-chat.svg" width="36" height="36" alt=""> | **33 cores.** From NES and Mega Drive to Dreamcast, GameCube, PSP, and more. |
+| <img src="webui/assets/fluent/library.svg" width="36" height="36" alt=""> | **One shared library.** Artwork and game details across RetroArch, EmulationStation, and the WebUI. |
+| <img src="webui/assets/fluent/arrow-square-down.svg" width="36" height="36" alt=""> | **Easy game setup.** Add a game, find its details, and download missing artwork. |
+| <img src="webui/assets/fluent/edit.svg" width="36" height="36" alt=""> | **DualSense stylus.** Use the touchpad for Nintendo DS and 3DS touchscreen controls. |
+
+**Explore:** [Get started](#get-started) · [WebUI](#webui) · [Systems](#supported-systems) · [Controls](#controls) · [Graphics](#graphics) · [Your files](#your-files) · [Known limits](#what-has-been-verified) · [Build](#build-from-source)
+
+<a id="get-started"></a>
+
+## <img src="webui/assets/fluent/arrow-square-down.svg" width="26" height="26" alt=""> Get started
+
+1. **Install the complete title folder.** Extract a release and copy `PPSA99169` to your homebrew launcher’s location, usually `/data/homebrew/PPSA99169/`. A compatible jailbreak and launcher must already be set up.
+2. **Choose your frontend.** Start RetroArch or EmulationStation from the picker. Press **Square** to remember your choice; hold **L1** during startup to return to the picker. XMB and RGUI are available in RetroArch.
+3. **Open the WebUI.** Scan its QR code or visit `http://<PS5-IP>:6769` from a device on the same network.
+4. **Add your games.** Use **Games → + Add Game** for one game backup, or **Content** for folders and multi-file games. Install any required BIOS files in the [system folders](#your-files), then load your game on the console.
 
 No games, BIOS files, firmware or decryption keys are included. Use your own
 legally obtained backups and system files dumped from hardware you own. Piracy
 is not condoned; requests for these files are not welcome in issues or discussions.
 
-## A browser companion, built in
+<details>
+<summary><strong>Choose your frontend</strong></summary>
+
+<img src="assets/readme/pre-screen.png" width="960" alt="Frontend picker offering RetroArch and EmulationStation">
+
+Change your default later in **WebUI Settings → Start with**.
+
+</details>
+
+### Scan to connect
+
+| Menu | Open the WebUI QR code |
+| --- | --- |
+| **Picker** | Press **Triangle**; Triangle again or Circle closes it |
+| **RetroArch XMB** | **WebUI** tab to the left of Settings |
+| **RetroArch RGUI** | **WebUI** at the top of the main menu |
+| **EmulationStation** | **WebUI** in the main menu |
+
+<a id="webui"></a>
+
+## <img src="webui/assets/fluent/laptop.svg" width="26" height="26" alt=""> Your browser companion
+
+Stay connected while switching between the picker, RetroArch, and EmulationStation. A supported ELF loader or homebrew launcher keeps the WebUI running across menus; without one, it is available while RetroArch runs.
 
 | Page | What you can do |
 | --- | --- |
-| **Overview** | Check release status, read what’s new, upload content and reach your library and quick settings. Development builds identify themselves honestly. |
-| **Content** | Browse folders, create subfolders, upload and download files. Uploads stream to storage, can be cancelled and never overwrite an existing filename. |
-| **Transfers** | Follow upload progress and results for this browser session. Downloads use your browser’s download manager. |
-| **Settings** | Edit global preferences or select a core profile. Guided categories explain each setting and offer supported choices; Advanced exposes technical keys and manual values. |
+| <img src="webui/assets/fluent/home.svg" width="24" height="24" alt=""> **Overview** | Check updates, alerts, recent transfers, and quick settings. |
+| <img src="webui/assets/fluent/library.svg" width="24" height="24" alt=""> **Games** | Browse cover art, search, filter by system or letter, and sort your collection. |
+| <img src="webui/assets/fluent/arrow-square-down.svg" width="24" height="24" alt=""> **Download Media** | Download artwork and game details for a few games or your whole library. |
+| <img src="webui/assets/fluent/document-folder.svg" width="24" height="24" alt=""> **Content** | Browse folders, create subfolders, and upload or download files. |
+| <img src="webui/assets/fluent/arrow-sync.svg" width="24" height="24" alt=""> **Transfers** | Follow uploads and their results. Downloads appear in your browser’s download manager. |
+| <img src="webui/assets/fluent/settings.svg" width="24" height="24" alt=""> **Settings** | Adjust global preferences, core options, controller mappings, and the startup frontend. |
 
-Guides cover all **15 release cores**, even before their first launch. Global
-preferences cover Video, Audio, Input, Saving, System and Interface. Core
-categories follow each emulator’s options. Runtime-specific choices, including
-BIOS lists and arcade switches, appear when the core registers them.
+### Add a game. Make it yours.
 
-**Save settings, then restart RetroArch to apply them.** Global preferences,
-core options and per-core RetroArch overrides are separate. Existing game or
-folder overrides can take precedence. Unsaved edits survive switching categories
-or Guided/Advanced mode. WebUI light/dark appearance changes immediately.
+Choose a game backup, enter details yourself or find a **LaunchBox** match, then add media. **Automatic media downloads are enabled by default**, with progress and artwork appearing as they arrive. Your own uploaded media is kept.
 
-The interface, fonts and artwork are served locally. Release checks and update
-downloads need internet access. Uploads are
-limited to the content folder and 64 GiB per file. Available storage is not
-reported because the console API does not provide a measured value.
+### One game. Everything within reach.
 
-**New in source builds after Alpha 6:** **Update RetroArch** downloads the newest
-published release, including alphas, directly to your console. It checks the ZIP
-checksum and every packaged file before enabling **Install and close RetroArch**.
-Save your progress, install, wait for the application to close, then reopen it.
-Content, saves, settings and existing custom BIOS/effect files are preserved.
-Keep enough free space for both the downloaded ZIP and its extracted files.
-Failed installs attempt to restore the previous files; a power loss that prevents
-the application from launching can still require reinstalling the release manually.
+<img src="assets/releases/v1.0.0-beta.1/webui-game-media.jpg" width="960" alt="Bust-A-Move Media Inspector with compact artwork thumbnails and a preview">
 
-The new **Alerts** panel lists missing required BIOS/system files by installed
-core and shows the configured location. Choose **Recheck** after adding files.
-It checks presence, not BIOS authenticity; regional requirements may not apply to
-your content. `/app0` means the RetroArch installation folder. Optional firmware
-is excluded from these checks. These controls are not in the published
-Alpha 6 package; install an updated source build once to enable future WebUI updates.
+- **Media:** browse, enlarge, or replace artwork, manuals, and videos.
+- **Details:** edit the name and game information; your changes survive future downloads.
+- **Files:** replace or export a game backup, import or export saves and savestates, and preview savestate screenshots when available.
+
+Close the game and back up your progress before replacing files. Savestates need the same game and a compatible core.
+
+### Fill in the missing artwork
+
+Choose **libretro**, **ScreenScraper**, and **LaunchBox**, set their order, and pick your region and language. Review uncertain matches and resume interrupted downloads. Downloads continue on your PS5 after the browser closes.
+
+ScreenScraper requires an account. Media availability varies by game and source; EmuMovies support is coming later.
+
+<details>
+<summary><strong>Settings, updates, and connection details</strong></summary>
+
+Guided settings cover the original **15 cores**; newer cores do not yet have guided profiles. Advanced settings remain available. Save settings, then restart RetroArch when prompted. Game or folder overrides may take priority.
+
+**Update RetroArch** downloads and verifies a release before offering **Install and close RetroArch**. Save your progress first, then reopen the title after installation. Content, saves, settings, and existing custom BIOS/effect files are preserved. Keep room for the ZIP and extracted files, and back up before updating. Failed installs attempt to restore the previous files; a power loss may require a manual reinstall.
+
+**Alerts** lists missing required BIOS/system files and their configured locations. Choose **Recheck** after adding files. Checks verify presence, not authenticity; regional requirements may vary.
+
+The interface and artwork are served locally. Media downloads, release checks, and updates need internet access. Content uploads support files up to **64 GiB** and do not overwrite existing filenames. Available storage is not reported.
+
+The persistent WebUI uses an ELF loader on port **9021** or a homebrew launcher on port **8080**. Its own address is `http://<PS5-IP>:6769`.
+
+</details>
 
 > The WebUI is a local HTTP service without a login. Use a trusted network and
 > do not forward port **6769** to the internet.
 
-## Supported systems
+<a id="supported-systems"></a>
 
-Release builds contain the following native cores. “GPU” means the emulator
-renders through Vulkan; “software” means RetroArch presents the core’s frames
-through Vulkan. These are supported systems, not a promise that every title works.
+## <img src="webui/assets/fluent/game-chat.svg" width="26" height="26" alt=""> Supported systems
 
-| Systems | Core | Rendering |
+**33 native cores**, grouped below by family. Compatibility and performance vary by game.
+
+| Family | Systems | Core |
 | --- | --- | --- |
-| NES / Famicom | FCEUmm | Software |
-| Game Boy / Game Boy Color / Game Boy Advance | mGBA | Software |
-| SNES / Super Famicom | Snes9x | Software |
-| Arcade, including Neo Geo and Sega System 16/32 | FinalBurn Neo | Software |
-| Mega Drive / Genesis, Master System, Game Gear, SG-1000, Sega CD | Genesis Plus GX | Software |
-| PlayStation Portable | PPSSPP | GPU |
-| GameCube / Wii | Dolphin | GPU |
-| PlayStation 2 | LRPS2 | GPU |
-| PlayStation | Beetle PSX HW | GPU |
-| Nintendo 64 | Mupen64Plus-Next | GPU |
-| Sega Saturn | Beetle Saturn | Software |
-| Commodore 64 | VICE x64sc | Software |
-| Arcade | MAME | Software |
-| Nintendo DS | DeSmuME | Software |
-| Nintendo 3DS | Azahar | GPU |
-| Dreamcast, NAOMI, NAOMI 2, Atomiswave | Flycast | GPU |
-| Sega 32X (and Mega Drive, Mega-CD, Master System, Pico) | PicoDrive | Software |
-| PC Engine / TurboGrafx-16, PC Engine CD, SuperGrafx | Beetle PCE | Software |
-| PC-FX | Beetle PC-FX | Software |
-| Virtual Boy | Beetle VB | Software |
-| Neo Geo Pocket / Color | Beetle NeoPop | Software |
-| WonderSwan / Color | Beetle Cygne | Software |
-| Pokémon Mini | PokeMini | Software |
-| Atari Lynx | Handy | Software |
-| Atari Jaguar | Virtual Jaguar | Software |
-| Atari 2600 | Stella | Software |
-| Atari 5200 | a5200 | Software |
-| Atari 7800 | ProSystem | Software |
-| MS-DOS | DOSBox Pure | Software |
-| 3DO | Opera | Software |
-| Commodore Amiga | PUAE | Software |
-| Neo Geo CD | NeoCD | Software |
-| Point-and-click adventures (LucasArts, Sierra and more) | ScummVM | Software |
+| **Nintendo** | <img src="webui/assets/systems/nes.webp" width="40" height="40" alt=""> **NES / Famicom** | FCEUmm |
+|  | <img src="webui/assets/systems/gb.webp" width="40" height="40" alt=""> **Game Boy**<br><img src="webui/assets/systems/gbc.webp" width="40" height="40" alt=""> **Game Boy Color**<br><img src="webui/assets/systems/gba.webp" width="40" height="40" alt=""> **Game Boy Advance** | mGBA |
+|  | <img src="webui/assets/systems/snes.webp" width="40" height="40" alt=""> **SNES / Super Famicom** | Snes9x |
+|  | <img src="webui/assets/systems/n64.webp" width="40" height="40" alt=""> **Nintendo 64** | Mupen64Plus-Next |
+|  | <img src="webui/assets/systems/gc.webp" width="40" height="40" alt=""> **GameCube**<br><img src="webui/assets/systems/wii.webp" width="40" height="40" alt=""> **Wii** | Dolphin |
+|  | <img src="webui/assets/systems/nds.webp" width="40" height="40" alt=""> **Nintendo DS** | DeSmuME |
+|  | <img src="webui/assets/systems/n3ds.webp" width="40" height="40" alt=""> **Nintendo 3DS** | Azahar |
+|  | <img src="webui/assets/systems/virtualboy.webp" width="40" height="40" alt=""> **Virtual Boy** | Beetle VB |
+|  | <img src="webui/assets/systems/pokemini.webp" width="40" height="40" alt=""> **Pokémon Mini** | PokeMini |
+| **Sony** | <img src="webui/assets/systems/psx.webp" width="40" height="40" alt=""> **PlayStation** | Beetle PSX HW |
+|  | <img src="webui/assets/systems/ps2.webp" width="40" height="40" alt=""> **PlayStation 2** | LRPS2 |
+|  | <img src="webui/assets/systems/psp.webp" width="40" height="40" alt=""> **PlayStation Portable** | PPSSPP |
+| **Sega** | <img src="webui/assets/systems/genesis.webp" width="40" height="40" alt=""> **Mega Drive / Genesis**<br><img src="webui/assets/systems/mastersystem.webp" width="40" height="40" alt=""> **Master System**<br><img src="webui/assets/systems/gamegear.webp" width="40" height="40" alt=""> **Game Gear**<br><img src="webui/assets/systems/sg-1000.webp" width="40" height="40" alt=""> **SG-1000**<br><img src="webui/assets/systems/segacd.webp" width="40" height="40" alt=""> **Sega CD** | Genesis Plus GX |
+|  | <img src="webui/assets/systems/sega32x.webp" width="40" height="40" alt=""> **Sega 32X** | PicoDrive |
+|  | <img src="webui/assets/systems/saturn.webp" width="40" height="40" alt=""> **Sega Saturn** | Beetle Saturn |
+|  | <img src="webui/assets/systems/dreamcast.webp" width="40" height="40" alt=""> **Dreamcast**<br><img src="webui/assets/systems/naomi.webp" width="40" height="40" alt=""> **NAOMI / NAOMI 2**<br><img src="webui/assets/systems/atomiswave.webp" width="40" height="40" alt=""> **Atomiswave** | Flycast |
+| **Arcade & SNK** | <img src="webui/assets/systems/fbneo.webp" width="40" height="40" alt=""> **Arcade**<br><img src="webui/assets/systems/neogeo.webp" width="40" height="40" alt=""> **Neo Geo** | FinalBurn Neo |
+|  | <img src="webui/assets/systems/mame.webp" width="40" height="40" alt=""> **Arcade** | MAME |
+|  | <img src="webui/assets/systems/ngpc.webp" width="40" height="40" alt=""> **Neo Geo Pocket / Color** | Beetle NeoPop |
+|  | <img src="webui/assets/systems/neogeocd.webp" width="40" height="40" alt=""> **Neo Geo CD** | NeoCD |
+| **NEC** | <img src="webui/assets/systems/pcengine.webp" width="40" height="40" alt=""> **PC Engine / TurboGrafx-16 / CD**<br><img src="webui/assets/systems/supergrafx.webp" width="40" height="40" alt=""> **SuperGrafx** | Beetle PCE |
+|  | <img src="webui/assets/systems/pcfx.webp" width="40" height="40" alt=""> **PC-FX** | Beetle PC-FX |
+| **Atari** | <img src="webui/assets/systems/atari2600.webp" width="40" height="40" alt=""> **Atari 2600** | Stella |
+|  | <img src="webui/assets/systems/atari5200.webp" width="40" height="40" alt=""> **Atari 5200** | a5200 |
+|  | <img src="webui/assets/systems/atari7800.webp" width="40" height="40" alt=""> **Atari 7800** | ProSystem |
+|  | <img src="webui/assets/systems/atarilynx.webp" width="40" height="40" alt=""> **Atari Lynx** | Handy |
+|  | <img src="webui/assets/systems/atarijaguar.webp" width="40" height="40" alt=""> **Atari Jaguar** | Virtual Jaguar |
+| **Computers & adventures** | <img src="webui/assets/systems/c64.webp" width="40" height="40" alt=""> **Commodore 64** | VICE x64sc |
+|  | <img src="webui/assets/systems/amiga.webp" width="40" height="40" alt=""> **Commodore Amiga** | PUAE |
+|  | <img src="webui/assets/systems/dos.webp" width="40" height="40" alt=""> **MS-DOS** | DOSBox Pure |
+|  | <img src="webui/assets/systems/scummvm.webp" width="40" height="40" alt=""> **Point-and-click adventures** | ScummVM |
+| **More consoles** | <img src="webui/assets/systems/3do.webp" width="40" height="40" alt=""> **3DO** | Opera |
+|  | <img src="webui/assets/systems/wonderswancolor.webp" width="40" height="40" alt=""> **WonderSwan / Color** | Beetle Cygne |
 
-Use matching arcade sets: MAME currently targets **0.289**, and FBNeo requires
-sets compatible with its pinned version. Azahar requires decrypted content.
-Core binaries must be built for this native SDK and loader; desktop cores or
-cores from another PS5 distribution are not interchangeable. No games or BIOS
-files are bundled.
+PicoDrive also supports Mega Drive, Mega-CD, Master System, and Pico. FinalBurn Neo includes Sega System 16/32; ScummVM supports many LucasArts, Sierra, and other adventures.
+
+Use matching arcade sets: MAME targets **0.289**, and FBNeo needs sets compatible with its version. Azahar requires decrypted content. Only native cores built for this port are compatible; desktop cores and other PS5 distributions’ cores are not interchangeable. No games or BIOS files are bundled.
 
 None of the games I tested with is provided.
 **Use only legally obtained backups of games you own**, and BIOS files dumped
 from your own hardware: piracy is not condoned.
 
-## Balanced graphics for a 4K display
+<a id="controls"></a>
+
+## <img src="webui/assets/fluent/edit.svg" width="26" height="26" alt=""> A stylus in your DualSense
+
+In **DeSmuME** and **Azahar**, slide a finger on the touchpad to move the stylus. **Press** to touch the screen; hold the press while sliding to drag. Release to lift the stylus. A light tap does not click.
+
+Up to **four controllers** are supported. Save controller mappings for each game or core.
+
+<a id="graphics"></a>
+
+## <img src="webui/assets/fluent/image.svg" width="26" height="26" alt=""> Graphics for your display
 
 RetroArch presents at the display resolution. Internal rendering is chosen to
 leave room for emulation and memory use; it need not reach native 4K. Saved
@@ -180,17 +212,15 @@ core, folder and game options take priority over these compiled defaults.
 Other cores retain native rendering, scaled for the display. MAME uses a 4K
 target for vector output; that path still needs console acceptance.
 
-PPSSPP’s **6× / 8× MSAA** default passed the recorded save/load checks. At
-10× / 8× MSAA, the tested workload exhausted device memory. Failed framebuffer
-allocations are now cleaned up and retried once; an unrecoverable failure returns
-to the menu instead of using a missing image. This improves recovery, not the
-amount of memory available. Disabling MSAA leaves more headroom.
+Higher resolutions and anti-aliasing use more memory. If a game struggles, lower its internal resolution or disable MSAA.
 
 To adopt these defaults on an existing installation, change the listed options
 in the WebUI or **Quick Menu → Core Options**. Reset Core Options resets every
 option for that core, so use individual controls if you want to keep other choices.
 
-## Shaders, filters and bezels
+<a id="shaders-filters-and-bezels"></a>
+
+## <img src="webui/assets/fluent/image.svg" width="26" height="26" alt=""> Shaders, filters and bezels
 
 Release builds bundle offline Slang shaders, Mega Bezel, koko-aio and
 standard overlays. Load GPU presets through **Quick Menu → Shaders**, choose a
@@ -198,13 +228,11 @@ CPU filter in **Settings → Video**, or choose artwork in **Settings → On-Scr
 Display → On-Screen Overlay**. CPU filters apply to software-rendered cores;
 hardware-rendered cores use GPU shaders.
 
-The package retains the upstream collections and their notices. Exact versions,
-path corrections and the five upstream file exclusions are recorded in
-`video-assets.json`. Development overlay fixtures are excluded from both the
-staged title and its ZIP. Representative presets and overlay layouts have been tested on PS5. Bundling
-does not imply every preset is verified; see the release notes for limitations.
+Presets and overlays are included for offline use. Compatibility varies by core and preset; original notices are retained.
 
-## Your files
+<a id="your-files"></a>
+
+## <img src="webui/assets/fluent/document-folder.svg" width="26" height="26" alt=""> Your files
 
 `/app0` is the running title’s mount. Over FTP, use your installed title folder,
 usually `/data/homebrew/PPSA99169/`.
@@ -250,24 +278,15 @@ the title folder. With [ShadowMountPlus](https://github.com/drakmor/ShadowMountP
 `/mnt/ext1`), only when a drive is mounted there. Without it, the sandbox hides them
 and **EXTERNAL** (`/mnt`) may be empty.
 
-## What has been verified
+<a id="what-has-been-verified"></a>
 
-Saturn now loads its BIOS from `system/Saturn/`. Console testing reached
-controlled gameplay with clean rendering and a normal exit. The fixes cover
-executable memory for its JITs and ownership of cropped video frames. This is
-a short gameplay check, not a full compatibility or long-session guarantee.
+## <img src="webui/assets/fluent/checkmark-circle.svg" width="26" height="26" alt=""> Compatibility and known limits
 
-Native startup and exit, Vulkan presentation, controller input, stereo audio,
-configuration persistence and representative core loading have console evidence.
-Save-state and memory-pressure results cover the recorded workloads, not every
-core or firmware. Controller rumble uses synthesized DualSense haptics with an
-ordinary-rumble fallback; physical feel still awaits owner confirmation.
+Startup, controller input, audio, saved settings, and representative games have been tested on PS5. Compatibility and long-session testing are ongoing.
 
-The title uses [PS5_Vulkan](https://github.com/mihawk-99/PS5_Vulkan)’s RADV port.
-CPU and GPU allocations share the console’s direct-memory pool; each core does
-not receive a separate 11.65 GiB allowance. A selectable CPU video backend remains
-available. RetroAchievements and netplay remain disabled. Broader BIOS, disc
-swapping, shader-preset and long-session coverage is still in progress.
+- **Azahar:** a crash when closing content, switching to Azahar, and starting a game remains under investigation.
+- **RetroAchievements and netplay** are disabled.
+- Shader presets, disc swapping, and rumble still need broader testing.
 
 [Recorded evidence](evidence/) accompanies verified changes. For a bug report,
 include the core, file format, settings and reproduction steps. Preserve
@@ -277,7 +296,12 @@ before sharing captures.
 
 ---
 
-## Build from source
+<a id="build-from-source"></a>
+
+## <img src="webui/assets/fluent/settings.svg" width="26" height="26" alt=""> Build from source
+
+<details>
+<summary><strong>Build requirements and commands</strong></summary>
 
 The current build uses Linux host tools and the project's cached public PS5 SDK.
 Start with `bash tools/doctor.sh` for host-tool checks. You also need `curl`,
@@ -378,6 +402,8 @@ import table and build identity depend on the shipped core binaries. Source
 patches live in `patches/`; fetched and generated trees stay in ignored
 `vendor/`, `.deps/`, `build/` and `dist/` directories.
 
+</details>
+
 <details>
 <summary><strong>Authors and acknowledgements</strong></summary>
 
@@ -401,6 +427,12 @@ lists and original notices.
 | [Khronos Group](https://github.com/KhronosGroup/Vulkan-Headers) | Vulkan API headers and [specification](https://github.com/KhronosGroup/Vulkan-Docs) |
 | [RetroArch assets contributors](https://github.com/libretro/retroarch-assets) and the [M+ Fonts project](https://mplusfonts.github.io/) | Packaged XMB assets and font; original notices retained |
 | [LLVM / Clang contributors](https://github.com/llvm/llvm-project), [zlib authors Jean-loup Gailly and Mark Adler](https://github.com/madler/zlib) | Compilation and compression tooling |
+
+### Frontends and interface artwork
+
+EmulationStation uses [ES-DE](https://es-de.org/) and the Alekfull NX theme. Touchpad handling builds on PS5_Proton; the picker uses PS5_VulkanTemplate’s UI foundation.
+
+Color icons: **Microsoft Fluent Color**. System artwork: **Linear ES-DE**. Region flags: **flag-icons**. Utility icons: **Lucide**. Full attribution and licences are in [artwork credits](webui/assets/ICON-CREDITS.txt).
 
 ### Emulator cores
 
@@ -439,7 +471,9 @@ lists and original notices.
 
 </details>
 
-## License and third-party terms
+<a id="license-and-third-party-terms"></a>
+
+## <img src="webui/assets/fluent/book-open.svg" width="26" height="26" alt=""> License and third-party terms
 
 This repository's own code is **GPL-3.0-or-later** ([LICENSE](LICENSE)). Most source
 files carry a copyright and SPDX notice; the ones that do not (for example
@@ -465,6 +499,8 @@ The cores keep their own licences, and they differ:
 | Zlib | Handy |
 | MPL-2.0 | mGBA |
 | Non-commercial licences | Snes9x, FinalBurn Neo, Genesis Plus GX, PicoDrive, Opera (FreeDO's modified LGPL): they may not be sold or used commercially, and FBNeo's forbids asking for donations for a project that uses its code |
+
+The Alekfull NX theme also carries non-commercial restrictions. Artwork credits and licence texts for the WebUI’s icons, flags, and system images are in [ICON-CREDITS.txt](webui/assets/ICON-CREDITS.txt).
 
 Assets and fonts keep their licences too: the XMB theme is CC-BY-4.0 with the M+
 font licence, PPSSPP's fonts are OFL-1.1, and Dolphin's `Sys` files carry theirs.
