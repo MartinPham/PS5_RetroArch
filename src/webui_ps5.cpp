@@ -74,11 +74,12 @@ struct BatchState;
 enum class Transfer
 {
     none,
-    single,  // PUT /api/upload
-    batch,   // PUT /api/upload/batch
-    part,    // PUT /api/upload/part
-    scraped, // PUT /api/scraper/pc/media: a file the PC helper downloaded
-    media    // PUT /api/library/media: a media file the user chose for a game
+    single,    // PUT /api/upload
+    batch,     // PUT /api/upload/batch
+    part,      // PUT /api/upload/part
+    scraped,   // PUT /api/scraper/pc/media: a file the PC helper downloaded
+    game_file, // PUT /api/library/file
+    media      // PUT /api/library/media: a media file the user chose for a game
 };
 struct Request
 {
@@ -1178,6 +1179,256 @@ bool content_length(MHD_Connection *c, uint64_t &length)
     length = std::strtoull(value, &end, 10);
     return !errno && !*end;
 }
+// File actions are bound to an exact library entry. Paths are never a general
+// filesystem browser: only content storage and configured save locations qualify.
+std::string game_real_path(std::string path)
+{
+    // RetroArch serializes paths relative to its application directory as :/.
+    if (path.rfind(":/", 0) == 0)
+        path = root_path + path.substr(1);
+    if (path.rfind("/app0/", 0) == 0)
+        path = root_path + path.substr(5);
+    return path;
+}
+bool game_safe_path(const std::string &path, bool create_parents = false, bool new_leaf = false)
+{
+    std::string base;
+    if (path.rfind(root_path + '/', 0) == 0)
+        base = root_path;
+    for (const char *mount : {"/mnt/usb0", "/mnt/usb1", "/mnt/usb2", "/mnt/usb3", "/mnt/usb4",
+                              "/mnt/usb5", "/mnt/usb6", "/mnt/usb7", "/mnt/ext0", "/mnt/ext1"})
+        if (path.rfind(std::string(mount) + '/', 0) == 0)
+            base = mount;
+    if (base.empty() || !valid_path(path.substr(base.size() + 1)))
+        return false;
+    struct stat st{};
+    if (content_stat(base.c_str(), &st) || !S_ISDIR(st.st_mode))
+        return false;
+    for (size_t at = base.size() + 1; at < path.size();)
+    {
+        const auto end = path.find('/', at);
+        const bool leaf = end == std::string::npos;
+        const auto part = path.substr(0, end);
+        if (content_stat(part.c_str(), &st))
+        {
+            if (errno != ENOENT)
+                return false;
+            if (leaf && new_leaf)
+                return true;
+            if (!create_parents || leaf || (mkdir(part.c_str(), 0777) && errno != EEXIST) ||
+                content_stat(part.c_str(), &st))
+                return false;
+        }
+        if (leaf)
+            return S_ISREG(st.st_mode);
+        if (!S_ISDIR(st.st_mode))
+            return false;
+        at = end + 1;
+    }
+    return false;
+}
+std::string leaf_name(const std::string &path)
+{
+    return path.substr(path.find_last_of('/') + 1);
+}
+struct GameFiles
+{
+    std::string rom, stem, core, save_root, state_root, save_folder, state_folder, why;
+    std::vector<std::string> saves, states;
+};
+bool game_save_name(const std::string &name, const std::string &stem, bool state)
+{
+    if (name.rfind(stem + '.', 0) != 0)
+        return false;
+    const std::string suffix = name.substr(stem.size());
+    if (!state)
+        return suffix == ".srm" || suffix == ".sav" || suffix == ".dsv" || suffix == ".rtc" ||
+               suffix == ".eep" || suffix == ".fla" || suffix == ".sra" || suffix == ".mpk";
+    if (suffix == ".state" || suffix == ".state.auto")
+        return true;
+    return suffix.rfind(".state", 0) == 0 && suffix.size() > 6 && suffix.size() <= 12 &&
+           suffix.find_first_not_of("0123456789", 6) == std::string::npos;
+}
+void scan_game_saves(const std::string &folder, const std::string &stem, bool state,
+                     std::vector<std::string> &out, unsigned depth, unsigned &budget)
+{
+    // Bounded traversal; no links, firmware, config files or unrelated basenames.
+    if (!depth || !budget || !game_safe_path(folder + "/probe", false, true))
+        return;
+    DIR *dir = opendir(folder.c_str());
+    if (!dir)
+        return;
+    while (auto *entry = readdir(dir))
+    {
+        if (!budget)
+            break;
+        --budget;
+        const std::string name = entry->d_name, path = folder + '/' + name;
+        if (name.empty() || name.front() == '.')
+            continue;
+        struct stat st{};
+        if (content_stat(path.c_str(), &st))
+            continue;
+        if (S_ISDIR(st.st_mode))
+            scan_game_saves(path, stem, state, out, depth - 1, budget);
+        else if (S_ISREG(st.st_mode) && game_save_name(name, stem, state))
+            out.push_back(path);
+    }
+    closedir(dir);
+}
+bool game_files(MHD_Connection *c, GameFiles &out)
+{
+    std::string core_path;
+    const std::string path = arg(c, "path");
+    if (!ps5_scraper::game_identity(arg(c, "system"), arg(c, "game"), path, core_path))
+    {
+        out.why = "This exact game is no longer in the library. Refresh Games.";
+        return false;
+    }
+    out.rom = game_real_path(path.substr(0, path.find('#')));
+    const bool content = out.rom.rfind(root_path + "/content/", 0) == 0 ||
+                         out.rom.rfind("/mnt/usb", 0) == 0 || out.rom.rfind("/mnt/ext", 0) == 0;
+    if (!content || !game_safe_path(out.rom))
+    {
+        out.why = "This game backup is unavailable or outside supported storage.";
+        return false;
+    }
+    auto name =
+        leaf_name(path.substr(path.find('#') == std::string::npos ? 0 : path.find('#') + 1));
+    out.stem = name.substr(0, name.find_last_of('.'));
+    auto core_file = leaf_name(core_path);
+    const auto dot = core_file.find_last_of('.');
+    if (dot != std::string::npos)
+        core_file.resize(dot);
+    out.core = read_config(root_path + "/info/" + core_file + ".info")["corename"];
+    Config cfg = read_config(root_path + "/config/retroarch.cfg");
+    const auto content_folder = out.rom.substr(0, out.rom.find_last_of('/'));
+    const auto content_name = leaf_name(content_folder);
+    if (!out.core.empty() && valid_path(out.core) && out.core.find('/') == std::string::npos)
+    {
+        const auto prefix = root_path + "/config/" + out.core + '/';
+        overlay(cfg, read_config(prefix + out.core + ".cfg"));
+        overlay(cfg, read_config(prefix + content_name + ".cfg"));
+        overlay(cfg, read_config(prefix + out.stem + ".cfg"));
+    }
+    for (bool state : {false, true})
+    {
+        const std::string plural = state ? "savestates" : "savefiles";
+        const std::string key = state ? "savestate_directory" : "savefile_directory";
+        std::string base = cfg[key];
+        if (base.empty() || base == "default")
+            base = root_path + '/' + plural;
+        base = game_real_path(base);
+        while (!base.empty() && base.back() == '/')
+            base.pop_back();
+        std::string folder = base;
+        if (cfg[plural + "_in_content_dir"] == "true")
+            folder = base = content_folder;
+        else
+        {
+            if (cfg["sort_" + plural + "_by_content_enable"] == "true")
+                folder += '/' + content_name;
+            if (cfg["sort_" + plural + "_enable"] != "false")
+            {
+                if (out.core.empty())
+                    folder.clear(); // Do not invent a core folder for a new save.
+                else
+                    folder += '/' + out.core;
+            }
+        }
+        (state ? out.state_root : out.save_root) = base;
+        (state ? out.state_folder : out.save_folder) = folder;
+        unsigned budget = 10000;
+        auto &files = state ? out.states : out.saves;
+        scan_game_saves(base, out.stem, state, files, base == content_folder ? 1 : 5, budget);
+        std::sort(files.begin(), files.end());
+        if (!budget)
+            out.why =
+                "Some save folders could not be scanned. Check the selected path before importing.";
+    }
+    return true;
+}
+std::string game_files_json(const GameFiles &g)
+{
+    auto entry = [&](const std::string &path)
+    {
+        struct stat st{};
+        content_stat(path.c_str(), &st);
+        const std::string shown =
+            path.rfind(root_path + '/', 0) == 0 ? "/app0" + path.substr(root_path.size()) : path;
+        return "{\"path\":" + quote(path) + ",\"name\":" + quote(leaf_name(path)) +
+               ",\"display\":" + quote(shown) + ",\"bytes\":" + std::to_string(st.st_size) + '}';
+    };
+    auto list = [&](const std::vector<std::string> &files)
+    {
+        std::string out = "[";
+        for (const auto &file : files)
+            out += (out.size() > 1 ? "," : "") + entry(file);
+        return out + ']';
+    };
+    return "{\"rom\":" + entry(g.rom) + ",\"save\":" + list(g.saves) +
+           ",\"state\":" + list(g.states) + ",\"saveFolder\":" + quote(g.save_folder) +
+           ",\"stateFolder\":" + quote(g.state_folder) + ",\"stem\":" + quote(g.stem) +
+           ",\"core\":" + quote(g.core) + ",\"warning\":" + quote(g.why) + '}';
+}
+bool game_file_target(MHD_Connection *c, const GameFiles &g, bool writing, std::string &target)
+{
+    const std::string kind = arg(c, "kind"), selected = arg(c, "file");
+    if (kind == "rom")
+        target = g.rom;
+    else if (kind == "save" || kind == "state")
+    {
+        const auto &files = kind == "state" ? g.states : g.saves;
+        if (std::find(files.begin(), files.end(), selected) != files.end())
+            target = selected;
+        else if (writing)
+        {
+            const auto &folder = kind == "state" ? g.state_folder : g.save_folder;
+            if (folder.empty() || !game_save_name(selected, g.stem, kind == "state"))
+                return false;
+            target = folder + '/' + selected;
+        }
+        else
+            return false;
+    }
+    else
+        return false;
+    return game_safe_path(target, writing, writing);
+}
+void prepare_game_file(MHD_Connection *c, Request &r)
+{
+    GameFiles game;
+    if (!game_files(c, game) || !game_file_target(c, game, true, r.destination))
+    {
+        r.error = 400;
+        r.media_why =
+            game.why.empty() ? "Choose a save file or slot belonging to this game." : game.why;
+        r.message = r.media_why.c_str();
+        return;
+    }
+    if (!content_length(c, r.expected) || !r.expected || r.expected > upload_limit)
+    {
+        r.error = 413;
+        r.message = "Choose a non-empty file of at most 64 GiB.";
+        return;
+    }
+    r.replace = std::strcmp(arg(c, "existing"), "replace") == 0;
+    if (exists(r.destination) && !r.replace)
+    {
+        r.error = 409;
+        r.message = "This file exists. Confirm replacement first.";
+        return;
+    }
+    r.transfer = Transfer::game_file;
+    r.temporary =
+        r.destination.substr(0, r.destination.find_last_of('/') + 1) + ".upload-" + nonce();
+    if (!r.writer.create(r.temporary))
+    {
+        r.error = 507;
+        r.message = "Cannot create the upload. Check storage and write access.";
+    }
+}
+
 void prepare_upload(MHD_Connection *c, Request &r)
 {
     auto fail = [&](unsigned code, const char *message)
@@ -1380,6 +1631,37 @@ MHD_Result scraper_route(MHD_Connection *c, const std::string &url, const std::s
         }
         return o;
     };
+    if (url == "/api/library/files" || url == "/api/library/file")
+    {
+        GameFiles game;
+        if (!game_files(c, game))
+            return error(c, 404, game.why.c_str());
+        if (method == "GET" && url == "/api/library/files")
+            return respond(c, 200, game_files_json(game));
+        std::string target;
+        if (!game_file_target(c, game, method == "PUT", target))
+            return error(c, 400, "Choose a file belonging to this game.");
+        if (method == "GET")
+            return serve_file(c, target, "application/octet-stream", true);
+        if (r.transfer != Transfer::game_file || target != r.destination)
+            return error(c, 409, "The game location changed. Refresh and try again.");
+        if (r.received != r.expected || !r.writer.flush())
+            return error(c, 400, "The upload was incomplete; the original file was kept.");
+        const int fd = r.writer.release();
+        const auto result = ps5_transfer::commit(fd, r.temporary, target, r.replace, true);
+        if (fd >= 0)
+            close(fd);
+        if (result != ps5_transfer::Commit::done)
+            return error(c, result == ps5_transfer::Commit::exists ? 409 : 507,
+                         "Could not finish the upload; the original file was kept.");
+        chmod(target.c_str(), 0777);
+        r.temporary.clear();
+        return respond(c, 201, "{\"stored\":true}");
+    }
+    if (method == "POST" && url == "/api/library/game")
+        return ps5_scraper::edit_game(arg(c, "system"), arg(c, "game"), r.body, why)
+                   ? respond(c, 200, ps5_scraper::game_json(arg(c, "system"), arg(c, "game")))
+                   : error(c, 400, why.c_str());
     if (method == "GET" && url == "/api/library")
         return respond(c, 200, ps5_scraper::library_json());
     if (method == "GET" && url == "/api/library/game")
@@ -1786,6 +2068,8 @@ MHD_Result handle(void *, MHD_Connection *c, const char *url, const char *method
             prepare_scraped(c, *r);
         else if (std::strcmp(method, "PUT") == 0 && std::strcmp(url, "/api/library/media") == 0)
             prepare_media(c, *r);
+        else if (std::strcmp(method, "PUT") == 0 && std::strcmp(url, "/api/library/file") == 0)
+            prepare_game_file(c, *r);
         if (std::strcmp(url, "/api/scraper/start") == 0)
             r->body_limit = 4 << 20; // one line a game chosen
         if (r->error)

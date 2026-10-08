@@ -452,6 +452,74 @@ class Scraper(unittest.TestCase):
         self.assertEqual({field: game[field] for field in fields}, fields)
         self.assertTrue(any('released' not in game for game in games))
 
+    def test_game_files_and_edited_metadata(self):
+        path = next(iter(self.games.values()))
+        rom = self.root / path.removeprefix('/app0/')
+        rom.parent.mkdir(parents=True, exist_ok=True)
+        rom.write_bytes(b'original backup')
+        key = rom.stem
+        query = urllib.parse.urlencode({'system': 'snes', 'game': key, 'path': path})
+        route = '/api/library/file?' + query
+        files_route = '/api/library/files?' + query
+        (self.root / 'config/retroarch.cfg').write_text(
+            'savefile_directory = ":/savefiles"\nsavestate_directory = ":/savestates"\n')
+        status, body = self.request('GET', files_route)
+        self.assertEqual(status, 200, body)
+        files = json.loads(body)
+        self.assertEqual(files['core'], 'Snes9x')
+        self.assertEqual(files['saveFolder'], str(self.root / 'savefiles/Snes9x'))
+        self.assertEqual(self.request('GET', route + '&kind=rom')[1], b'original backup')
+        self.assertEqual(self.request('PUT', route + '&kind=rom', b'replacement')[0], 409)
+        self.assertEqual(self.request('PUT', route + '&kind=rom&existing=replace', b'replacement')[0], 201)
+        self.assertEqual(rom.read_bytes(), b'replacement')
+        for kind, filename, folder in [('save', key + '.srm', 'savefiles'), ('state', key + '.state3', 'savestates')]:
+            target = route + '&kind=' + kind + '&file=' + urllib.parse.quote(filename)
+            self.assertEqual(self.request('PUT', target, b'new progress')[0], 201)
+            stored = self.root / folder / 'Snes9x' / filename
+            self.assertEqual(stored.read_bytes(), b'new progress')
+            listing = json.loads(self.request('GET', files_route)[1])[kind]
+            self.assertEqual([f['path'] for f in listing], [str(stored)])
+            target = route + '&kind=' + kind + '&file=' + urllib.parse.quote(str(stored))
+            self.assertEqual(self.request('GET', target)[1], b'new progress')
+            self.assertEqual(self.request('PUT', target, b'bad')[0], 409)
+            self.assertEqual(self.request('PUT', target + '&existing=replace', b'newer')[0], 201)
+            self.assertEqual(stored.read_bytes(), b'newer')
+            # A disconnected upload must not replace a whole save.
+            conn = socket.create_connection(('127.0.0.1', self.port))
+            conn.sendall((f'PUT {target}&existing=replace HTTP/1.1\r\nHost: 127.0.0.1:{self.port}\r\nX-RetroArch-Token: {self.token}\r\nContent-Length: 100\r\n\r\ncut').encode())
+            conn.close()
+            self.assertEqual(stored.read_bytes(), b'newer')
+        for bad in ['../config/retroarch.cfg', key + '.state.png', key + '.state-2', 'other.state']:
+            self.assertEqual(self.request('PUT', route + '&kind=state&file=' + urllib.parse.quote(bad), b'bad')[0], 400)
+        self.assertEqual(self.request('PUT', route + '&kind=rom&existing=replace', b'')[0], 413)
+        self.assertEqual(self.request('GET', files_route.replace('path=', 'invalid='))[0], 404)
+        self.token, token = 'wrong', self.token
+        self.assertEqual(self.request('PUT', route + '&kind=rom&existing=replace', b'bad')[0], 403)
+        self.token = token
+        # Links never expose or overwrite a different file.
+        save = self.root / 'savefiles/Snes9x' / (key + '.sav')
+        save.symlink_to(rom)
+        self.assertEqual(self.request('PUT', route + '&kind=save&file=' + urllib.parse.quote(save.name), b'bad')[0], 400)
+        self.assertEqual(rom.read_bytes(), b'replacement')
+        # The same basename in another core remains a separate selectable file.
+        alternate = self.root / 'savefiles/Other Core' / (key + '.srm')
+        alternate.parent.mkdir(); alternate.write_bytes(b'other core')
+        self.assertEqual(len(json.loads(self.request('GET', files_route)[1])['save']), 2)
+        cfg = self.root / 'config/retroarch.cfg'
+        cfg.write_text('sort_savestates_enable = "false"\nsort_savestates_by_content_enable = "true"\n')
+        self.assertEqual(json.loads(self.request('GET', files_route)[1])['stateFolder'], str(self.root / 'savestates/SNES'))
+        metadata = {field: '' for field in ('name', 'description', 'developer', 'publisher', 'released', 'genre', 'players', 'rating')}
+        metadata.update(name='My game', description='Line one\n"quoted" \\ text', rating='0.85')
+        status, body = self.request('POST', '/api/library/game?' + query, json.dumps(metadata).encode())
+        self.assertEqual(status, 200, body)
+        self.assertEqual(json.loads(body)['details']['description'], metadata['description'])
+        self.assertEqual(next(g for system in json.loads(self.request('GET', '/api/library')[1])['systems'] for g in system['games'] if g['path'] == path)['name'], 'My game')
+        meta = (self.root / 'library/snes/metadata' / (key + '.meta')).read_text()
+        self.assertIn('edited = "name,description,developer,publisher,genre,players,rating,released"', meta)
+        metadata['rating'] = 'NaN'
+        self.assertEqual(self.request('POST', '/api/library/game?' + query, json.dumps(metadata).encode())[0], 400)
+        self.assertEqual(rom.read_bytes(), b'replacement')
+
     def test_games_page_in_a_browser(self):
         playwright = next((str(p) for p in (Path.home() / '.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright-core',
                                             Path('/usr/lib/chatgpt/resources/cua_node/lib/node_modules/playwright-core')) if p.exists()),
@@ -460,6 +528,10 @@ class Scraper(unittest.TestCase):
             self.skipTest('needs Playwright and Chromium')
         import shutil
         shutil.copytree(ROOT / 'webui', self.root / 'webui', dirs_exist_ok=True)
+        for game_path in self.games.values():
+            backup = self.root / game_path.removeprefix('/app0/')
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            backup.write_bytes(b'game backup fixture')
         # Page files newer than the running server: the page asks for a restart.
         (self.root / 'webui/version.json').write_text('{"build": "newer-than-the-server"}\n')
         # Covers must decode: the transfer-only fixture is text, and the page

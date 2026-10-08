@@ -83,6 +83,10 @@ bool sign_out(const std::string &source);
  * stored (type, size, uploaded by the user) and the file types it accepts; "" for no
  * such game. */
 std::string game_json(const std::string &system, const std::string &game);
+bool game_identity(const std::string &system, const std::string &game, const std::string &path,
+                   std::string &core);
+bool edit_game(const std::string &system, const std::string &game, const std::string &body,
+               std::string &why);
 /* A media file the user uploads for a game: where to write it (a hidden file beside its
  * final name); false with why for a type the frontends cannot show. Once committed,
  * uploaded() makes it the kind's only file and marks it the user's: no scrape replaces it. */

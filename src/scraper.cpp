@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <climits>
+#include <cmath>
 #include <functional>
 #include <unordered_map>
 #include <atomic>
@@ -302,7 +303,7 @@ std::string clean_title(const std::string &name)
 /* ---- the library ------------------------------------------------------------------ */
 struct Game
 {
-    std::string system, system_name, database, path, label, crc32, key;
+    std::string system, system_name, database, path, label, crc32, key, core;
 };
 std::vector<Game> load_games()
 {
@@ -328,7 +329,7 @@ std::vector<Game> load_games()
                 system.known ? ps5_library_platform_database(system.id) : nullptr;
             const std::string path = title_path(game.path);
             out.push_back({system.id, system.name, database ? database : "", path, game.label,
-                           game.crc32, game_key(path)});
+                           game.crc32, game_key(path), *game.core ? game.core : system.core});
         }
     ps5_library_free(&library);
     return out;
@@ -664,7 +665,7 @@ std::shared_ptr<Job> load_job(const std::string &path, const std::vector<Game> &
             if (known != by_path.end())
                 item.game = *known->second;
             else
-                item.game = {f[2], "", "", f[3], f[4], f[5], game_key(f[3])};
+                item.game = {f[2], "", "", f[3], f[4], f[5], game_key(f[3]), ""};
             item.matched = f[6];
             item.message = f[7];
             item.started = f.size() >= 9 && f[8] == "1";
@@ -856,8 +857,10 @@ bool wanted(const Game &game, const std::string &kind, const Options &options)
     return std::find(mine.begin(), mine.end(), kind) == mine.end();
 }
 /* What is written of a game's metadata (fields edited by hand are kept). */
+std::mutex metadata_lock;
 void save_meta(const Item &item, const Options &options, const Fields &details = {})
 {
+    std::lock_guard<std::mutex> guard(metadata_lock);
     const std::string path = meta_path(item.game.system, item.game.key);
     Fields fields = read_fields(path);
     std::set<std::string> edited;
@@ -2765,6 +2768,67 @@ std::string game_json(const std::string &system, const std::string &key)
            "]}";
 }
 
+bool game_identity(const std::string &system, const std::string &key, const std::string &path,
+                   std::string &core)
+{
+    for (const auto &game : load_games())
+        if (game.system == system && game.key == key && game.path == path)
+        {
+            core = game.core;
+            return true;
+        }
+    return false;
+}
+
+bool edit_game(const std::string &system, const std::string &key, const std::string &body,
+               std::string &why)
+{
+    Game game;
+    const Json input = Json::parse(body);
+    if (!find_game(system, key, game) || input.kind != Json::object)
+    {
+        why = "Choose a game and valid details.";
+        return false;
+    }
+    std::lock_guard<std::mutex> guard(metadata_lock);
+    Fields meta = read_fields(meta_path(system, key));
+    for (const char *field : {"name", "description", "developer", "publisher", "genre", "players",
+                              "rating", "released"})
+    {
+        if (input[field].kind != Json::string)
+        {
+            why = "Every detail must be text.";
+            return false;
+        }
+        const std::string value = input[field].str();
+        if (value.size() > (std::string(field) == "description" ? 12000u : 512u) ||
+            value.find('\0') != std::string::npos ||
+            (std::string(field) == "name" &&
+             value.find_first_not_of(" \t\r\n") == std::string::npos))
+        {
+            why = "Enter a game name and keep each detail within its limit.";
+            return false;
+        }
+        if (std::string(field) == "rating" && !value.empty())
+        {
+            char *end = nullptr;
+            const double rating = std::strtod(value.c_str(), &end);
+            if (*end || !std::isfinite(rating) || rating < 0 || rating > 1)
+            {
+                why = "Rating must be between 0 and 100 percent.";
+                return false;
+            }
+        }
+        meta[field] = value;
+    }
+    meta["edited"] = "name,description,developer,publisher,genre,players,rating,released";
+    make_folders(library_root() + '/' + system + "/metadata");
+    if (write_atomic(meta_path(system, key), fields_text(meta)))
+        return true;
+    why = "Details could not be saved. Check console storage.";
+    return false;
+}
+
 bool upload_target(const std::string &system, const std::string &key, const std::string &kind,
                    const std::string &type, std::string &temporary, std::string &destination,
                    std::string &why)
@@ -2799,6 +2863,7 @@ bool upload_target(const std::string &system, const std::string &key, const std:
 void uploaded(const std::string &system, const std::string &key, const std::string &kind,
               const std::string &destination)
 {
+    std::lock_guard<std::mutex> guard(metadata_lock);
     /* The new file is the kind's only one (a lookup takes the first type it finds). */
     const std::string stem = destination.substr(0, destination.find_last_of('.'));
     for (const char *ext : {".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".webm", ".pdf"})

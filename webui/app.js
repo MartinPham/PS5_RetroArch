@@ -925,27 +925,35 @@ $('#games-direction').addEventListener('click', () => {
   setGamesDirection($('#games-direction').dataset.direction === 'asc' ? 'desc' : 'asc'); changeGamesSort();
 });
 
-// A game's page: its details, then one row a kind of media, missing ones greyed, each
-// replaceable by a file from this computer (streamed to the console, then put in place).
-let sheetGame = null;
-const DETAIL_NAMES = [['developer', 'Developer'], ['publisher', 'Publisher'], ['released', 'Released'], ['genre', 'Genre'], ['players', 'Players'], ['rating', 'Rating']];
+// Media Inspector: one preview, editable details, and game-bound file transfers.
+let sheetGame = null, sheetBusy = false;
+const DETAIL_NAMES = [['name', 'Game name'], ['developer', 'Developer'], ['publisher', 'Publisher'], ['released', 'Release date'], ['genre', 'Genre'], ['players', 'Players'], ['rating', 'Rating (%)'], ['description', 'Description']];
+function sheetQuery(context = sheetGame) {
+  return new URLSearchParams({ system: context.system.id, game: context.game.key, path: context.game.path }).toString();
+}
 async function openGame(system, game) {
-  sheetGame = { system, game, info: null };
+  const context = sheetGame = { system, game, info: null, tab: 'media', selected: 'cover' };
   const dialog = $('#game-sheet');
   $('#sheet-title').textContent = gameName(game);
   $('#sheet-tags').replaceChildren(...gameTags(game).map(tagNode));
   $('#sheet-sub').textContent = `${system.name} · ${game.path.split('/').pop()}`;
   $('#sheet-details').hidden = true;
+  $('#sheet-media-panel').hidden = false; $('#sheet-files').hidden = true;
+  $('#sheet-thumbs').replaceChildren();
   $('#sheet-media').replaceChildren(element('p', 'Loading…', 'list-message'));
   drawSheetCover();
   if (!dialog.open) dialog.showModal();
-  try { sheetGame.info = await api(`/api/library/game?system=${encodeURIComponent(system.id)}&game=${encodeURIComponent(game.key)}`); }
-  catch (error) { $('#sheet-media').replaceChildren(element('p', error.message, 'list-message inline-error')); return; }
-  drawSheet();
+  try {
+    const info = await api(`/api/library/game?${sheetQuery(context)}`, { signal: AbortSignal.timeout(60000) });
+    if (sheetGame !== context) return;
+    context.info = info; drawSheet();
+  } catch (error) {
+    if (sheetGame === context) $('#sheet-media').replaceChildren(element('p', error.message, 'list-message inline-error'));
+  }
 }
 function sheetMediaUrl(kind) {
-  const { system, game, info } = sheetGame, entry = info?.kinds.find(k => k.id === kind);
-  return `/api/library/media?system=${encodeURIComponent(system.id)}&game=${encodeURIComponent(game.key)}&kind=${kind}&v=${entry?.changed || ''}`;
+  const { info } = sheetGame, entry = info?.kinds.find(k => k.id === kind);
+  return `/api/library/media?${sheetQuery()}&kind=${kind}&v=${entry?.changed || ''}`;
 }
 function drawSheetCover() {
   const box = $('#sheet-cover'), { system, game, info } = sheetGame;
@@ -955,24 +963,145 @@ function drawSheetCover() {
   img.addEventListener('error', () => img.replaceWith(icon('file'))); box.replaceChildren(img);
 }
 function drawSheet() {
-  const { info } = sheetGame, details = info.details;
-  // Details, when a source gave them.
-  const box = $('#sheet-details'); box.replaceChildren();
-  if (details.description) {
-    const text = element('p', details.description, 'description'); box.append(text);
-    if (details.description.length > 420) { const more = element('button', 'Read more', 'text-button'); more.type = 'button'; more.addEventListener('click', () => { text.classList.toggle('open'); more.textContent = text.classList.contains('open') ? 'Show less' : 'Read more'; }); box.append(more); }
-  }
-  const facts = DETAIL_NAMES.filter(([k]) => details[k]);
-  if (facts.length) {
-    const dl = element('dl');
-    for (const [k, label] of facts) dl.append(element('dt', label), element('dd', k === 'rating' ? `${Math.round(Number(details[k]) * 100)}%` : details[k]));
-    box.append(dl);
-  }
-  box.hidden = !box.childElementCount;
-  const present = info.kinds.filter(k => k.present).length;
-  $('#sheet-media-count').textContent = `${present} of ${info.kinds.length} kinds`;
-  $('#sheet-media').replaceChildren(...info.kinds.map(mediaRow));
+  const { info } = sheetGame;
+  $('#sheet-title').textContent = info.details.name || gameName(sheetGame.game);
+  $('#sheet-media-count').textContent = `${info.kinds.filter(k => k.present).length} of ${info.kinds.length} types`;
+  const selected = info.kinds.find(k => k.id === sheetGame.selected) || info.kinds[0];
+  $('#sheet-media').replaceChildren(mediaRow(selected));
+  $('#sheet-thumbs').replaceChildren(...info.kinds.map(kind => {
+    const button = element('button', undefined, 'sheet-thumb'); button.type = 'button';
+    button.setAttribute('aria-pressed', String(kind.id === selected.id));
+    const picture = element('span', undefined, 'thumb-picture');
+    if (kind.present && kind.id !== 'video' && kind.type !== 'pdf') {
+      const img = document.createElement('img'); img.src = sheetMediaUrl(kind.id); img.alt = ''; img.loading = 'lazy';
+      img.addEventListener('error', () => img.replaceWith(svgIcon(KIND_ICONS[kind.id] || KIND_ICONS.cover))); picture.append(img);
+    } else picture.append(svgIcon(KIND_ICONS[kind.id] || KIND_ICONS.cover));
+    button.append(picture, element('span', kind.name), element('small', kind.present ? 'Available' : 'Missing'));
+    button.addEventListener('click', () => { if (!sheetBusy) { sheetGame.selected = kind.id; drawSheet(); } });
+    return button;
+  }));
   drawSheetCover();
+  selectSheetTab(sheetGame.tab);
+}
+function selectSheetTab(tab) {
+  if (sheetBusy || !sheetGame?.info) return;
+  sheetGame.tab = tab;
+  for (const button of $$('#sheet-nav button')) button.setAttribute('aria-pressed', String(button.dataset.tab === tab));
+  $('#sheet-media-panel').hidden = tab !== 'media';
+  $('#sheet-details').hidden = tab !== 'details';
+  $('#sheet-files').hidden = tab !== 'files';
+  if (tab === 'details') drawSheetDetails();
+  if (tab === 'files') loadSheetFiles();
+}
+for (const button of $$('#sheet-nav button')) button.addEventListener('click', () => selectSheetTab(button.dataset.tab));
+$('#sheet-edit').addEventListener('click', () => selectSheetTab('details'));
+function drawSheetDetails() {
+  const context = sheetGame, form = element('form', undefined, 'sheet-editor');
+  form.append(element('h3', 'Edit game details'), element('p', 'Your changes are kept when media and details are downloaded again.', 'muted sheet-hint'));
+  const fields = element('div', undefined, 'sheet-fields');
+  for (const [key, title] of DETAIL_NAMES) {
+    const label = element('label', title, key === 'description' || key === 'name' ? 'wide-field' : '');
+    const input = document.createElement(key === 'description' ? 'textarea' : 'input');
+    input.name = key; input.maxLength = key === 'description' ? 12000 : 512;
+    input.value = key === 'name' ? context.info.details.name || gameName(context.game) : context.info.details[key] || '';
+    if (key === 'name') input.required = true;
+    if (key === 'rating') { input.type = 'number'; input.min = 0; input.max = 100; input.step = 'any'; input.value = input.value === '' ? '' : String(Number(input.value) * 100); }
+    if (context.draft) input.value = context.draft[key];
+    if (key === 'released') input.placeholder = 'YYYY-MM-DD, YYYY-MM or YYYY';
+    label.append(input); fields.append(label);
+  }
+  const actions = element('div', undefined, 'sheet-actions'), save = element('button', 'Save changes', 'primary'), cancel = element('button', 'Cancel', 'secondary');
+  save.type = 'submit'; cancel.type = 'button'; cancel.addEventListener('click', () => { context.draft = null; selectSheetTab('media'); });
+  const status = element('p', '', 'sheet-status'); status.setAttribute('role', 'status');
+  actions.append(save, cancel);
+  form.append(fields, element('p', 'The display name does not rename the game backup or change its system.', 'muted sheet-hint'), actions, status);
+  form.addEventListener('input', () => { context.draft = Object.fromEntries(new FormData(form)); });
+  form.addEventListener('submit', async event => {
+    event.preventDefault(); if (sheetBusy) return;
+    const values = Object.fromEntries(new FormData(form));
+    if (values.rating !== '') values.rating = String(Number(values.rating) / 100);
+    sheetBusy = true; save.disabled = cancel.disabled = true; status.textContent = 'Saving…';
+    try {
+      const info = await api(`/api/library/game?${sheetQuery(context)}`, { method: 'POST', body: JSON.stringify(values) });
+      context.info = info; context.draft = null; Object.assign(context.game, info.details); context.game.title = info.details.name;
+      $('#sheet-title').textContent = info.details.name; drawGames(); status.textContent = 'Details saved.';
+    } catch (error) { status.textContent = error.message; status.classList.add('inline-error'); }
+    finally { sheetBusy = false; save.disabled = cancel.disabled = false; }
+  });
+  $('#sheet-details').replaceChildren(form);
+}
+async function loadSheetFiles() {
+  const context = sheetGame, box = $('#sheet-files');
+  box.replaceChildren(element('p', 'Finding game files…', 'muted'));
+  try {
+    const data = await api(`/api/library/files?${sheetQuery(context)}`, { signal: AbortSignal.timeout(60000) });
+    if (sheetGame !== context || context.tab !== 'files') return;
+    context.files = data;
+    box.replaceChildren(element('h3', 'Game files'), element('p', 'Close this game on the console before replacing or importing files. Export first to keep a copy.', 'muted sheet-hint'));
+    if (data.warning) box.append(element('p', data.warning, 'inline-error'));
+    for (const [kind, title, hint] of [['rom', 'Game backup (ROM)', 'Your legally obtained backup. The existing filename is kept.'], ['save', 'In-game save', 'Saved progress files. Import the native format used by your core.'], ['state', 'RetroArch savestate', 'Use the same game and compatible core version. Select a file or a new slot.']]) {
+      const group = element('section', undefined, 'sheet-file-group'); group.dataset.kind = kind;
+      group.append(element('h4', title), element('p', hint, 'muted sheet-hint'));
+      const list = kind === 'rom' ? [data.rom] : data[kind], select = document.createElement('select');
+      select.setAttribute('aria-label', `${title} file`);
+      for (const file of list) select.add(new Option(`${file.display} · ${bytes(file.bytes)}`, file.path));
+      if (kind !== 'rom' && data[kind + 'Folder']) select.add(new Option(`Import a new ${kind === 'state' ? 'slot' : 'save file'}`, ''));
+      if (!select.options.length) select.add(new Option('No matching files found', ''));
+      const slotLabel = element('label', 'Slot (0 is the default, -1 is automatic)', 'sheet-slot'), slot = document.createElement('input');
+      slot.type = 'number'; slot.min = -1; slot.max = 999999; slot.value = 0; slotLabel.append(slot);
+      const destination = element('p', '', 'muted sheet-path');
+      const actions = element('div', undefined, 'sheet-actions'), upload = element('button', kind === 'rom' ? 'Replace…' : 'Import…', 'secondary'), download = element('a', 'Export', 'secondary');
+      upload.type = 'button'; const input = document.createElement('input'); input.type = 'file'; input.hidden = true;
+      if (kind === 'rom') input.accept = '.' + data.rom.name.split('.').pop();
+      if (kind === 'save') input.accept = '.srm,.sav,.dsv,.rtc,.eep,.fla,.sra,.mpk';
+      const status = element('p', '', 'sheet-status'); status.setAttribute('role', 'status');
+      const refresh = () => {
+        const file = list.find(f => f.path === select.value);
+        slotLabel.hidden = kind !== 'state' || !!file;
+        destination.textContent = file ? file.display : data[kind + 'Folder'] ? `Destination: ${data[kind + 'Folder']}` : 'Launch this game with its core and save once, then refresh to locate its files.';
+        upload.disabled = !file && !data[kind + 'Folder'];
+        if (file) { download.href = `/api/library/file?${sheetQuery(context)}&kind=${kind}&file=${encodeURIComponent(file.path)}`; download.removeAttribute('aria-disabled'); }
+        else { download.removeAttribute('href'); download.setAttribute('aria-disabled', 'true'); }
+      };
+      select.addEventListener('change', refresh); refresh();
+      upload.addEventListener('click', () => { if (!sheetBusy) input.click(); });
+      input.addEventListener('change', async () => {
+        const file = input.files[0]; input.value = ''; if (!file || sheetBusy) return;
+        if (!file.size) { status.textContent = 'Choose a non-empty file.'; return; }
+        let target = select.value;
+        if (kind === 'rom' && file.name.split('.').pop().toLowerCase() !== data.rom.name.split('.').pop().toLowerCase()) { status.textContent = 'Choose a backup with the same file extension.'; return; }
+        if (!target) {
+          if (kind === 'state') {
+            if (!slot.checkValidity() || slot.value === '') { slot.reportValidity(); return; }
+            target = data.stem + '.state' + (Number(slot.value) === -1 ? '.auto' : Number(slot.value) === 0 ? '' : Number(slot.value));
+          } else target = data.stem + '.' + file.name.split('.').pop().toLowerCase();
+        }
+        const replacement = !!select.value;
+        if (!confirm(`${replacement ? 'Replace ' : 'Import to '}${target}?\n\nClose this game on the console first.${replacement ? '\nThe existing file will be overwritten. Export it first if you need a copy.' : ''}`)) return;
+        sheetBusy = true; select.disabled = upload.disabled = true;
+        const progress = document.createElement('progress'); progress.max = 100; progress.value = 0; progress.setAttribute('aria-label', 'Upload progress'); group.append(progress);
+        const cancel = element('button', 'Cancel upload', 'secondary'); cancel.type = 'button'; actions.append(cancel);
+        try {
+          await new Promise((resolve, reject) => {
+            const request = new XMLHttpRequest();
+            request.open('PUT', `/api/library/file?${sheetQuery(context)}&kind=${kind}&file=${encodeURIComponent(target)}${replacement ? '&existing=replace' : ''}`);
+            request.setRequestHeader('X-RetroArch-Token', token);
+            request.upload.addEventListener('progress', e => { if (e.lengthComputable) { progress.value = e.loaded / e.total * 100; status.textContent = `${Math.round(progress.value)}% · ${bytes(e.loaded)} of ${bytes(e.total)}`; } });
+            cancel.addEventListener('click', () => request.abort());
+            request.addEventListener('load', () => { let result = {}; try { result = JSON.parse(request.responseText); } catch {} request.status === 201 ? resolve() : reject(new Error(result.error || 'Upload failed. Try again.')); });
+            request.addEventListener('error', () => reject(new Error('Connection lost. Refresh to check whether the upload completed.')));
+            request.addEventListener('abort', () => reject(new Error('Upload cancelled. Refresh to check its status.')));
+            request.send(file);
+          });
+          sheetBusy = false; await loadSheetFiles();
+          $('#sheet-files').prepend(element('p', `${title} stored successfully.`, 'sheet-status'));
+        } catch (error) { status.textContent = error.message; status.classList.add('inline-error'); }
+        finally { sheetBusy = false; select.disabled = false; refresh(); progress.remove(); cancel.remove(); }
+      });
+      actions.append(upload, download, input); group.append(select, destination, slotLabel, actions, status); box.append(group);
+    }
+    box.append(element('p', 'File transfers preserve bytes; they do not convert save formats. Cores with private save directories and multi-file disc sets may need the Content browser or FTP.', 'muted sheet-hint'));
+  } catch (error) { if (sheetGame === context) box.replaceChildren(element('p', error.message, 'inline-error')); }
 }
 function mediaRow(kind) {
   const row = element('div', undefined, `media-row-item${kind.present ? '' : ' missing'}`), stage = element('div', undefined, 'media-stage');
@@ -1008,6 +1137,10 @@ function mediaRow(kind) {
   input.accept = kind.accepts.map(type => '.' + type).join(',');
   choose.addEventListener('click', () => input.click());
   input.addEventListener('change', () => { if (input.files[0]) uploadMedia(kind, input.files[0], row); input.value = ''; });
+  if (kind.present && kind.id !== 'video' && kind.type !== 'pdf') {
+    const enlarge = element('button', 'Enlarge', 'secondary'); enlarge.type = 'button';
+    enlarge.addEventListener('click', () => openLightbox(sheetMediaUrl(kind.id), kind)); actions.append(enlarge);
+  }
   actions.append(choose, input);
   side.append(title, element('p', kind.description, 'muted'), state, actions);
   // A file dropped on the row replaces that kind.
@@ -1025,32 +1158,41 @@ function openLightbox(src, kind) {
   $('#game-sheet').append(box);
 }
 function uploadMedia(kind, file, row) {
+  if (sheetBusy) return;
+  const context = sheetGame;
   const type = (file.name.split('.').pop() || '').toLowerCase();
   const state = row.querySelector('.state');
   if (!kind.accepts.includes(type)) { state.textContent = `${kind.name} takes ${kind.accepts.join(', ').toUpperCase()} files (what every frontend can show).`; state.className = 'state inline-error'; return; }
   const { system, game } = sheetGame, bar = document.createElement('progress'); bar.max = 100; bar.value = 0;
+  sheetBusy = true;
   row.classList.add('busy'); state.textContent = `Sending ${file.name} · ${bytes(file.size)}`; state.className = 'state'; state.after(bar);
   const request = new XMLHttpRequest();
   request.open('PUT', `/api/library/media?system=${encodeURIComponent(system.id)}&game=${encodeURIComponent(game.key)}&kind=${kind.id}&type=${encodeURIComponent(type)}`);
   request.setRequestHeader('X-RetroArch-Token', token);
   request.upload.addEventListener('progress', event => { if (event.lengthComputable) bar.value = event.loaded / event.total * 100; });
   request.addEventListener('load', () => {
+    sheetBusy = false;
     let data = {}; try { data = JSON.parse(request.responseText); } catch {}
     if (request.status !== 201) { row.classList.remove('busy'); bar.remove(); state.textContent = data.error || `The upload failed (${request.status}). Try again.`; state.className = 'state inline-error'; return; }
-    sheetGame.info = data;
+    if (sheetGame !== context) return;
+    context.info = data;
     // The card and its media list follow, for every frontend reads the same file.
     game.media = data.kinds.filter(k => k.present).map(k => k.id); game.scraped = String(Date.now());
     drawSheet(); drawGames();
     announce(`${kind.name} of ${gameName(game)} replaced.`);
   });
-  request.addEventListener('error', () => { row.classList.remove('busy'); bar.remove(); state.textContent = 'The connection was lost. Try again.'; state.className = 'state inline-error'; });
+  request.addEventListener('error', () => { sheetBusy = false; row.classList.remove('busy'); bar.remove(); state.textContent = 'The connection was lost. Try again.'; state.className = 'state inline-error'; });
   request.send(file);
 }
-$('#sheet-close').addEventListener('click', () => $('#game-sheet').close());
-$('#game-sheet').addEventListener('click', event => { if (event.target === $('#game-sheet')) $('#game-sheet').close(); });
+function closeSheet() {
+  if (sheetBusy || (sheetGame?.draft && !confirm('Discard unsaved game details?'))) return;
+  $('#game-sheet').close();
+}
+$('#sheet-close').addEventListener('click', closeSheet);
+$('#game-sheet').addEventListener('click', event => { if (event.target === $('#game-sheet')) closeSheet(); });
 $('#game-sheet').addEventListener('close', () => { for (const v of $$('#sheet-media video')) v.pause(); });
 // Escape closes a full-size picture first, then the game.
-$('#game-sheet').addEventListener('cancel', event => { const box = $('#game-sheet .lightbox'); if (box) { event.preventDefault(); box.remove(); } });
+$('#game-sheet').addEventListener('cancel', event => { if (sheetBusy) { event.preventDefault(); return; } const box = $('#game-sheet .lightbox'); event.preventDefault(); if (box) box.remove(); else closeSheet(); });
 $('#games-search').addEventListener('input', () => { shownGames = 300; drawGames(); });
 // The cards' picture, remembered in this browser.
 try { const saved = localStorage.getItem('ps5-games-view'); const radio = saved && $(`input[name="games-view"][value="${saved}"]`); if (radio) radio.checked = true; } catch {}
