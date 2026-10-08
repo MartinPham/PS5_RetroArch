@@ -42,9 +42,9 @@ async function openAddGame() {
   const context = addGame;
   $('#add-game').showModal(); addTab('file'); $('#add-results').replaceChildren(); $('#add-match').textContent = ''; $('#add-search-status').textContent = ''; $('#add-search').value = ''; $('#add-search-button').disabled = false;
   $('#add-file-name').textContent = 'Choose a game backup'; $('#add-file-hint').textContent = 'Drop one file here, or browse your device';
-  setAddDownloads(false); $('#add-layout').hidden = false; $('#add-activity').hidden = true; $('#add-submit').hidden = false; $('#add-progress').hidden = true; $('#add-submit').disabled = true;
+  setAddDownloads(true); $('#add-layout').hidden = false; $('#add-activity').hidden = true; $('#add-submit').hidden = false; $('#add-progress').hidden = true; $('#add-submit').disabled = true;
   $('#add-system').disabled = $('#add-drop').disabled = false; $('#add-fetch-details').checked = true;
-  $('#add-submit').replaceChildren(uiIcon('plus'), document.createTextNode('Add to library')); addMessage('Loading your installed systems…');
+  addMessage('Loading your installed systems…');
   $('#add-fields').replaceChildren(...ADD_FIELDS.map(([key, title]) => {
     const label = element('label', title, key === 'name' || key === 'description' ? 'wide-field' : '');
     const input = document.createElement(key === 'description' ? 'textarea' : 'input'); input.id = 'add-' + key;
