@@ -24,7 +24,11 @@ It exists so you can play the games you own on the console you own.
 
 ---
 
-<img src="assets/releases/v1.0.0-beta.1/webui-games-neogeo-b.jpg" width="960" alt="WebUI Games library with SNK Neo Geo selected and the B filter active">
+<a id="galaxy-banner"></a>
+
+<img src="assets/readme/galaxy-banner.svg" width="960" alt="RetroArch for PlayStation 5 — a violet starfield and magenta horizon grid">
+
+<a href="assets/releases/v1.0.0-beta.1/webui-games-neogeo-b.jpg"><img src="assets/readme/galaxy-games.svg" width="960" alt="WebUI Games library with SNK Neo Geo selected and the B filter active, in a galaxy frame"></a>
 
 <p align="center"><strong>Your collection, beautifully organized.</strong><br>Browse, add games, and manage artwork from your phone or computer.</p>
 
@@ -37,11 +41,11 @@ A native RetroArch homebrew title for jailbroken PlayStation 5 consoles, made by
 
 <a id="choose-your-frontend"></a>
 
-## <img src="webui/assets/fluent/game-chat.svg" width="26" height="26" alt=""> Choose your frontend
+## <img src="assets/readme/starfield-section.svg" width="960" alt=""><br><img src="webui/assets/fluent/game-chat.svg" width="26" height="26" alt=""> Choose your frontend
 
 **RetroArch or EmulationStation.** Pick your preferred way to browse and play.
 
-<img src="assets/readme/pre-screen.png" width="960" alt="Frontend picker offering RetroArch and EmulationStation">
+<a href="assets/readme/pre-screen.png"><img src="assets/readme/galaxy-frontends.svg" width="960" alt="Frontend picker offering RetroArch and EmulationStation, in a galaxy frame"></a>
 
 Press **Square** to remember your choice. Hold **L1** during startup to return to the picker, or change it in **WebUI Settings → Start with**.
 
@@ -82,7 +86,7 @@ is not condoned; requests for these files are not welcome in issues or discussio
 
 <a id="webui"></a>
 
-## <img src="webui/assets/fluent/laptop.svg" width="26" height="26" alt=""> Your browser companion
+## <img src="assets/readme/starfield-section.svg" width="960" alt=""><br><img src="webui/assets/fluent/laptop.svg" width="26" height="26" alt=""> Your browser companion
 
 Stay connected while switching between the picker, RetroArch, and EmulationStation. A supported ELF loader or homebrew launcher keeps the WebUI running across menus; without one, it is available while RetroArch runs.
 
@@ -100,7 +104,7 @@ Stay connected while switching between the picker, RetroArch, and EmulationStati
 
 <a id="supported-systems"></a>
 
-## <img src="webui/assets/fluent/game-chat.svg" width="26" height="26" alt=""> Supported systems
+## <img src="assets/readme/starfield-section.svg" width="960" alt=""><br><img src="webui/assets/fluent/game-chat.svg" width="26" height="26" alt=""> Supported systems
 
 **33 native cores**, grouped below by family. Compatibility and performance vary by game.
 
@@ -200,7 +204,7 @@ Presets and overlays are included for offline use. Compatibility varies by core 
 
 <a id="your-files"></a>
 
-## <img src="webui/assets/fluent/document-folder.svg" width="26" height="26" alt=""> Your files
+## <img src="assets/readme/starfield-section.svg" width="960" alt=""><br><img src="webui/assets/fluent/document-folder.svg" width="26" height="26" alt=""> Your files
 
 `/app0` is the running title’s mount. Over FTP, use your installed title folder,
 usually `/data/homebrew/PPSA99169/`.
