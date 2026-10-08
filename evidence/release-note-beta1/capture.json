@@ -1,0 +1,27 @@
+{
+  "step": "release-note-beta1",
+  "revision": "working tree on ab4666c",
+  "command": "Compare warning with README.md; render with markdown-it; inspect local browser preview; tools/verify.sh format evidence",
+  "lines": [
+    "README warning preserved word for word; required main-branch banner is first image",
+    "All prose paragraphs and list items occupy one source line",
+    "Markdown renders four tables; the warning image loads without horizontal overflow",
+    "Draft names 18 added cores and 33 total; owner-requested sections and image removed",
+    "No release tag, release package or publication created"
+  ],
+  "artifact": {
+    "file": "releases/v1.0.0-beta.1.md",
+    "sha256": "4d02fd685eb9bd7169a8d2c59cf050219f196e170cfff0374ba6b4361429dceb",
+    "warning_matches_readme": true,
+    "warning_is_first_image": true,
+    "paragraphs_single_line": true,
+    "markdown_rendered": true,
+    "words": 1817
+  },
+  "preview": "build/release-preview/index.html",
+  "scope": "Release-note drafting only; no runtime changes or console actions",
+  "owner_edits": [
+    "Removed Beta notes \u2014 please read section",
+    "Removed WebUI overview image and its caption"
+  ]
+}
