@@ -127,32 +127,83 @@ int main() {
 }
 ''')
 
-    def test_azahar_software_stylus(self):
-        source = self.patched('azahar', 'src/citra_libretro/input/mouse_tracker.cpp')
+    def test_azahar_stylus_matches_desmume(self):
+        software = self.patched('azahar', 'src/citra_libretro/input/mouse_tracker.cpp')
+        desmume = self.patched('desmume', 'desmume/src/frontend/libretro/libretro.cpp')
+        shader = self.patched('azahar', 'src/video_core/host_shaders/vulkan_cursor.frag')
+        # Compile the real shaders together, then exercise the fragment's actual
+        # shape predicate against DeSmuME's rasterizer at native and scaled sizes.
+        with tempfile.TemporaryDirectory() as td:
+            for ext in ('vert', 'frag'):
+                Path(td, f'cursor.{ext}').write_text(self.patched(
+                    'azahar', f'src/video_core/host_shaders/vulkan_cursor.{ext}'))
+            subprocess.run(['glslangValidator', '-V', '-l', 'cursor.vert', 'cursor.frag'],
+                           cwd=td, check=True, capture_output=True)
+        shape = shader[shader.index('            float along'):shader.index('                color +=')]
+        shape = shape.replace('p.x', 'dx').replace('p.y', 'dy')
+        shape = shape.replace('vec3 ink', 'uint32_t ink').replace('vec3(1.0)', '0xffffff')
+        shape = shape.replace('vec3(32.0, 40.0, 48.0) / 255.0', '0x202830')
+        # GLSL literals are floats; preserve that in the extracted C++ predicate.
+        import re
+        shape = re.sub(r'(\d+\.\d+)', r'\1f', shape)
         self.compile_run("""
 #include <algorithm>
 #include <cmath>
 #include <cassert>
 #include <cstdint>
 #include <vector>
+using std::min; using std::max; using std::abs;
+constexpr int RETRO_PIXEL_FORMAT_XRGB8888=1;
+int colorMode=1;
+uint32_t pointer_color_32=0xffffff;
 namespace Layout {
 struct FramebufferLayout {
-  bool IsWithinTouchscreen(int x,int y)const{return x>=10&&x<30&&y>=20&&y<40;}
+  int left,top,right,bottom;
+  bool IsWithinTouchscreen(int x,int y)const{return x>=left&&x<right&&y>=top&&y<bottom;}
 }; }
 struct SoftwareCursorRenderer {
   void Render(int,int,float,float,float,const Layout::FramebufferLayout&,void*);
 };
-""" + function(source, 'void SoftwareCursorRenderer::Render(') + """
+uint32_t shader_sample(float dx,float dy,uint32_t original) {
+""" + shape + """
+                return ink;
+            }
+    return original;
+}
+""" + function(desmume, 'static void DrawStylus(') +
+            function(software, 'void SoftwareCursorRenderer::Render(') + """
 int main() {
-  SoftwareCursorRenderer cursor; Layout::FramebufferLayout layout;
-  for(float x : {10.f,29.f}) for(float y : {20.f,39.f}) {
-    std::vector<uint32_t> pixels(40*50,0xff123456);
-    cursor.Render(40,50,x,y,8,layout,pixels.data());
-    assert(pixels[static_cast<int>(y)*40+static_cast<int>(x)]==0xffedcba9);
-    for(int py=0;py<50;++py) for(int px=0;px<40;++px)
-      if(!layout.IsWithinTouchscreen(px,py)) assert(pixels[py*40+px]==0xff123456);
+  SoftwareCursorRenderer cursor;
+  for(int scale : {1,5,18}) {
+    const int w=40*scale,h=32*scale;
+    Layout::FramebufferLayout layout{0,0,w,h};
+    for(int x : {0,w/2,w-1}) for(int y : {0,h/2,h-1}) {
+      std::vector<uint32_t> ds(w*h,0x123456),az=ds;
+      DrawStylus(reinterpret_cast<uint16_t*>(ds.data()),w,w,h,x,y,scale);
+      cursor.Render(w,h,x,y,8*scale,layout,az.data());
+      assert(ds==az);
+      for(int py=0;py<h;++py) for(int px=0;px<w;++px) {
+        unsigned r=0,g=0,b=0;
+        for(int sy=0;sy<2;++sy) for(int sx=0;sx<2;++sx) {
+          auto c=shader_sample((px-x+(sx-.5f)*.5f)/scale,
+                               (py-y+(sy-.5f)*.5f)/scale,0x123456);
+          r+=(c>>16)&255;g+=(c>>8)&255;b+=c&255;
+        }
+        assert(ds[py*w+px]==((r/4)<<16|(g/4)<<8|(b/4)));
+      }
+      // Preserve alpha and never paint outside the lower screen.
+      layout={3*scale,4*scale,w-3*scale,h-4*scale};
+      az.assign(w*h,0xff123456);
+      cursor.Render(w,h,x,y,8*scale,layout,az.data());
+      for(int py=0;py<h;++py) for(int px=0;px<w;++px) {
+        assert((az[py*w+px]>>24)==255);
+        if(!layout.IsWithinTouchscreen(px,py)) assert(az[py*w+px]==0xff123456);
+        else assert((az[py*w+px]&0xffffff)==ds[py*w+px]);
+      }
+      layout={0,0,w,h};
+    }
   }
-  cursor.Render(40,50,10,20,8,layout,nullptr);
+  cursor.Render(40,50,10,20,8,{0,0,40,50},nullptr);
 }
 """)
 
@@ -167,17 +218,20 @@ int main() {
 #include <initializer_list>
 struct Rect {float left,top,right,bottom; float GetHeight()const{return bottom-top;}};
 int main() {
-  for(float scale : {1.f,18.f}) for(float x : {0.f,160.f,319.f})
+  for(float resolution : {1.f,5.f,18.f}) for(float x : {0.f,160.f,319.f})
     for(float y : {0.f,120.f,239.f}) {
       struct {float width,height; Rect bottom_screen;} layout{
-        400*scale,480*scale,{40*scale,240*scale,360*scale,480*scale}};
-      struct {float projected_x,projected_y;} cursor{x*scale,y*scale};
+        400*resolution,480*resolution,{40*resolution,240*resolution,360*resolution,480*resolution}};
+      struct {float projected_x,projected_y;} cursor{x*resolution,y*resolution};
 """ + source[start:end] + """
-      assert(sizeof(vertices)/sizeof(float)==18);
-      assert(vertices[0]==cx && vertices[1]==cy); // nib is the exact touch point
-      for(unsigned i=0;i<18;i+=2) {
-        assert(vertices[i]>=bl && vertices[i]<=br);
-        assert(vertices[i+1]>=bt && vertices[i+1]<=bb);
+      assert(sizeof(vertices)/sizeof(float)==24);
+      for(unsigned i=0;i<24;i+=4) {
+        float px=(vertices[i]+1)*buf_w/2, py=(vertices[i+1]+1)*buf_h/2;
+        assert(px>=layout.bottom_screen.left-.001 && px<=layout.bottom_screen.right+.001);
+        assert(py>=layout.bottom_screen.top-.001 && py<=layout.bottom_screen.bottom+.001);
+        // Every clipped vertex still measures its local position from the nib.
+        assert(std::abs(px-(abs_x+vertices[i+2]*scale))<.001);
+        assert(std::abs(py-(abs_y+vertices[i+3]*scale))<.001);
       }
     }
 }
