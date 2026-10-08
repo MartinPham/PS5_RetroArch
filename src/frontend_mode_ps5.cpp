@@ -15,6 +15,9 @@
  *   --ps5-mode=quit        a frontend quit (EmulationStation, or RetroArch the
  *                          picker started): the picker, or, when a frontend is
  *                          remembered, the title closes
+ *   --rom <file> [--core <core>] [--exit-after-game]
+ *                          a home screen forwarder's game (no mode): run as a frontend's
+ *                          game, then the title as from the home screen, or closed
  *   no mode                a launch from the home screen: the frontend remembered
  *                          in config/frontend.cfg (src/ps5_frontend_choice.h), or
  *                          the picker when none is or L1 is held as the title
@@ -67,6 +70,9 @@ std::string launch_mode;
 struct ps5_game game;
 bool game_running = false;
 std::time_t game_started = 0;
+/* The game is a forwarder's (--rom), not a frontend's: nothing to hand a result back to */
+bool game_forwarded = false;
+bool forward_exit_after_game = false;
 
 extern "C" void ps5_permissions_settle(); /* src/permissions_ps5.cpp */
 
@@ -172,10 +178,61 @@ bool take_game(const Paths &paths, unsigned replaced_wait_seconds)
     }
     game = request;
     game_running = true;
+    game_forwarded = false;
     game_started = std::time(nullptr);
     char line[PS5_GAME_PATH_MAX * 3 + 64];
     std::snprintf(line, sizeof line, "game mode: %s with %s, for %s", game.content, game.core,
                   game.frontend);
+    ps5::debug::mark(line);
+    return true;
+}
+
+/* A forwarder's game: true when RetroArch is to run it in this process. Not runnable,
+ * the reason goes to the trace and the launch goes on as one from the home screen. */
+bool take_forward(const Paths &paths, const Forward &forward)
+{
+    struct ps5_game request = {};
+    const std::string content = forward_content(forward.rom, paths.content);
+    const std::string core = forward_core(forward.core, PS5_GAME_CORES);
+    std::snprintf(request.content, sizeof(request.content), "%s", content.c_str());
+    std::snprintf(request.core, sizeof(request.core), "%s", core.c_str());
+    /* game mode's check wants a frontend to come back to: the title itself */
+    std::snprintf(request.frontend, sizeof(request.frontend), "%s", paths.eboot.c_str());
+    const auto refused = [&](const char *why)
+    {
+        char line[PS5_GAME_PATH_MAX + 400];
+        std::snprintf(line, sizeof line, "forwarder: --rom %s --core %s not run: %s",
+                      forward.rom.c_str(), forward.core.empty() ? "(none)" : forward.core.c_str(),
+                      why);
+        ps5::debug::mark(line);
+        return false;
+    };
+    if (content.empty())
+        return refused("the content is not a path inside the content folder (no \"..\")");
+    if (core.size() >= sizeof(request.core) || content.size() >= sizeof(request.content))
+        return refused("a path is too long");
+    if (ps5_game_check(&request) != 0)
+        return refused(request.error);
+    /* --core is the user's choice for this tile; without it, RetroArch's playlists choose,
+     * as they do for a frontend's game. */
+    if (!request.core[0])
+    {
+        struct ps5_game associated = request;
+        if (ps5_game_playlist_core(paths.playlists.c_str(), request.content, associated.core,
+                                   sizeof(associated.core)) &&
+            ps5_game_check(&associated) == 0)
+            std::snprintf(request.core, sizeof(request.core), "%s", associated.core);
+        if (!request.core[0])
+            return refused("no core: neither --core nor RetroArch's playlists name one");
+    }
+    game = request;
+    game_running = true;
+    game_forwarded = true;
+    forward_exit_after_game = forward.exit_after_game;
+    game_started = std::time(nullptr);
+    char line[PS5_GAME_PATH_MAX * 2 + 64];
+    std::snprintf(line, sizeof line, "forwarder: %s with %s%s", game.content, game.core,
+                  forward_exit_after_game ? ", closing after it" : "");
     ps5::debug::mark(line);
     return true;
 }
@@ -188,6 +245,70 @@ std::string mode_argument(int argc, char **argv)
         if (std::strncmp(argv[i], prefix, sizeof(prefix) - 1) == 0)
             return argv[i] + sizeof(prefix) - 1;
     return "";
+}
+
+Forward forward_arguments(int argc, char **argv)
+{
+    Forward forward;
+    const auto value = [&](int &i, const char *flag, std::string &out)
+    {
+        const std::size_t length = std::strlen(flag);
+        if (std::strcmp(argv[i], flag) == 0)
+        {
+            if (i + 1 < argc && argv[i + 1])
+                out = argv[++i];
+            return true;
+        }
+        if (std::strncmp(argv[i], flag, length) == 0 && argv[i][length] == '=')
+        {
+            out = argv[i] + length + 1;
+            return true;
+        }
+        return false;
+    };
+    for (int i = 0; i < argc && argv && argv[i]; i++)
+    {
+        if (std::strcmp(argv[i], "--exit-after-game") == 0)
+            forward.exit_after_game = true;
+        else if (!value(i, "--rom", forward.rom))
+            value(i, "--core", forward.core);
+    }
+    return forward;
+}
+
+std::string forward_content(const std::string &rom, const std::string &content)
+{
+    std::string path = rom;
+    while (!path.empty() && (path.back() == ' ' || path.back() == '\r' || path.back() == '\n'))
+        path.pop_back();
+    if (path.empty())
+        return "";
+    if (path[0] == '/')
+        return path;
+    for (std::string::size_type at = 0; at <= path.size();)
+    {
+        const std::string::size_type slash = path.find('/', at);
+        const std::string::size_type end = slash == std::string::npos ? path.size() : slash;
+        if (path.compare(at, end - at, "..") == 0 && end - at == 2)
+            return "";
+        at = end + 1;
+    }
+    return content + path;
+}
+
+std::string forward_core(const std::string &core, const std::string &cores)
+{
+    if (core.empty() || core.find('/') != std::string::npos)
+        return core;
+    static const char suffix[] = "_libretro.so";
+    const std::string::size_type suffix_length = sizeof(suffix) - 1;
+    std::string name = core;
+    if (name.size() > 3 && name.compare(name.size() - 3, 3, ".so") == 0)
+        name.erase(name.size() - 3);
+    if (name.size() >= suffix_length - 3 &&
+        name.compare(name.size() - (suffix_length - 3), suffix_length - 3, "_libretro") == 0)
+        name.erase(name.size() - (suffix_length - 3));
+    return name.empty() ? "" : cores + name + suffix;
 }
 
 bool session_start(int argc, char **argv)
@@ -290,6 +411,14 @@ void run(const Paths &paths, int argc, char **argv, unsigned replaced_wait_secon
     if (launch.mode.empty() && !launch.test_run && !launch.picker_test && launch.choice != "ask" &&
         launch.picker_present && paths.reopen_held)
         launch.reopen_held = paths.reopen_held();
+    /* A forwarder's game, on a launch that names no mode (a handover's mode wins). */
+    const Forward forward = forward_arguments(argc, argv);
+    if (!forward.rom.empty() && launch.mode.empty())
+    {
+        if (take_forward(paths, forward))
+            return; /* RetroArch runs the game */
+        /* not runnable (the trace says why): the launch goes on as from the home screen */
+    }
     const Next next = decide(launch);
     char line[256];
     std::snprintf(line, sizeof line,
@@ -336,6 +465,22 @@ void after_retroarch(const Paths &paths, const std::string &mode, int status,
         game_running = false;
         return;
     }
+    if (game_running && game_forwarded)
+    {
+        /* A forwarder's game: no frontend to hand a result to. The title opens as from
+         * the home screen (the picker, or the frontend remembered), or closes. */
+        game_running = game_forwarded = false;
+        char line[128];
+        std::snprintf(line, sizeof line, "forwarder: RetroArch quit (status %d) after %ld s; %s",
+                      status, static_cast<long>(std::time(nullptr) - game_started),
+                      forward_exit_after_game ? "the title closes" : "the title as from the home screen");
+        ps5::debug::mark(line);
+        if (forward_exit_after_game)
+            return;
+        restart_as(paths.eboot, replaced_wait_seconds,
+                   "forwarder: LoadExec did not replace the process; the title closes; result");
+        return;
+    }
     if (game_running)
     {
         game_running = false;
@@ -374,6 +519,7 @@ const ps5::frontend_mode::Paths title_paths{"/app0/picker/picker.bin",
                                             PS5_GAME_REQUEST_PATH,
                                             PS5_GAME_RESULT_PATH,
                                             PS5_GAME_PLAYLISTS,
+                                            "/app0/content/",
                                             PS5_FRONTEND_CHOICE_PATH,
                                             "/app0/trace.txt",
                                             "/app0/retroarch.log",

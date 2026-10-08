@@ -5,6 +5,7 @@
  * directory for the files the decision reads. */
 #include <sys/stat.h>
 
+#include <algorithm>
 #include <cassert>
 #include <cstdio>
 #include <string>
@@ -192,6 +193,7 @@ int main(int argc, char **argv)
                                           dir + "/game-request.txt",
                                           dir + "/game-result.txt",
                                           dir + "/playlists",
+                                          dir + "/content/",
                                           dir + "/frontend.cfg",
                                           dir + "/trace.txt",
                                           dir + "/retroarch.log",
@@ -413,8 +415,82 @@ int main(int argc, char **argv)
            !ps5::frontend_mode::running_game());
     assert(marks.back() == "game mode: no request; RetroArch runs");
 
+    /* A home screen forwarder: --rom and --core, run as a game; afterwards the title as from
+     * the home screen, or closed with --exit-after-game. */
+    {
+        using ps5::frontend_mode::forward_arguments;
+        using ps5::frontend_mode::forward_content;
+        using ps5::frontend_mode::forward_core;
+        char rom[] = "--rom", rom_value[] = "SNES/Game (USA).zip", core_flag[] = "--core=snes9x",
+             exit_flag[] = "--exit-after-game", dangling[] = "--core";
+        char *full[] = {rom, rom_value, core_flag, exit_flag, nullptr};
+        const ps5::frontend_mode::Forward parsed = forward_arguments(4, full);
+        assert(parsed.rom == "SNES/Game (USA).zip" && parsed.core == "snes9x" && parsed.exit_after_game);
+        char *missing[] = {dangling, nullptr};
+        assert(forward_arguments(1, missing).core.empty() && forward_arguments(0, nullptr).rom.empty());
+        assert(forward_content("SNES/Game.zip", "/app0/content/") == "/app0/content/SNES/Game.zip");
+        assert(forward_content("/mnt/usb0/Game.zip\r\n", "/c/") == "/mnt/usb0/Game.zip");
+        assert(forward_content("../Game.zip", "/c/").empty() && forward_content("a/../../x", "/c/").empty());
+        assert(forward_content("a/..b.zip", "/c/") == "/c/a/..b.zip" && forward_content("", "/c/").empty());
+        for (const char *name : {"snes9x", "snes9x_libretro", "snes9x_libretro.so"})
+            assert(forward_core(name, "/app0/cores/") == "/app0/cores/snes9x_libretro.so");
+        assert(forward_core("/app0/cores/mgba_libretro.so", "/x/") == "/app0/cores/mgba_libretro.so");
+        assert(forward_core("", "/app0/cores/").empty() && forward_core("_libretro.so", "/c/").empty());
+    }
+    mkdir((dir + "/content").c_str(), 0777);
+    mkdir((dir + "/content/SNES").c_str(), 0777);
+    const std::string forwarded = dir + "/content/SNES/Game.zip";
+    touch(forwarded, true);
+    touch(paths.eboot, true); /* the title, which game mode's check takes as the frontend */
+    touch(paths.picker, true);
+    std::remove(paths.choice.c_str());
+    exec_mode = Exec::replace;
+    /* --core named: the game, with that core; the playlists do not override it */
+    assert(launch(paths, {"--rom", "SNES/Game.zip", "--core", "snes9x"}) == "retroarch");
+    const struct ps5_game *forward_game = ps5::frontend_mode::running_game();
+    assert(forward_game && forwarded == forward_game->content && core == forward_game->core);
+    assert(marks.back() == "forwarder: " + forwarded + " with " + core);
+    assert(ps5::frontend_mode::retroarch_log(paths) == paths.game_log);
+    /* RetroArch quit: the title as from the home screen, with no result for a frontend */
+    std::remove(paths.result.c_str());
+    assert(quit("") == paths.eboot && exec_argument.empty());
+    assert(!ps5::frontend_mode::exists(paths.result) && !ps5::frontend_mode::running_game());
+    /* --exit-after-game: the title closes (catchReturnFromMain's LoadExec("exit")) */
+    {
+        const std::string absolute = "--rom=" + forwarded;
+        assert(launch(paths, {absolute.c_str(), "--core=snes9x_libretro.so", "--exit-after-game"}) ==
+               "retroarch");
+        assert(ps5::frontend_mode::running_game() && quit("") == "closes");
+        assert(marks.back().find("the title closes") != std::string::npos);
+    }
+    /* no --core: RetroArch's playlists choose, as for a frontend's game */
+    playlist = std::fopen((paths.playlists + "/SNES.lpl").c_str(), "w");
+    assert(playlist);
+    std::fprintf(playlist, "{\"items\":[{\"path\":\"%s\",\"core_path\":\"%s\"}]}",
+                 forwarded.c_str(), other.c_str());
+    std::fclose(playlist);
+    assert(launch(paths, {"--rom", "SNES/Game.zip"}) == "retroarch" &&
+           other == ps5::frontend_mode::running_game()->core);
+    assert(quit("") == paths.eboot);
+    std::remove((paths.playlists + "/SNES.lpl").c_str());
+    /* not runnable: the trace says why, and the launch goes on as from the home screen */
+    assert(launch(paths, {"--rom", "SNES/Game.zip"}) == paths.picker &&
+           !ps5::frontend_mode::running_game());
+    assert(std::find_if(marks.begin(), marks.end(), [](const std::string &m)
+                        { return m.find("no core: neither --core") != std::string::npos; }) != marks.end());
+    for (const std::vector<const char *> &args :
+         std::vector<std::vector<const char *>>{{"--rom", "SNES/Missing.zip", "--core", "snes9x"},
+                                                {"--rom", "../Game.zip", "--core", "snes9x"},
+                                                {"--rom", "SNES/Game.zip", "--core", "nosuchcore"}})
+        assert(launch(paths, args) == paths.picker && !ps5::frontend_mode::running_game());
+    /* a handover's mode wins over --rom */
+    assert(launch(paths, {"--ps5-mode=es-de", "--rom", "SNES/Game.zip", "--core", "snes9x"}) ==
+               paths.es_de &&
+           !ps5::frontend_mode::running_game());
+
     std::puts(
-        "frontend_mode_ps5: decisions, mode argument, LoadExec targets, test runs and "
+        "frontend_mode_ps5: forwarder --rom/--core launches, cores, refusals and after-game PASS; "
+        "decisions, mode argument, LoadExec targets, test runs and "
         "refused or ignored LoadExec PASS; the remembered frontend, L1, quit and closing PASS; "
         "session and per-mode logs PASS; back to the picker after RetroArch, no handover after "
         "an update; game mode requests, cores, refusals and results PASS");
