@@ -46,34 +46,38 @@
     {
       "file": "webui-game-details.jpg",
       "resolution": [
-        1265,
-        712
+        801,
+        594
       ],
-      "sha256": "6e33d68dabad4f20563343fd4629b369eecb2095c25e2f821e84920969d0b5b0"
+      "sha256": "f9ecf12ae56c3b9a0496775f42cf5317bd514aac85a873f75731c9b644a0d7a2",
+      "game": "Bust-A-Move"
     },
     {
       "file": "webui-game-files.jpg",
       "resolution": [
-        1265,
-        712
+        801,
+        594
       ],
-      "sha256": "dd0e0e8220ee4d97a20244bc18430f43016b6bb2cb92c8552eef934ce6c73a66"
+      "sha256": "78662bfb3473ff1ee2a735f3bfe0a55317816c9f16023d92a95a1d247c008d5b",
+      "game": "Bust-A-Move"
     },
     {
       "file": "webui-game-media.jpg",
       "resolution": [
-        1265,
-        712
+        801,
+        594
       ],
-      "sha256": "b1b38315638e13f5a17d016223ea87e8ddc94cb3120b7aca16dcf82bd9576494"
+      "sha256": "7b312c4f136167b1ed419cd06f1020da370bdc56335b137c443ea2ef5e1541af",
+      "game": "Bust-A-Move"
     },
     {
       "file": "webui-game-savestates.jpg",
       "resolution": [
-        1265,
-        712
+        801,
+        594
       ],
-      "sha256": "9cade05983ae5fc6d51ca0f2461e3caa98b17d19c9663fca2655635ee8df0c07"
+      "sha256": "307439798aeb8ab8901a9665a5a6eac3c0f40569510601247815b90caf59e2bc",
+      "game": "Bust-A-Move"
     },
     {
       "file": "webui-games-neogeo-b.jpg",
