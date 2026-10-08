@@ -35,6 +35,16 @@ A native RetroArch homebrew title for jailbroken PlayStation 5 consoles, made by
 > [!WARNING]
 > **Designed around ShadowMountPlus 1.7beta4 or later.** Use [ShadowMountPlus 1.7beta4](https://github.com/drakmor/ShadowMountPlus/releases/tag/1.7beta4) or newer for supported USB and extended-storage access.
 
+<a id="choose-your-frontend"></a>
+
+## <img src="webui/assets/fluent/game-chat.svg" width="26" height="26" alt=""> Choose your frontend
+
+**RetroArch or EmulationStation.** Pick your preferred way to browse and play.
+
+<img src="assets/readme/pre-screen.png" width="960" alt="Frontend picker offering RetroArch and EmulationStation">
+
+Press **Square** to remember your choice. Hold **L1** during startup to return to the picker, or change it in **WebUI Settings → Start with**.
+
 <a id="highlights"></a>
 
 ## <img src="webui/assets/fluent/board.svg" width="26" height="26" alt=""> At a glance
@@ -61,15 +71,6 @@ No games, BIOS files, firmware or decryption keys are included. Use your own
 legally obtained backups and system files dumped from hardware you own. Piracy
 is not condoned; requests for these files are not welcome in issues or discussions.
 
-<details>
-<summary><strong>Choose your frontend</strong></summary>
-
-<img src="assets/readme/pre-screen.png" width="960" alt="Frontend picker offering RetroArch and EmulationStation">
-
-Change your default later in **WebUI Settings → Start with**.
-
-</details>
-
 ### Scan to connect
 
 | Menu | Open the WebUI QR code |
@@ -94,41 +95,6 @@ Stay connected while switching between the picker, RetroArch, and EmulationStati
 | <img src="webui/assets/fluent/arrow-sync.svg" width="24" height="24" alt=""> **Transfers** | Follow uploads and their results. Downloads appear in your browser’s download manager. |
 | <img src="webui/assets/fluent/settings.svg" width="24" height="24" alt=""> **Settings** | Adjust global preferences, core options, controller mappings, and the startup frontend. |
 
-### Add a game. Make it yours.
-
-Choose a game backup, enter details yourself or find a **LaunchBox** match, then add media. **Automatic media downloads are enabled by default**, with progress and artwork appearing as they arrive. Your own uploaded media is kept.
-
-### One game. Everything within reach.
-
-<img src="assets/releases/v1.0.0-beta.1/webui-game-media.jpg" width="960" alt="Bust-A-Move Media Inspector with compact artwork thumbnails and a preview">
-
-- **Media:** browse, enlarge, or replace artwork, manuals, and videos.
-- **Details:** edit the name and game information; your changes survive future downloads.
-- **Files:** replace or export a game backup, import or export saves and savestates, and preview savestate screenshots when available.
-
-Close the game and back up your progress before replacing files. Savestates need the same game and a compatible core.
-
-### Fill in the missing artwork
-
-Choose **libretro**, **ScreenScraper**, and **LaunchBox**, set their order, and pick your region and language. Review uncertain matches and resume interrupted downloads. Downloads continue on your PS5 after the browser closes.
-
-ScreenScraper requires an account. Media availability varies by game and source; EmuMovies support is coming later.
-
-<details>
-<summary><strong>Settings, updates, and connection details</strong></summary>
-
-Guided settings cover the original **15 cores**; newer cores do not yet have guided profiles. Advanced settings remain available. Save settings, then restart RetroArch when prompted. Game or folder overrides may take priority.
-
-**Update RetroArch** downloads and verifies a release before offering **Install and close RetroArch**. Save your progress first, then reopen the title after installation. Content, saves, settings, and existing custom BIOS/effect files are preserved. Keep room for the ZIP and extracted files, and back up before updating. Failed installs attempt to restore the previous files; a power loss may require a manual reinstall.
-
-**Alerts** lists missing required BIOS/system files and their configured locations. Choose **Recheck** after adding files. Checks verify presence, not authenticity; regional requirements may vary.
-
-The interface and artwork are served locally. Media downloads, release checks, and updates need internet access. Content uploads support files up to **64 GiB** and do not overwrite existing filenames. Available storage is not reported.
-
-The persistent WebUI uses an ELF loader on port **9021** or a homebrew launcher on port **8080**. Its own address is `http://<PS5-IP>:6769`.
-
-</details>
-
 > The WebUI is a local HTTP service without a login. Use a trusted network and
 > do not forward port **6769** to the internet.
 
@@ -138,41 +104,43 @@ The persistent WebUI uses an ELF loader on port **9021** or a homebrew launcher 
 
 **33 native cores**, grouped below by family. Compatibility and performance vary by game.
 
-| Family | Systems | Core |
-| --- | --- | --- |
-| **Nintendo** | <img src="webui/assets/systems/nes.webp" width="40" height="40" alt=""> **NES / Famicom** | FCEUmm |
-|  | <img src="webui/assets/systems/gb.webp" width="40" height="40" alt=""> **Game Boy**<br><img src="webui/assets/systems/gbc.webp" width="40" height="40" alt=""> **Game Boy Color**<br><img src="webui/assets/systems/gba.webp" width="40" height="40" alt=""> **Game Boy Advance** | mGBA |
-|  | <img src="webui/assets/systems/snes.webp" width="40" height="40" alt=""> **SNES / Super Famicom** | Snes9x |
-|  | <img src="webui/assets/systems/n64.webp" width="40" height="40" alt=""> **Nintendo 64** | Mupen64Plus-Next |
-|  | <img src="webui/assets/systems/gc.webp" width="40" height="40" alt=""> **GameCube**<br><img src="webui/assets/systems/wii.webp" width="40" height="40" alt=""> **Wii** | Dolphin |
-|  | <img src="webui/assets/systems/nds.webp" width="40" height="40" alt=""> **Nintendo DS** | DeSmuME |
-|  | <img src="webui/assets/systems/n3ds.webp" width="40" height="40" alt=""> **Nintendo 3DS** | Azahar |
-|  | <img src="webui/assets/systems/virtualboy.webp" width="40" height="40" alt=""> **Virtual Boy** | Beetle VB |
-|  | <img src="webui/assets/systems/pokemini.webp" width="40" height="40" alt=""> **Pokémon Mini** | PokeMini |
-| **Sony** | <img src="webui/assets/systems/psx.webp" width="40" height="40" alt=""> **PlayStation** | Beetle PSX HW |
-|  | <img src="webui/assets/systems/ps2.webp" width="40" height="40" alt=""> **PlayStation 2** | LRPS2 |
-|  | <img src="webui/assets/systems/psp.webp" width="40" height="40" alt=""> **PlayStation Portable** | PPSSPP |
-| **Sega** | <img src="webui/assets/systems/genesis.webp" width="40" height="40" alt=""> **Mega Drive / Genesis**<br><img src="webui/assets/systems/mastersystem.webp" width="40" height="40" alt=""> **Master System**<br><img src="webui/assets/systems/gamegear.webp" width="40" height="40" alt=""> **Game Gear**<br><img src="webui/assets/systems/sg-1000.webp" width="40" height="40" alt=""> **SG-1000**<br><img src="webui/assets/systems/segacd.webp" width="40" height="40" alt=""> **Sega CD** | Genesis Plus GX |
-|  | <img src="webui/assets/systems/sega32x.webp" width="40" height="40" alt=""> **Sega 32X** | PicoDrive |
-|  | <img src="webui/assets/systems/saturn.webp" width="40" height="40" alt=""> **Sega Saturn** | Beetle Saturn |
-|  | <img src="webui/assets/systems/dreamcast.webp" width="40" height="40" alt=""> **Dreamcast**<br><img src="webui/assets/systems/naomi.webp" width="40" height="40" alt=""> **NAOMI / NAOMI 2**<br><img src="webui/assets/systems/atomiswave.webp" width="40" height="40" alt=""> **Atomiswave** | Flycast |
-| **Arcade & SNK** | <img src="webui/assets/systems/fbneo.webp" width="40" height="40" alt=""> **Arcade**<br><img src="webui/assets/systems/neogeo.webp" width="40" height="40" alt=""> **Neo Geo** | FinalBurn Neo |
-|  | <img src="webui/assets/systems/mame.webp" width="40" height="40" alt=""> **Arcade** | MAME |
-|  | <img src="webui/assets/systems/ngpc.webp" width="40" height="40" alt=""> **Neo Geo Pocket / Color** | Beetle NeoPop |
-|  | <img src="webui/assets/systems/neogeocd.webp" width="40" height="40" alt=""> **Neo Geo CD** | NeoCD |
-| **NEC** | <img src="webui/assets/systems/pcengine.webp" width="40" height="40" alt=""> **PC Engine / TurboGrafx-16 / CD**<br><img src="webui/assets/systems/supergrafx.webp" width="40" height="40" alt=""> **SuperGrafx** | Beetle PCE |
-|  | <img src="webui/assets/systems/pcfx.webp" width="40" height="40" alt=""> **PC-FX** | Beetle PC-FX |
-| **Atari** | <img src="webui/assets/systems/atari2600.webp" width="40" height="40" alt=""> **Atari 2600** | Stella |
-|  | <img src="webui/assets/systems/atari5200.webp" width="40" height="40" alt=""> **Atari 5200** | a5200 |
-|  | <img src="webui/assets/systems/atari7800.webp" width="40" height="40" alt=""> **Atari 7800** | ProSystem |
-|  | <img src="webui/assets/systems/atarilynx.webp" width="40" height="40" alt=""> **Atari Lynx** | Handy |
-|  | <img src="webui/assets/systems/atarijaguar.webp" width="40" height="40" alt=""> **Atari Jaguar** | Virtual Jaguar |
-| **Computers & adventures** | <img src="webui/assets/systems/c64.webp" width="40" height="40" alt=""> **Commodore 64** | VICE x64sc |
-|  | <img src="webui/assets/systems/amiga.webp" width="40" height="40" alt=""> **Commodore Amiga** | PUAE |
-|  | <img src="webui/assets/systems/dos.webp" width="40" height="40" alt=""> **MS-DOS** | DOSBox Pure |
-|  | <img src="webui/assets/systems/scummvm.webp" width="40" height="40" alt=""> **Point-and-click adventures** | ScummVM |
-| **More consoles** | <img src="webui/assets/systems/3do.webp" width="40" height="40" alt=""> **3DO** | Opera |
-|  | <img src="webui/assets/systems/wonderswancolor.webp" width="40" height="40" alt=""> **WonderSwan / Color** | Beetle Cygne |
+**Vulkan (GPU)** cores render on the GPU. **Software** cores render on the CPU, with Vulkan displaying the result.
+
+| Family | Systems | Core | Renderer |
+| --- | --- | --- | --- |
+| **Nintendo** | <img src="webui/assets/systems/nes.webp" width="40" height="40" alt=""> **NES / Famicom** | FCEUmm | Software |
+|  | <img src="webui/assets/systems/gb.webp" width="40" height="40" alt=""> **Game Boy**<br><img src="webui/assets/systems/gbc.webp" width="40" height="40" alt=""> **Game Boy Color**<br><img src="webui/assets/systems/gba.webp" width="40" height="40" alt=""> **Game Boy Advance** | mGBA | Software |
+|  | <img src="webui/assets/systems/snes.webp" width="40" height="40" alt=""> **SNES / Super Famicom** | Snes9x | Software |
+|  | <img src="webui/assets/systems/n64.webp" width="40" height="40" alt=""> **Nintendo 64** | Mupen64Plus-Next | Vulkan (GPU) |
+|  | <img src="webui/assets/systems/gc.webp" width="40" height="40" alt=""> **GameCube**<br><img src="webui/assets/systems/wii.webp" width="40" height="40" alt=""> **Wii** | Dolphin | Vulkan (GPU) |
+|  | <img src="webui/assets/systems/nds.webp" width="40" height="40" alt=""> **Nintendo DS** | DeSmuME | Software |
+|  | <img src="webui/assets/systems/n3ds.webp" width="40" height="40" alt=""> **Nintendo 3DS** | Azahar | Vulkan (GPU) |
+|  | <img src="webui/assets/systems/virtualboy.webp" width="40" height="40" alt=""> **Virtual Boy** | Beetle VB | Software |
+|  | <img src="webui/assets/systems/pokemini.webp" width="40" height="40" alt=""> **Pokémon Mini** | PokeMini | Software |
+| **Sony** | <img src="webui/assets/systems/psx.webp" width="40" height="40" alt=""> **PlayStation** | Beetle PSX HW | Vulkan (GPU) |
+|  | <img src="webui/assets/systems/ps2.webp" width="40" height="40" alt=""> **PlayStation 2** | LRPS2 | Vulkan (GPU) |
+|  | <img src="webui/assets/systems/psp.webp" width="40" height="40" alt=""> **PlayStation Portable** | PPSSPP | Vulkan (GPU) |
+| **Sega** | <img src="webui/assets/systems/genesis.webp" width="40" height="40" alt=""> **Mega Drive / Genesis**<br><img src="webui/assets/systems/mastersystem.webp" width="40" height="40" alt=""> **Master System**<br><img src="webui/assets/systems/gamegear.webp" width="40" height="40" alt=""> **Game Gear**<br><img src="webui/assets/systems/sg-1000.webp" width="40" height="40" alt=""> **SG-1000**<br><img src="webui/assets/systems/segacd.webp" width="40" height="40" alt=""> **Sega CD** | Genesis Plus GX | Software |
+|  | <img src="webui/assets/systems/sega32x.webp" width="40" height="40" alt=""> **Sega 32X** | PicoDrive | Software |
+|  | <img src="webui/assets/systems/saturn.webp" width="40" height="40" alt=""> **Sega Saturn** | Beetle Saturn | Software |
+|  | <img src="webui/assets/systems/dreamcast.webp" width="40" height="40" alt=""> **Dreamcast**<br><img src="webui/assets/systems/naomi.webp" width="40" height="40" alt=""> **NAOMI / NAOMI 2**<br><img src="webui/assets/systems/atomiswave.webp" width="40" height="40" alt=""> **Atomiswave** | Flycast | Vulkan (GPU) |
+| **Arcade & SNK** | <img src="webui/assets/systems/fbneo.webp" width="40" height="40" alt=""> **Arcade**<br><img src="webui/assets/systems/neogeo.webp" width="40" height="40" alt=""> **Neo Geo** | FinalBurn Neo | Software |
+|  | <img src="webui/assets/systems/mame.webp" width="40" height="40" alt=""> **Arcade** | MAME | Software |
+|  | <img src="webui/assets/systems/ngpc.webp" width="40" height="40" alt=""> **Neo Geo Pocket / Color** | Beetle NeoPop | Software |
+|  | <img src="webui/assets/systems/neogeocd.webp" width="40" height="40" alt=""> **Neo Geo CD** | NeoCD | Software |
+| **NEC** | <img src="webui/assets/systems/pcengine.webp" width="40" height="40" alt=""> **PC Engine / TurboGrafx-16 / CD**<br><img src="webui/assets/systems/supergrafx.webp" width="40" height="40" alt=""> **SuperGrafx** | Beetle PCE | Software |
+|  | <img src="webui/assets/systems/pcfx.webp" width="40" height="40" alt=""> **PC-FX** | Beetle PC-FX | Software |
+| **Atari** | <img src="webui/assets/systems/atari2600.webp" width="40" height="40" alt=""> **Atari 2600** | Stella | Software |
+|  | <img src="webui/assets/systems/atari5200.webp" width="40" height="40" alt=""> **Atari 5200** | a5200 | Software |
+|  | <img src="webui/assets/systems/atari7800.webp" width="40" height="40" alt=""> **Atari 7800** | ProSystem | Software |
+|  | <img src="webui/assets/systems/atarilynx.webp" width="40" height="40" alt=""> **Atari Lynx** | Handy | Software |
+|  | <img src="webui/assets/systems/atarijaguar.webp" width="40" height="40" alt=""> **Atari Jaguar** | Virtual Jaguar | Software |
+| **Computers & adventures** | <img src="webui/assets/systems/c64.webp" width="40" height="40" alt=""> **Commodore 64** | VICE x64sc | Software |
+|  | <img src="webui/assets/systems/amiga.webp" width="40" height="40" alt=""> **Commodore Amiga** | PUAE | Software |
+|  | <img src="webui/assets/systems/dos.webp" width="40" height="40" alt=""> **MS-DOS** | DOSBox Pure | Software |
+|  | <img src="webui/assets/systems/scummvm.webp" width="40" height="40" alt=""> **Point-and-click adventures** | ScummVM | Software |
+| **More consoles** | <img src="webui/assets/systems/3do.webp" width="40" height="40" alt=""> **3DO** | Opera | Software |
+|  | <img src="webui/assets/systems/wonderswancolor.webp" width="40" height="40" alt=""> **WonderSwan / Color** | Beetle Cygne | Software |
 
 PicoDrive also supports Mega Drive, Mega-CD, Master System, and Pico. FinalBurn Neo includes Sega System 16/32; ScummVM supports many LucasArts, Sierra, and other adventures.
 
