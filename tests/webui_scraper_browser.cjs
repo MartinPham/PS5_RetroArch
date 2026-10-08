@@ -32,6 +32,17 @@ const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
     releaseResponse = []; await page.unroute('**/version.json');
     await page.locator('#add-game-open').click();
     await page.locator('[data-add-tab=media]').click();
+    // Exercise image decoding under the server's CSP, not just URL/status checks.
+    const mediaIcons = await page.locator('#add-media-types .icon').evaluateAll(async icons => {
+      return Promise.all(icons.map(async icon => {
+        if (icon instanceof HTMLImageElement) {
+          try { await icon.decode(); return icon.naturalWidth > 0; } catch { return false; }
+        }
+        return icon instanceof SVGSVGElement && icon.children.length > 0 && icon.getBoundingClientRect().width > 0;
+      }));
+    });
+    assert.equal(mediaIcons.length,10);
+    assert.ok(mediaIcons.every(Boolean),'every media selector icon renders under the production CSP');
     await page.locator('#add-download').click();
     await page.locator('.add-source', {hasText:'ScreenScraper'}).getByRole('button', {name:'Sign in',exact:true}).click();
     await page.locator('#sign-in-user').fill('browser fixture');

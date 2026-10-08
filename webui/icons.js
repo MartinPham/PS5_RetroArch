@@ -98,7 +98,12 @@ function assetIcon(src, className = '') {
   const img = document.createElement('img'); img.src = src; img.alt = ''; img.className = 'icon color-icon ' + className; img.setAttribute('aria-hidden','true'); return img;
 }
 function uiIcon(name, className = '') {
-  if (MEDIA_SYMBOLS[name]) return assetIcon('data:image/svg+xml,' + encodeURIComponent(MEDIA_SYMBOLS[name]),className);
+  if (MEDIA_SYMBOLS[name]) {
+    const svg = new DOMParser().parseFromString(MEDIA_SYMBOLS[name], 'image/svg+xml').documentElement;
+    svg.setAttribute('class', 'icon color-icon ' + className);
+    svg.setAttribute('aria-hidden', 'true'); svg.setAttribute('focusable', 'false');
+    return svg;
+  }
   if (COLOR_ICONS[name]) return assetIcon(COLOR_ICONS[name],className);
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   for (const [key, value] of Object.entries({viewBox:'0 0 24 24', fill:'none', stroke:'currentColor', 'stroke-width':'1.75', 'stroke-linecap':'round', 'stroke-linejoin':'round', 'aria-hidden':'true', focusable:'false', class:'icon lucide ' + className})) svg.setAttribute(key, value);
