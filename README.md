@@ -34,7 +34,7 @@ It exists so you can play the games you own on the console you own.
 
 A native RetroArch homebrew title for jailbroken PlayStation 5 consoles, made by [Mihawk](https://github.com/mihawk-99). Play through RetroArch or EmulationStation, with Vulkan graphics and up to four controllers.
 
-**This README describes the current beta development version.** See the [beta notes](releases/v1.0.0-beta.1.md) for what’s new and [Releases](https://github.com/mihawk-99/PS5_RetroArch/releases) for packaged downloads.
+**Latest release: [v1.0.0-beta.1](https://github.com/mihawk-99/PS5_RetroArch/releases/tag/v1.0.0-beta.1).** Read [what’s new](releases/v1.0.0-beta.1.md) or [download the package](https://github.com/mihawk-99/PS5_RetroArch/releases/latest).
 
 > [!WARNING]
 > **Designed around ShadowMountPlus 1.7beta4 or later.** Use [ShadowMountPlus 1.7beta4](https://github.com/drakmor/ShadowMountPlus/releases/tag/1.7beta4) or newer for supported USB and extended-storage access.
@@ -457,9 +457,10 @@ is Copyright (C) 2026 BlackBearReloaded, GPL-3.0-or-later. The title's
 Every built title folder carries `LEGAL.txt` (the legal notice above) and
 `licenses/`: the licence texts each part requires, and `components.json`, which
 ties every executable file to the source revision it was built from
-([tooling/notices/components.json](tooling/notices/components.json)). Each
-release also carries the source archives of everything in it. Releases up to
-v0.5.0-alpha.5 were published without `licenses/`.
+([tooling/notices/components.json](tooling/notices/components.json)). The package records public source links and exact revisions for every component.
+The release tag contains the build scripts and patches; `tools/source-bundle.py`
+can assemble the corresponding source archives from a prepared build checkout.
+Releases up to v0.5.0-alpha.5 were published without `licenses/`.
 
 The cores keep their own licences, and they differ:
 
