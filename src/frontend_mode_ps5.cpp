@@ -49,10 +49,13 @@
  */
 #include "frontend_mode_ps5.h"
 
+#include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
 #include <string>
+#include <dirent.h>
 #include <unistd.h>
 
 #include "ps5_frontend_choice.h"
@@ -222,8 +225,34 @@ bool take_forward(const Paths &paths, const Forward &forward)
                                    sizeof(associated.core)) &&
             ps5_game_check(&associated) == 0)
             std::snprintf(request.core, sizeof(request.core), "%s", associated.core);
+        /* nor a playlist: the core whose .info file lists the content's extension, when one
+         * does (or a shared cartridge extension's own core) */
+        std::vector<std::string> runnable;
+        for (const std::string &name : forward_extension_cores(paths.info, request.content))
+        {
+            struct ps5_game candidate = request;
+            const std::string path = forward_core(name, PS5_GAME_CORES);
+            std::snprintf(candidate.core, sizeof(candidate.core), "%s", path.c_str());
+            if (path.size() < sizeof(candidate.core) && ps5_game_check(&candidate) == 0)
+                runnable.push_back(name);
+        }
+        std::string chosen = runnable.size() == 1 ? runnable[0] : forward_preferred_core(request.content, runnable);
+        if (!request.core[0] && !chosen.empty())
+            std::snprintf(request.core, sizeof(request.core), "%s",
+                          forward_core(chosen, PS5_GAME_CORES).c_str());
+        if (!request.core[0] && runnable.empty())
+            return refused("no core: neither --core nor RetroArch's playlists name one, and no "
+                           "core lists its extension");
         if (!request.core[0])
-            return refused("no core: neither --core nor RetroArch's playlists name one");
+        {
+            std::string names;
+            for (const std::string &name : runnable)
+                names += (names.empty() ? "" : ", ") + name;
+            const std::string why = "no core: neither --core nor RetroArch's playlists name one, "
+                                    "and several cores list its extension (" + names +
+                                    "); --core names the one";
+            return refused(why.c_str());
+        }
     }
     game = request;
     game_running = true;
@@ -309,6 +338,90 @@ std::string forward_core(const std::string &core, const std::string &cores)
         name.compare(name.size() - (suffix_length - 3), suffix_length - 3, "_libretro") == 0)
         name.erase(name.size() - (suffix_length - 3));
     return name.empty() ? "" : cores + name + suffix;
+}
+
+namespace
+{
+std::string lower(std::string text)
+{
+    for (char &c : text)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return text;
+}
+
+/* The content's extension, lower case, without the dot; empty for none */
+std::string extension_of(const std::string &content)
+{
+    const std::string::size_type slash = content.rfind('/');
+    const std::string::size_type dot = content.rfind('.');
+    if (dot == std::string::npos || (slash != std::string::npos && dot < slash) || dot + 1 == content.size())
+        return "";
+    return lower(content.substr(dot + 1));
+}
+} // namespace
+
+std::vector<std::string> forward_extension_cores(const std::string &info, const std::string &content)
+{
+    std::vector<std::string> cores;
+    const std::string extension = extension_of(content);
+    if (extension.empty())
+        return cores;
+    DIR *folder = opendir(info.c_str());
+    if (!folder)
+        return cores;
+    static const char suffix[] = "_libretro.info";
+    const std::string::size_type suffix_length = sizeof(suffix) - 1;
+    for (struct dirent *entry; (entry = readdir(folder)) != nullptr;)
+    {
+        const std::string file = entry->d_name;
+        if (file.size() <= suffix_length || file.compare(file.size() - suffix_length, suffix_length, suffix) != 0)
+            continue;
+        std::FILE *input = std::fopen((info + file).c_str(), "r");
+        if (!input)
+            continue;
+        char line[4096];
+        bool listed = false;
+        while (!listed && std::fgets(line, sizeof line, input))
+        {
+            /* supported_extensions = "sfc|smc|swc" */
+            const char *at = line;
+            while (*at == ' ' || *at == '\t')
+                at++;
+            if (std::strncmp(at, "supported_extensions", 20) != 0)
+                continue;
+            const char *open = std::strchr(at, '"');
+            const char *close = open ? std::strchr(open + 1, '"') : nullptr;
+            if (!close)
+                break;
+            const std::string list = lower(std::string(open + 1, close));
+            for (std::string::size_type start = 0; start <= list.size();)
+            {
+                std::string::size_type bar = list.find('|', start);
+                if (bar == std::string::npos)
+                    bar = list.size();
+                if (list.compare(start, bar - start, extension) == 0 && bar - start == extension.size())
+                    listed = true;
+                start = bar + 1;
+            }
+            break;
+        }
+        std::fclose(input);
+        if (listed)
+            cores.push_back(file.substr(0, file.size() - suffix_length));
+    }
+    closedir(folder);
+    std::sort(cores.begin(), cores.end());
+    return cores;
+}
+
+std::string forward_preferred_core(const std::string &content, const std::vector<std::string> &cores)
+{
+    static const char *const sega[] = {"md", "smd", "gen", "sms", "gg", "sg", "68k", "sgd"};
+    const std::string extension = extension_of(content);
+    for (const char *shared : sega)
+        if (extension == shared && std::find(cores.begin(), cores.end(), "genesis_plus_gx") != cores.end())
+            return "genesis_plus_gx";
+    return "";
 }
 
 bool session_start(int argc, char **argv)
@@ -520,6 +633,7 @@ const ps5::frontend_mode::Paths title_paths{"/app0/picker/picker.bin",
                                             PS5_GAME_RESULT_PATH,
                                             PS5_GAME_PLAYLISTS,
                                             "/app0/content/",
+                                            "/app0/info/",
                                             PS5_FRONTEND_CHOICE_PATH,
                                             "/app0/trace.txt",
                                             "/app0/retroarch.log",

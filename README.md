@@ -261,7 +261,7 @@ opening the picker or a frontend.
 | Argument | Meaning |
 | --- | --- |
 | `--rom <file>` or `--rom=<file>` | The content to start: an absolute path (`/mnt/usb0/roms/snes/Game.zip`), or a path inside the title's `content/` folder (`/app0/content/`), such as `SNES/Game.zip`. A relative path may not contain `..`. |
-| `--core <core>` or `--core=<core>` | The core to run it with, one of the title's: `snes9x`, `snes9x_libretro`, `snes9x_libretro.so` and `/app0/cores/snes9x_libretro.so` all name `/app0/cores/snes9x_libretro.so`. Without it, the core RetroArch's playlists associate with the content. |
+| `--core <core>` or `--core=<core>` | The core to run it with, one of the title's: `snes9x`, `snes9x_libretro`, `snes9x_libretro.so` and `/app0/cores/snes9x_libretro.so` all name `/app0/cores/snes9x_libretro.so`. Without it, the core RetroArch's playlists associate with the content, or else the one core whose info file lists the file's extension (`.sfc` is Snes9x's; a Mega Drive `.md` or `.gen` is Genesis Plus GX's). An extension several cores take (`.cue`, `.chd`, `.iso`, `.zip`, `.bin`) needs `--core`. |
 | `--exit-after-game` | When RetroArch quits (Close Content or Quit), the title closes and the console returns to the home screen. Without it, the title then opens as from the home screen. |
 
 ```text
@@ -272,7 +272,7 @@ opening the picker or a frontend.
 The game runs as a frontend's game does in game mode (`src/ps5_game.h`): the content and core
 are checked the same way, RetroArch starts with `-L <core> <content>` and its own configuration,
 overrides and saves apply, and its log is `retroarch-game.log`. If the content is missing, the
-core is not one of the title's, or no core is named and the playlists name none, the reason is
+core is not one of the title's, or no core is named and none can be chosen, the reason is
 written to `trace.txt` (`forwarder: ... not run: ...`) and the title opens as from the home
 screen. A launch that names a mode (`--ps5-mode=...`) wins over `--rom`. The title's own restarts
 carry no arguments, so the forwarded game never starts twice. Arguments only reach a new

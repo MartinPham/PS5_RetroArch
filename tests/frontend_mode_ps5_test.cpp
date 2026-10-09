@@ -194,6 +194,7 @@ int main(int argc, char **argv)
                                           dir + "/game-result.txt",
                                           dir + "/playlists",
                                           dir + "/content/",
+                                          dir + "/info/",
                                           dir + "/frontend.cfg",
                                           dir + "/trace.txt",
                                           dir + "/retroarch.log",
@@ -478,6 +479,43 @@ int main(int argc, char **argv)
            !ps5::frontend_mode::running_game());
     assert(std::find_if(marks.begin(), marks.end(), [](const std::string &m)
                         { return m.find("no core: neither --core") != std::string::npos; }) != marks.end());
+    /* nor a playlist: the core whose .info lists the extension (a hack no playlist has) */
+    mkdir(paths.info.c_str(), 0777);
+    write_file(paths.info + "snes9x_libretro.info", "display_name = \"Snes9x\"\nsupported_extensions = \"smc|SFC|swc\"\n");
+    write_file(paths.info + "bsnes_libretro.info", "supported_extensions = \"sfc|bs\"\n");
+    write_file(paths.info + "genesis_plus_gx_libretro.info", "  supported_extensions = \"md|gen|cue\"\n");
+    write_file(paths.info + "picodrive_libretro.info", "supported_extensions = \"md|32x|cue\"\n");
+    write_file(paths.info + "notes.txt", "supported_extensions = \"sfc\"\n");
+    const std::string hack = dir + "/content/SNES/Mario (patched).SFC";
+    touch(hack, true);
+    assert((ps5::frontend_mode::forward_extension_cores(paths.info, hack) ==
+            std::vector<std::string>{"bsnes", "snes9x"}));
+    assert(ps5::frontend_mode::forward_extension_cores(paths.info, dir + "/content/SNES/x.smc") ==
+           std::vector<std::string>{"snes9x"});
+    assert(ps5::frontend_mode::forward_extension_cores(paths.info, dir + "/content/a.b/noext").empty());
+    assert(ps5::frontend_mode::forward_extension_cores(paths.info, dir + "/content/x.sf").empty());
+    assert(ps5::frontend_mode::forward_preferred_core("/x/Sonic.md", {"genesis_plus_gx", "picodrive"}) ==
+           "genesis_plus_gx");
+    assert(ps5::frontend_mode::forward_preferred_core("/x/Game.cue", {"genesis_plus_gx", "picodrive"}).empty());
+    /* bsnes lists .sfc but is not one of the title's cores (no library): snes9x runs it */
+    std::remove(other.c_str());
+    assert(launch(paths, {"--rom", "SNES/Mario (patched).SFC"}) == "retroarch" &&
+           core == ps5::frontend_mode::running_game()->core);
+    assert(quit("") == paths.eboot);
+    /* both are cores of the title: --core has to choose, and the trace names them */
+    touch(other, true);
+    assert(launch(paths, {"--rom", "SNES/Mario (patched).SFC"}) == paths.picker &&
+           !ps5::frontend_mode::running_game());
+    assert(std::find_if(marks.begin(), marks.end(), [](const std::string &m)
+                        { return m.find("several cores list its extension (bsnes, snes9x)") != std::string::npos; }) !=
+           marks.end());
+    /* a Mega Drive cartridge both Sega cores list: Genesis Plus GX */
+    const std::string genesis = std::string(PS5_GAME_CORES) + "genesis_plus_gx_libretro.so";
+    touch(genesis, true);
+    touch(std::string(PS5_GAME_CORES) + "picodrive_libretro.so", true);
+    touch(dir + "/content/Sonic.md", true);
+    assert(launch(paths, {"--rom", "Sonic.md"}) == "retroarch" && genesis == ps5::frontend_mode::running_game()->core);
+    assert(quit("") == paths.eboot);
     for (const std::vector<const char *> &args :
          std::vector<std::vector<const char *>>{{"--rom", "SNES/Missing.zip", "--core", "snes9x"},
                                                 {"--rom", "../Game.zip", "--core", "snes9x"},

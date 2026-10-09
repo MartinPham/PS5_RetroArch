@@ -10,6 +10,7 @@
 
 #ifdef __cplusplus
 #include <string>
+#include <vector>
 
 namespace ps5::frontend_mode
 {
@@ -38,6 +39,7 @@ struct Paths
     std::string picker, es_de, test_run, picker_test, eboot;
     std::string request, result, playlists; /* game mode's (src/ps5_game.h) */
     std::string content;                    /* a forwarder's relative --rom is in it */
+    std::string info;                       /* the cores' .info files (supported_extensions) */
     std::string choice;                     /* config/frontend.cfg */
     std::string trace, retroarch_log, game_log;
     /* Reads the pad as the title starts: true when L1 is held. Asked only when a
@@ -72,6 +74,14 @@ std::string forward_content(const std::string &rom, const std::string &content);
 /* The core's path inside cores (a folder ending in '/'), from a name with or without
  * _libretro.so; a path with a '/' as it is (ps5_game_check decides). Empty for none. */
 std::string forward_core(const std::string &core, const std::string &cores);
+/* The cores whose .info file in info (a folder ending in '/') lists the content's extension in
+ * supported_extensions, by name (snes9x), sorted: a forwarder without --core whose content no
+ * playlist names takes the one core that runs it. */
+std::vector<std::string> forward_extension_cores(const std::string &info, const std::string &content);
+/* Of several such cores, the one a cartridge extension two cores share is meant for (the Mega
+ * Drive and Master System extensions: Genesis Plus GX before PicoDrive); empty when there is
+ * no such choice and --core has to name one. */
+std::string forward_preferred_core(const std::string &content, const std::vector<std::string> &cores);
 /* A launch that starts a session: no --ps5- argument at all, as from the home screen
  * or a test run. Every handover names a mode, and a test's restarts their generation. */
 bool session_start(int argc, char **argv);
