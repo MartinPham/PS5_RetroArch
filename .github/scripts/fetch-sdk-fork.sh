@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
-# ../PS5_PayloadSDK, the payload SDK fork, with the commit tools/setup-native-dependencies.sh
-# pins (it exports that commit with git archive): just that commit, fetched, beside this
-# checkout.
+# ../PS5_PayloadSDK, the payload SDK fork, at the commit tools/setup-native-dependencies.sh
+# pins: just that commit, fetched and checked out beside this checkout. The setup exports it with
+# git archive; tools/stage-notices.py copies its licence texts from the working tree (LICENSE,
+# platform/src/regex/COPYRIGHT.musl).
 #
 #   .github/scripts/fetch-sdk-fork.sh
 set -euo pipefail
@@ -17,4 +18,6 @@ if ! git -C "$fork" cat-file -e "$revision^{commit}" 2>/dev/null; then
     }
     git -C "$fork" fetch -q --depth 1 origin "$revision"
 fi
+git -C "$fork" checkout -q --force --detach "$revision"
+[[ -f $fork/LICENSE ]] || { echo "fetch-sdk-fork: no LICENSE in $fork at $revision" >&2; exit 2; }
 echo "==> [sdk] PS5_PayloadSDK ${revision:0:12} beside $root"
