@@ -69,7 +69,7 @@ struct Forward
 };
 Forward forward_arguments(int argc, char **argv);
 /* The content's path: an absolute one as it is; a relative one inside content (a folder
- * ending in '/'), never above it: empty for a path with a ".." part. */
+ * ending in '/'), never above it: empty for a path with a ".." part. A trailing '/' goes. */
 std::string forward_content(const std::string &rom, const std::string &content);
 /* The core's path inside cores (a folder ending in '/'), from a name with or without
  * _libretro.so; a path with a '/' as it is (ps5_game_check decides). Empty for none. */
@@ -77,11 +77,16 @@ std::string forward_core(const std::string &core, const std::string &cores);
 /* The cores whose .info file in info (a folder ending in '/') lists the content's extension in
  * supported_extensions, by name (snes9x), sorted: a forwarder without --core whose content no
  * playlist names takes the one core that runs it. */
-std::vector<std::string> forward_extension_cores(const std::string &info, const std::string &content);
+std::vector<std::string> forward_extension_cores(const std::string &info,
+                                                 const std::string &content);
 /* Of several such cores, the one a cartridge extension two cores share is meant for (the Mega
  * Drive and Master System extensions: Genesis Plus GX before PicoDrive); empty when there is
  * no such choice and --core has to name one. */
-std::string forward_preferred_core(const std::string &content, const std::vector<std::string> &cores);
+/* The cores whose .info lists "/" in supported_extensions: they open a folder as content
+ * (DOSBox Pure, PUAE, VICE). A forwarder's --rom may name a folder for them. */
+std::vector<std::string> forward_folder_cores(const std::string &info);
+std::string forward_preferred_core(const std::string &content,
+                                   const std::vector<std::string> &cores);
 /* A launch that starts a session: no --ps5- argument at all, as from the home screen
  * or a test run. Every handover names a mode, and a test's restarts their generation. */
 bool session_start(int argc, char **argv);

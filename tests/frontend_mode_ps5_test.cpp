@@ -185,21 +185,12 @@ int main(int argc, char **argv)
     }
 
     /* The launches, against files in the scratch directory. */
-    const ps5::frontend_mode::Paths paths{dir + "/picker.bin",
-                                          dir + "/es-de.bin",
-                                          dir + "/test-run.txt",
-                                          dir + "/picker-test.txt",
-                                          dir + "/eboot.bin",
-                                          dir + "/game-request.txt",
-                                          dir + "/game-result.txt",
-                                          dir + "/playlists",
-                                          dir + "/content/",
-                                          dir + "/info/",
-                                          dir + "/frontend.cfg",
-                                          dir + "/trace.txt",
-                                          dir + "/retroarch.log",
-                                          dir + "/retroarch-game.log",
-                                          read_l1};
+    const ps5::frontend_mode::Paths paths{
+        dir + "/picker.bin",      dir + "/es-de.bin",          dir + "/test-run.txt",
+        dir + "/picker-test.txt", dir + "/eboot.bin",          dir + "/game-request.txt",
+        dir + "/game-result.txt", dir + "/playlists",          dir + "/content/",
+        dir + "/info/",           dir + "/frontend.cfg",       dir + "/trace.txt",
+        dir + "/retroarch.log",   dir + "/retroarch-game.log", read_l1};
     touch(paths.picker, true);
     touch(paths.es_de, true);
     touch(paths.test_run, false);
@@ -481,9 +472,11 @@ int main(int argc, char **argv)
                         { return m.find("no core: neither --core") != std::string::npos; }) != marks.end());
     /* nor a playlist: the core whose .info lists the extension (a hack no playlist has) */
     mkdir(paths.info.c_str(), 0777);
-    write_file(paths.info + "snes9x_libretro.info", "display_name = \"Snes9x\"\nsupported_extensions = \"smc|SFC|swc\"\n");
+    write_file(paths.info + "snes9x_libretro.info",
+               "display_name = \"Snes9x\"\nsupported_extensions = \"smc|SFC|swc\"\n");
     write_file(paths.info + "bsnes_libretro.info", "supported_extensions = \"sfc|bs\"\n");
-    write_file(paths.info + "genesis_plus_gx_libretro.info", "  supported_extensions = \"md|gen|cue\"\n");
+    write_file(paths.info + "genesis_plus_gx_libretro.info",
+               "  supported_extensions = \"md|gen|cue\"\n");
     write_file(paths.info + "picodrive_libretro.info", "supported_extensions = \"md|32x|cue\"\n");
     write_file(paths.info + "notes.txt", "supported_extensions = \"sfc\"\n");
     const std::string hack = dir + "/content/SNES/Mario (patched).SFC";
@@ -492,11 +485,14 @@ int main(int argc, char **argv)
             std::vector<std::string>{"bsnes", "snes9x"}));
     assert(ps5::frontend_mode::forward_extension_cores(paths.info, dir + "/content/SNES/x.smc") ==
            std::vector<std::string>{"snes9x"});
-    assert(ps5::frontend_mode::forward_extension_cores(paths.info, dir + "/content/a.b/noext").empty());
+    assert(ps5::frontend_mode::forward_extension_cores(paths.info, dir + "/content/a.b/noext")
+               .empty());
     assert(ps5::frontend_mode::forward_extension_cores(paths.info, dir + "/content/x.sf").empty());
-    assert(ps5::frontend_mode::forward_preferred_core("/x/Sonic.md", {"genesis_plus_gx", "picodrive"}) ==
-           "genesis_plus_gx");
-    assert(ps5::frontend_mode::forward_preferred_core("/x/Game.cue", {"genesis_plus_gx", "picodrive"}).empty());
+    assert(ps5::frontend_mode::forward_preferred_core(
+               "/x/Sonic.md", {"genesis_plus_gx", "picodrive"}) == "genesis_plus_gx");
+    assert(
+        ps5::frontend_mode::forward_preferred_core("/x/Game.cue", {"genesis_plus_gx", "picodrive"})
+            .empty());
     /* bsnes lists .sfc but is not one of the title's cores (no library): snes9x runs it */
     std::remove(other.c_str());
     assert(launch(paths, {"--rom", "SNES/Mario (patched).SFC"}) == "retroarch" &&
@@ -506,16 +502,55 @@ int main(int argc, char **argv)
     touch(other, true);
     assert(launch(paths, {"--rom", "SNES/Mario (patched).SFC"}) == paths.picker &&
            !ps5::frontend_mode::running_game());
-    assert(std::find_if(marks.begin(), marks.end(), [](const std::string &m)
-                        { return m.find("several cores list its extension (bsnes, snes9x)") != std::string::npos; }) !=
-           marks.end());
+    assert(std::find_if(marks.begin(), marks.end(),
+                        [](const std::string &m) {
+                            return m.find("several cores list its extension (bsnes, snes9x)") !=
+                                   std::string::npos;
+                        }) != marks.end());
     /* a Mega Drive cartridge both Sega cores list: Genesis Plus GX */
     const std::string genesis = std::string(PS5_GAME_CORES) + "genesis_plus_gx_libretro.so";
     touch(genesis, true);
     touch(std::string(PS5_GAME_CORES) + "picodrive_libretro.so", true);
     touch(dir + "/content/Sonic.md", true);
-    assert(launch(paths, {"--rom", "Sonic.md"}) == "retroarch" && genesis == ps5::frontend_mode::running_game()->core);
+    assert(launch(paths, {"--rom", "Sonic.md"}) == "retroarch" &&
+           genesis == ps5::frontend_mode::running_game()->core);
     assert(quit("") == paths.eboot);
+    /* a folder, for a core that opens folders (its .info lists "/"): DOSBox Pure's DOS or
+     * Windows installation */
+    write_file(paths.info + "dosbox_pure_libretro.info",
+               "supported_extensions = \"zip|dosz|exe|/\"\n");
+    const std::string dosbox = std::string(PS5_GAME_CORES) + "dosbox_pure_libretro.so";
+    touch(dosbox, true);
+    mkdir((dir + "/content/dos").c_str(), 0777);
+    mkdir((dir + "/content/dos/w95").c_str(), 0777);
+    assert(ps5::frontend_mode::forward_folder_cores(paths.info) ==
+           std::vector<std::string>{"dosbox_pure"});
+    assert(ps5::frontend_mode::forward_content("dos/w95/", "/c/") == "/c/dos/w95");
+    {
+        const std::string w95 = "--rom=" + dir + "/content/dos/w95";
+        assert(launch(paths, {w95.c_str(), "--core", "dosbox_pure_libretro",
+                              "--exit-after-game"}) == "retroarch" &&
+               dosbox == ps5::frontend_mode::running_game()->core &&
+               dir + "/content/dos/w95" == ps5::frontend_mode::running_game()->content);
+        assert(quit("") == "closes");
+    }
+    /* without --core: the one core that opens folders */
+    assert(launch(paths, {"--rom", "dos/w95/"}) == "retroarch" &&
+           dosbox == ps5::frontend_mode::running_game()->core);
+    assert(quit("") == paths.eboot);
+    /* a core that does not open folders is refused, naming those that do */
+    assert(launch(paths, {"--rom", "dos/w95", "--core", "snes9x"}) == paths.picker &&
+           !ps5::frontend_mode::running_game());
+    const auto marked = [&](const char *text)
+    {
+        return std::find_if(marks.begin(), marks.end(), [&](const std::string &m)
+                            { return m.find(text) != std::string::npos; }) != marks.end();
+    };
+    assert(
+        marked("snes9x does not open folders (its .info lists no \"/\"; these do: dosbox_pure)"));
+    /* a folder that is not there is still "not a file" */
+    assert(launch(paths, {"--rom", "dos/w98", "--core", "dosbox_pure"}) == paths.picker &&
+           marked("--rom dos/w98 --core dosbox_pure not run: the content is not a file"));
     for (const std::vector<const char *> &args :
          std::vector<std::vector<const char *>>{{"--rom", "SNES/Missing.zip", "--core", "snes9x"},
                                                 {"--rom", "../Game.zip", "--core", "snes9x"},
@@ -527,7 +562,9 @@ int main(int argc, char **argv)
            !ps5::frontend_mode::running_game());
 
     std::puts(
-        "frontend_mode_ps5: forwarder --rom/--core launches, cores, refusals and after-game PASS; "
+        "frontend_mode_ps5: forwarder --rom/--core launches, cores by extension, folders, refusals "
+        "and "
+        "after-game PASS; "
         "decisions, mode argument, LoadExec targets, test runs and "
         "refused or ignored LoadExec PASS; the remembered frontend, L1, quit and closing PASS; "
         "session and per-mode logs PASS; back to the picker after RetroArch, no handover after "

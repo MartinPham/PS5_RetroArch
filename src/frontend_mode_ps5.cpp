@@ -56,6 +56,7 @@
 #include <ctime>
 #include <string>
 #include <dirent.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "ps5_frontend_choice.h"
@@ -78,6 +79,20 @@ bool game_forwarded = false;
 bool forward_exit_after_game = false;
 
 extern "C" void ps5_permissions_settle(); /* src/permissions_ps5.cpp */
+
+std::string joined(const std::vector<std::string> &names)
+{
+    std::string text;
+    for (const std::string &name : names)
+        text += (text.empty() ? "" : ", ") + name;
+    return text;
+}
+
+bool is_folder(const std::string &path)
+{
+    struct stat status;
+    return stat(path.c_str(), &status) == 0 && S_ISDIR(status.st_mode);
+}
 
 bool exists(const std::string &path)
 {
@@ -214,7 +229,35 @@ bool take_forward(const Paths &paths, const Forward &forward)
         return refused("the content is not a path inside the content folder (no \"..\")");
     if (core.size() >= sizeof(request.core) || content.size() >= sizeof(request.content))
         return refused("a path is too long");
-    if (ps5_game_check(&request) != 0)
+    /* A folder is content for a core that opens folders, as DOSBox Pure opens a DOS or Windows
+     * installation: its .info lists "/" in supported_extensions. Game mode's check wants a file,
+     * so a folder's request is checked with the title in its place, for the core and frontend. */
+    const bool folder = is_folder(content);
+    const std::vector<std::string> folder_cores =
+        folder ? forward_folder_cores(paths.info) : std::vector<std::string>();
+    const auto check = [&](struct ps5_game &candidate)
+    {
+        if (!folder)
+            return ps5_game_check(&candidate);
+        struct ps5_game probe = candidate;
+        std::snprintf(probe.content, sizeof(probe.content), "%s", paths.eboot.c_str());
+        const int result = ps5_game_check(&probe);
+        std::snprintf(candidate.error, sizeof(candidate.error), "%s", probe.error);
+        if (result != 0 || !candidate.core[0])
+            return result;
+        std::string name = candidate.core;
+        name = name.substr(name.rfind('/') + 1);
+        name.erase(name.size() - std::strlen("_libretro.so"));
+        if (std::find(folder_cores.begin(), folder_cores.end(), name) != folder_cores.end())
+            return 0;
+        std::snprintf(candidate.error, sizeof(candidate.error),
+                      "the content is a folder, and %s does not open folders (its .info lists no "
+                      "\"/\"%s%s)",
+                      name.c_str(),
+                      folder_cores.empty() ? "" : "; these do: ", joined(folder_cores).c_str());
+        return -1;
+    };
+    if (check(request) != 0)
         return refused(request.error);
     /* --core is the user's choice for this tile; without it, RetroArch's playlists choose,
      * as they do for a frontend's game. */
@@ -223,34 +266,37 @@ bool take_forward(const Paths &paths, const Forward &forward)
         struct ps5_game associated = request;
         if (ps5_game_playlist_core(paths.playlists.c_str(), request.content, associated.core,
                                    sizeof(associated.core)) &&
-            ps5_game_check(&associated) == 0)
+            check(associated) == 0)
             std::snprintf(request.core, sizeof(request.core), "%s", associated.core);
         /* nor a playlist: the core whose .info file lists the content's extension, when one
          * does (or a shared cartridge extension's own core) */
         std::vector<std::string> runnable;
-        for (const std::string &name : forward_extension_cores(paths.info, request.content))
+        for (const std::string &name :
+             folder ? folder_cores : forward_extension_cores(paths.info, request.content))
         {
             struct ps5_game candidate = request;
             const std::string path = forward_core(name, PS5_GAME_CORES);
             std::snprintf(candidate.core, sizeof(candidate.core), "%s", path.c_str());
-            if (path.size() < sizeof(candidate.core) && ps5_game_check(&candidate) == 0)
+            if (path.size() < sizeof(candidate.core) && check(candidate) == 0)
                 runnable.push_back(name);
         }
-        std::string chosen = runnable.size() == 1 ? runnable[0] : forward_preferred_core(request.content, runnable);
+        std::string chosen =
+            runnable.size() == 1 ? runnable[0] : forward_preferred_core(request.content, runnable);
         if (!request.core[0] && !chosen.empty())
             std::snprintf(request.core, sizeof(request.core), "%s",
                           forward_core(chosen, PS5_GAME_CORES).c_str());
         if (!request.core[0] && runnable.empty())
-            return refused("no core: neither --core nor RetroArch's playlists name one, and no "
-                           "core lists its extension");
+            return refused(folder
+                               ? "no core: the content is a folder, and no core of the title "
+                                 "opens folders"
+                               : "no core: neither --core nor RetroArch's playlists name one, and "
+                                 "no core lists its extension");
         if (!request.core[0])
         {
-            std::string names;
-            for (const std::string &name : runnable)
-                names += (names.empty() ? "" : ", ") + name;
             const std::string why = "no core: neither --core nor RetroArch's playlists name one, "
-                                    "and several cores list its extension (" + names +
-                                    "); --core names the one";
+                                    "and several cores " +
+                                    std::string(folder ? "open folders" : "list its extension") +
+                                    " (" + joined(runnable) + "); --core names the one";
             return refused(why.c_str());
         }
     }
@@ -310,6 +356,8 @@ std::string forward_content(const std::string &rom, const std::string &content)
     std::string path = rom;
     while (!path.empty() && (path.back() == ' ' || path.back() == '\r' || path.back() == '\n'))
         path.pop_back();
+    while (path.size() > 1 && path.back() == '/') /* a folder given as "dos/w95/" */
+        path.pop_back();
     if (path.empty())
         return "";
     if (path[0] == '/')
@@ -354,16 +402,19 @@ std::string extension_of(const std::string &content)
 {
     const std::string::size_type slash = content.rfind('/');
     const std::string::size_type dot = content.rfind('.');
-    if (dot == std::string::npos || (slash != std::string::npos && dot < slash) || dot + 1 == content.size())
+    if (dot == std::string::npos || (slash != std::string::npos && dot < slash) ||
+        dot + 1 == content.size())
         return "";
     return lower(content.substr(dot + 1));
 }
 } // namespace
 
-std::vector<std::string> forward_extension_cores(const std::string &info, const std::string &content)
+namespace
+{
+/* The cores whose .info lists token in supported_extensions ("sfc", or "/" for a folder) */
+std::vector<std::string> cores_listing(const std::string &info, const std::string &extension)
 {
     std::vector<std::string> cores;
-    const std::string extension = extension_of(content);
     if (extension.empty())
         return cores;
     DIR *folder = opendir(info.c_str());
@@ -374,7 +425,8 @@ std::vector<std::string> forward_extension_cores(const std::string &info, const 
     for (struct dirent *entry; (entry = readdir(folder)) != nullptr;)
     {
         const std::string file = entry->d_name;
-        if (file.size() <= suffix_length || file.compare(file.size() - suffix_length, suffix_length, suffix) != 0)
+        if (file.size() <= suffix_length ||
+            file.compare(file.size() - suffix_length, suffix_length, suffix) != 0)
             continue;
         std::FILE *input = std::fopen((info + file).c_str(), "r");
         if (!input)
@@ -399,7 +451,8 @@ std::vector<std::string> forward_extension_cores(const std::string &info, const 
                 std::string::size_type bar = list.find('|', start);
                 if (bar == std::string::npos)
                     bar = list.size();
-                if (list.compare(start, bar - start, extension) == 0 && bar - start == extension.size())
+                if (list.compare(start, bar - start, extension) == 0 &&
+                    bar - start == extension.size())
                     listed = true;
                 start = bar + 1;
             }
@@ -413,13 +466,27 @@ std::vector<std::string> forward_extension_cores(const std::string &info, const 
     std::sort(cores.begin(), cores.end());
     return cores;
 }
+} // namespace
 
-std::string forward_preferred_core(const std::string &content, const std::vector<std::string> &cores)
+std::vector<std::string> forward_extension_cores(const std::string &info,
+                                                 const std::string &content)
+{
+    return cores_listing(info, extension_of(content));
+}
+
+std::vector<std::string> forward_folder_cores(const std::string &info)
+{
+    return cores_listing(info, "/");
+}
+
+std::string forward_preferred_core(const std::string &content,
+                                   const std::vector<std::string> &cores)
 {
     static const char *const sega[] = {"md", "smd", "gen", "sms", "gg", "sg", "68k", "sgd"};
     const std::string extension = extension_of(content);
     for (const char *shared : sega)
-        if (extension == shared && std::find(cores.begin(), cores.end(), "genesis_plus_gx") != cores.end())
+        if (extension == shared &&
+            std::find(cores.begin(), cores.end(), "genesis_plus_gx") != cores.end())
             return "genesis_plus_gx";
     return "";
 }

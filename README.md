@@ -260,7 +260,7 @@ opening the picker or a frontend.
 
 | Argument | Meaning |
 | --- | --- |
-| `--rom <file>` or `--rom=<file>` | The content to start: an absolute path (`/mnt/usb0/roms/snes/Game.zip`), or a path inside the title's `content/` folder (`/app0/content/`), such as `SNES/Game.zip`. A relative path may not contain `..`. |
+| `--rom <file>` or `--rom=<file>` | The content to start: an absolute path (`/mnt/usb0/roms/snes/Game.zip`), or a path inside the title's `content/` folder (`/app0/content/`), such as `SNES/Game.zip`. A folder is content for a core that opens folders, one whose info file lists `/` among its extensions: DOSBox Pure (`--rom /mnt/usb0/ROMS/dos/w95 --core dosbox_pure`), PUAE, VICE. A relative path may not contain `..`. |
 | `--core <core>` or `--core=<core>` | The core to run it with, one of the title's: `snes9x`, `snes9x_libretro`, `snes9x_libretro.so` and `/app0/cores/snes9x_libretro.so` all name `/app0/cores/snes9x_libretro.so`. Without it, the core RetroArch's playlists associate with the content, or else the one core whose info file lists the file's extension (`.sfc` is Snes9x's; a Mega Drive `.md` or `.gen` is Genesis Plus GX's). An extension several cores take (`.cue`, `.chd`, `.iso`, `.zip`, `.bin`) needs `--core`. |
 | `--exit-after-game` | When RetroArch quits (Close Content or Quit), the title closes and the console returns to the home screen. Without it, the title then opens as from the home screen. |
 
