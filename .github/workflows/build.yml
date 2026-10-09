@@ -11,7 +11,8 @@
 #
 # The jobs:
 #
-#   plan    the cores tools/build-title.sh builds (.github/scripts/core-plan.py)
+#   plan    the cores tools/build-title.sh builds (.github/scripts/core-plan.py), but for those
+#           CI_SKIP_CORES names
 #   radv    RADV, as PS5_Vulkan builds it (LLVM 18, Mesa's host needs), cached by its pins
 #   core    one job per core: its tools/build-<core>.sh, as build-title.sh runs it. A core is
 #           cached with its stamp (tools/core-stamp.sh: the script, its patches, the SDK and the
@@ -60,6 +61,10 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
+  # Cores left out of this build (space-separated libretro names, as in tools/build-title.sh's
+  # core_names): no job builds them and the title does not carry them. MAME, the longest build by
+  # far, is left out for now; empty this to build it again.
+  CI_SKIP_CORES: ''
   # PS5_Vulkan main when the beta.1 release was built (radv-link.sh binds strcasestr, mkstemp,
   # readlink, link and symlink, which tools/build-title.sh's wraps expect)
   PS5_VULKAN_REVISION: 5b5e4fc2d80fdb67a4f61ba9e6a8a424026bb8a5
@@ -74,6 +79,8 @@ jobs:
       - uses: actions/checkout@v7
       - id: plan
         run: |
+          # shellcheck disable=SC2086 # a list of names
+          python3 .github/scripts/core-plan.py skip $CI_SKIP_CORES
           matrix=$(python3 .github/scripts/core-plan.py matrix)
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
           python3 -c 'import json, sys; [print(c["core"], c["script"]) for c in json.loads(sys.argv[1])]' "$matrix"
@@ -383,6 +390,8 @@ jobs:
       - name: Check the cores are the ones built
         working-directory: PS5_RetroArch
         run: |
+          # shellcheck disable=SC2086 # a list of names
+          python3 .github/scripts/core-plan.py skip $CI_SKIP_CORES
           # each script finds its stamp and outputs and skips; one that would build again means
           # the core jobs and this one differ in an input, which this stops before it builds
           python3 .github/scripts/core-plan.py matrix |

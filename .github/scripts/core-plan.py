@@ -6,10 +6,15 @@
                                    matrix: [{"core", "script", "stamp", "fork", "revision",
                                    "source"}]; fork and revision only for a core built from a
                                    mihawk-99 fork checkout (tools/core-fork.sh, LRPS2's own)
-  core-plan.py prefetch CORE       that fork's pinned commit alone, fetched into the tree the
-                                   build script checks out, so it does not clone the whole
+  core-plan.py prefetch CORE       that fork's pinned commit alone, fetched and checked out in
+                                   the tree the build script uses, so it does not clone the whole
                                    history (MAME's is gigabytes); the script still checks it out
-                                   at the pin and cleans it
+                                   at the pin and cleans it when it builds
+  core-plan.py skip CORE...        leave those cores out of this checkout's title (CI_SKIP_CORES
+                                   in the workflow): their names out of tools/build-title.sh's
+                                   core_names and tools/generate-core-metadata.py's CORES, so the
+                                   matrix has no job for them and the title neither builds nor
+                                   stages them. An edit to the CI's working tree, never committed
   core-plan.py collect CORE OUT    what the title job needs from a built core, copied into OUT
                                    at the same paths: build/cores/stage (the library, its info
                                    file, its system/ assets), the stamp that lets the title's
@@ -91,6 +96,9 @@ def prefetch(core):
     # origin is the published fork: a relative submodule URL (../PS5_Dynarmic) resolves against it
     git("remote", "add", "origin", f"https://github.com/mihawk-99/{entry['fork']}.git", cwd=tree)
     git("fetch", "-q", "--depth", "1", "--no-recurse-submodules", "origin", entry["revision"], cwd=tree)
+    # checked out too: a core its stamp finds up to date is not checked out by its script, and
+    # collect still takes its licence texts and option sources from the tree
+    git("checkout", "-q", "--force", "--detach", entry["revision"], cwd=tree)
     print(f"==> [{core}] {entry['fork']} {entry['revision'][:12]} in {entry['source']}")
 
 
@@ -108,14 +116,20 @@ def metadata_sources(core):
     return files
 
 
+def notice_components(entry):
+    """The core's entries in tooling/notices/components.json: those whose artifacts name its
+    library. Their build folder (build/cores/<build>/build.json) is not always the stamp's name:
+    LRPS2's is lrps2, its stamp pcsx2."""
+    table = json.loads((ROOT / "tooling/notices/components.json").read_text(encoding="utf-8"))
+    library = f"cores/{entry['core']}_libretro.so"
+    return [component for component in table["components"]
+            if component.get("source", {}).get("kind") == "core" and library in component.get("artifacts", [])]
+
+
 def licence_texts(entry):
     """The licence texts stage-notices.py copies for this core, from its source tree."""
-    table = json.loads((ROOT / "tooling/notices/components.json").read_text(encoding="utf-8"))
     paths = []
-    for component in table["components"]:
-        source = component.get("source", {})
-        if source.get("kind") != "core" or source.get("build") != entry["stamp"]:
-            continue
+    for component in notice_components(entry):
         for text in component.get("texts", []):
             choices = text.get("from", [])
             for choice in choices if isinstance(choices, list) else [choices]:
@@ -135,8 +149,10 @@ def collect(core, out):
     files = [ROOT / "build/cores/stamps" / entry["stamp"]]
     for kind in ("cores", "info"):
         files += sorted((stage / kind).glob(f"{core}_libretro.*"))
-    # the work folder a script names after its stamp or its core (build.json, abi.json)
-    for folder in {entry["stamp"], core}:
+    # the work folder a script names after its stamp, its core or its notice entry (build.json,
+    # abi.json, which stage-notices.py reads)
+    builds = {component["source"]["build"] for component in notice_components(entry)}
+    for folder in sorted({entry["stamp"], core} | builds):
         files += [ROOT / "build/cores" / folder / name for name in ("build.json", "abi.json")
                   if (ROOT / "build/cores" / folder / name).is_file()]
     files += metadata_sources(core)
@@ -156,15 +172,35 @@ def collect(core, out):
     print(f"==> [{core}] {len(files)} files and {len(folders)} folders collected in {out}")
 
 
+def skip(cores):
+    known = core_names()
+    for core in cores:
+        if core not in known:
+            sys.exit(f"core-plan: {core} is not in tools/build-title.sh's core_names")
+    title = TOOLS / "build-title.sh"
+    text = title.read_text()
+    found = re.search(r"^core_names=\(([^)]*)\)", text, re.M)
+    kept = [core for core in found.group(1).split() if core not in cores]
+    title.write_text(text[:found.start(1)] + " ".join(kept) + text[found.end(1):])
+    metadata = TOOLS / "generate-core-metadata.py"
+    lines = metadata.read_text().splitlines(keepends=True)
+    entry = re.compile(r"^\s*\('(" + "|".join(map(re.escape, cores)) + r")',")
+    metadata.write_text("".join(line for line in lines if not entry.match(line)))
+    print(f"==> [cores] left out of this build: {' '.join(cores)}; {len(kept)} cores")
+
+
 def main(argv):
     if argv[:1] == ["matrix"] and len(argv) == 1:
         print(json.dumps(plan()))
     elif argv[:1] == ["prefetch"] and len(argv) == 2:
         prefetch(argv[1])
+    elif argv[:1] == ["skip"]:
+        if argv[1:]:
+            skip(argv[1:])
     elif argv[:1] == ["collect"] and len(argv) == 3:
         collect(argv[1], argv[2])
     else:
-        sys.exit("usage: core-plan.py matrix | prefetch CORE | collect CORE OUT")
+        sys.exit("usage: core-plan.py matrix | prefetch CORE | skip CORE... | collect CORE OUT")
 
 
 if __name__ == "__main__":
