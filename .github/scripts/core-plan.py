@@ -15,6 +15,11 @@
                                    core_names and tools/generate-core-metadata.py's CORES, so the
                                    matrix has no job for them and the title neither builds nor
                                    stages them. An edit to the CI's working tree, never committed
+  core-plan.py check CORE...|all  every one of those cores has what the title needs from it
+                                   (stamp, library, info file, build report, licence texts);
+                                   exit 1 naming what is missing. A core job rebuilds a core its
+                                   cache restored without them; the title job checks them all
+                                   before it builds anything
   core-plan.py collect CORE OUT    what the title job needs from a built core, copied into OUT
                                    at the same paths: build/cores/stage (the library, its info
                                    file, its system/ assets), the stamp that lets the title's
@@ -126,35 +131,68 @@ def notice_components(entry):
             if component.get("source", {}).get("kind") == "core" and library in component.get("artifacts", [])]
 
 
-def licence_texts(entry):
-    """The licence texts stage-notices.py copies for this core, from its source tree."""
+def licence_texts(entry, missing=None):
+    """The licence texts stage-notices.py copies for this core, from its source tree; a text
+    none of whose paths exists goes to missing (or stops the script)."""
     paths = []
     for component in notice_components(entry):
         for text in component.get("texts", []):
-            choices = text.get("from", [])
-            for choice in choices if isinstance(choices, list) else [choices]:
-                if (ROOT / choice).exists():
-                    paths.append(ROOT / choice)
-                    break
+            if "from" not in text:
+                continue
+            choices = text["from"] if isinstance(text["from"], list) else [text["from"]]
+            found = next((ROOT / choice for choice in choices if (ROOT / choice).exists()), None)
+            if found:
+                paths.append(found)
+            elif missing is None:
+                sys.exit(f"core-plan: {component['id']}'s licence text {choices} is missing")
             else:
-                if "from" in text:
-                    sys.exit(f"core-plan: {component['id']}'s licence text {choices} is missing")
+                missing.append(choices[0])
     return paths
+
+
+def required(entry):
+    """What the title cannot be made without, for this core: the stamp its script skips by, the
+    library and its info file, and the build report stage-notices.py reads
+    (build/cores/<build>/build.json)."""
+    stage = ROOT / "build/cores/stage"
+    files = [ROOT / "build/cores/stamps" / entry["stamp"],
+             stage / "cores" / f"{entry['core']}_libretro.so", stage / "info" / f"{entry['core']}_libretro.info"]
+    files += [ROOT / "build/cores" / component["source"]["build"] / "build.json"
+              for component in notice_components(entry)]
+    return files
+
+
+def missing_of(entry):
+    missing = [str(path.relative_to(ROOT)) for path in required(entry) if not path.is_file()]
+    licence_texts(entry, missing)
+    return missing
+
+
+def check(cores):
+    """Every core's required files and licence texts are here; exit 1 naming what is not."""
+    bad = 0
+    for core in cores:
+        missing = missing_of(find(core))
+        if missing:
+            bad += 1
+            print(f"core-plan: {core} is missing {', '.join(missing)}", file=sys.stderr)
+    if bad:
+        sys.exit(1)
+    print(f"==> [cores] {len(cores)} cores have their libraries, stamps, build reports and licences")
 
 
 def collect(core, out):
     entry = find(core)
     out = Path(out).resolve()
     stage = ROOT / "build/cores/stage"
-    files = [ROOT / "build/cores/stamps" / entry["stamp"]]
-    for kind in ("cores", "info"):
-        files += sorted((stage / kind).glob(f"{core}_libretro.*"))
-    # the work folder a script names after its stamp, its core or its notice entry (build.json,
-    # abi.json, which stage-notices.py reads)
+    files = required(entry) + sorted((stage / "cores").glob(f"{core}_libretro.*")) + \
+        sorted((stage / "info").glob(f"{core}_libretro.*"))
+    # the ABI reports beside the build reports, in the folder a script names after its stamp, its
+    # core or its notice entry
     builds = {component["source"]["build"] for component in notice_components(entry)}
     for folder in sorted({entry["stamp"], core} | builds):
-        files += [ROOT / "build/cores" / folder / name for name in ("build.json", "abi.json")
-                  if (ROOT / "build/cores" / folder / name).is_file()]
+        files += [ROOT / "build/cores" / folder / "abi.json"]
+    files = [path for path in dict.fromkeys(files) if path.is_file() or path in required(entry)]
     files += metadata_sources(core)
     folders = [stage / "system"] if (stage / "system").is_dir() else []
     for path in licence_texts(entry):
@@ -197,10 +235,12 @@ def main(argv):
     elif argv[:1] == ["skip"]:
         if argv[1:]:
             skip(argv[1:])
+    elif argv[:1] == ["check"] and len(argv) >= 2:
+        check(argv[1:] if argv[1:] != ["all"] else [entry["core"] for entry in plan()])
     elif argv[:1] == ["collect"] and len(argv) == 3:
         collect(argv[1], argv[2])
     else:
-        sys.exit("usage: core-plan.py matrix | prefetch CORE | skip CORE... | collect CORE OUT")
+        sys.exit("usage: core-plan.py matrix | prefetch CORE | skip CORE... | check CORE...|all | collect CORE OUT")
 
 
 if __name__ == "__main__":

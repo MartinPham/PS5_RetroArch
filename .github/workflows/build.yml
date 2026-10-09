@@ -259,6 +259,13 @@ jobs:
           export CCACHE_DIR=$GITHUB_WORKSPACE/ci-ccache JOBS
           [[ $PS5_DISABLE_CCACHE == 1 ]] || ccache --zero-stats
           bash "tools/${{ matrix.script }}"
+          # a cache entry from before the collected set grew (LRPS2's build report) passes the
+          # stamp but lacks what the title needs: that core is built again, once
+          if ! python3 .github/scripts/core-plan.py check "$CORE"; then
+            echo "::warning::$CORE: the cached build lacks what the title needs; building it again"
+            PS5_FORCE_CORES=1 bash "tools/${{ matrix.script }}"
+            python3 .github/scripts/core-plan.py check "$CORE"
+          fi
           [[ $PS5_DISABLE_CCACHE == 1 ]] || ccache --show-stats
 
       - name: Save ccache
@@ -274,7 +281,8 @@ jobs:
           rm -rf ci-core
           python3 PS5_RetroArch/.github/scripts/core-plan.py collect "$CORE" ci-core
           stamp=$(<"PS5_RetroArch/build/cores/stamps/${{ matrix.stamp }}")
-          echo "key=$CORE_CACHE-$stamp" >> "$GITHUB_OUTPUT"
+          # the stamp, and the version of what collect keeps (a new one saves an entry again)
+          echo "key=$CORE_CACHE-$stamp-c2" >> "$GITHUB_OUTPUT"
 
       - name: Save the core
         if: steps.collect.outputs.key != steps.restore.outputs.cache-matched-key
@@ -301,6 +309,7 @@ jobs:
       DEBIAN_FRONTEND: noninteractive
       # a development build: no release tag, and no frontends (see the top of this file)
       PS5_FRONTENDS: ''
+      CCACHE_MAXSIZE: 1G
     defaults:
       run:
         shell: bash
@@ -392,6 +401,8 @@ jobs:
         run: |
           # shellcheck disable=SC2086 # a list of names
           python3 .github/scripts/core-plan.py skip $CI_SKIP_CORES
+          # every core's library, stamp, build report and licence texts, before anything is built
+          python3 .github/scripts/core-plan.py check all
           # each script finds its stamp and outputs and skips; one that would build again means
           # the core jobs and this one differ in an input, which this stops before it builds
           python3 .github/scripts/core-plan.py matrix |
@@ -402,6 +413,23 @@ jobs:
                 { echo "tools/$script did not find its core up to date:" >&2; echo "$output" >&2; exit 1; }
               echo "$output"
             done
+
+      # What the title builds besides the cores, kept from the last run: RetroArch's configured tree
+      # and objects (build-retroarch.sh rebuilds what its fingerprint and patch stamps say moved),
+      # the WebUI's libmicrohttpd, updater and curl (each stamped by its script), and the title's
+      # own compiles (ccache)
+      - name: Restore the title's builds
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ci-ccache
+            PS5_RetroArch/build/ra
+            PS5_RetroArch/build/ra-conf
+            PS5_RetroArch/build/webui-mhd-ps5
+            PS5_RetroArch/build/webui-update-ps5
+            PS5_RetroArch/.deps/native/curl-ps5
+          key: ps5ra-title-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: ps5ra-title-
 
       - name: Build the frontend (tools/build-retroarch.sh)
         working-directory: PS5_RetroArch
@@ -425,8 +453,22 @@ jobs:
         run: |
           export PS5_PAYLOAD_SDK=$PWD/.deps/native/ps5-payload-sdk PS5_CLANG=/usr/bin/clang
           JOBS=$(nproc)
-          export PS5_DISABLE_CCACHE=1 JOBS
+          export CCACHE_DIR=$GITHUB_WORKSPACE/ci-ccache JOBS
           bash tools/build-title.sh
+          ccache --show-stats || true
+
+      - name: Save the title's builds
+        if: always()
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ci-ccache
+            PS5_RetroArch/build/ra
+            PS5_RetroArch/build/ra-conf
+            PS5_RetroArch/build/webui-mhd-ps5
+            PS5_RetroArch/build/webui-update-ps5
+            PS5_RetroArch/.deps/native/curl-ps5
+          key: ps5ra-title-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Stage the bundle (dist/PPSA99169.zip)
         working-directory: PS5_RetroArch
